@@ -1,89 +1,83 @@
-# Human-in-the-Loop MCP (WeCom)
+# Human-in-the-Loop MCP for WeCom (企业微信)
 
-企业微信 Human-in-the-Loop MCP 服务，让 AI 能够通过企业微信与用户进行实时交互。
+让 AI Agent 能够发送消息到企业微信并等待用户回复的 MCP 服务。
 
 ## 功能特性
 
-- 🚀 **发送消息**: AI 可以发送文本和图片消息到企微群或私聊
-- ⏳ **等待回复**: 发送消息后可以等待用户回复
-- 📷 **图片支持**: 支持发送本地图片文件
-- 🔄 **飞鸽集成**: 通过飞鸽传书服务与企业微信交互
+- 🚀 **发送消息到企微群聊/私聊**
+- ⏳ **等待用户回复并返回结果**
+- 🎯 **引用回复匹配** - 通过 `[#short_id]` 精确匹配多个并发会话
+- 💬 **多会话冲突检测** - 自动提示用户使用引用回复
+- ⏰ **20分钟默认超时**
+- 📋 **自动回复 chat_id** - 方便用户获取配置信息
 
-## 架构
+## 架构说明
+
+本项目分为两部分：
 
 ```
-┌─────────────────┐     HTTP      ┌─────────────────┐     飞鸽回调
-│   MCP Server    │ ───────────▶ │ DevCloud Service │ ◀─────────────
-│   (本地运行)     │              │  (DevCloud 部署) │
-└─────────────────┘              └─────────────────┘
-        │                                │
-        │                                │ 调用飞鸽 API
-        ▼                                ▼
-   AI Agent                         企业微信
+┌─────────────────┐     HTTP      ┌─────────────────┐     飞鸽API    ┌─────────────────┐
+│   MCP Server    │ ──────────▶  │ DevCloud Service │ ──────────▶  │   企业微信       │
+│   (本地运行)     │              │   (服务器运行)    │ ◀──────────  │   (飞鸽传书)     │
+│                 │              │                  │    回调       │                 │
+└─────────────────┘              └─────────────────┘              └─────────────────┘
 ```
+
+- **MCP Server** (`mcp_server/`): 运行在本地，由 Cursor 调用
+- **DevCloud Service** (`devcloud_service/`): 运行在服务器上，处理消息发送和回调
 
 ## 快速开始
 
-### 1. 安装依赖
+### 1. 准备工作
+
+1. **创建企微机器人**
+   - 在企业微信中创建群机器人，获取 Webhook Key
+   - 配置回调地址（飞鸽传书）
+
+2. **准备服务器**
+   - 需要一台可访问的服务器（用于接收企微回调）
+   - Python 3.10+
+
+### 2. 部署 DevCloud Service（服务器端）
 
 ```bash
+# 克隆代码到服务器
+git clone <your-repo-url>
 cd hil-mcp
 
-# 使用 pip
-pip install -e .
+# 安装依赖
+pip install -r requirements.txt
 
-# 或使用 pnpm（如果有 Node.js 环境）
-# pnpm install  # 仅用于开发工具
-```
-
-### 2. 配置环境变量
-
-```bash
-# 复制配置文件
+# 配置环境变量
 cp .env.example .env
-
-# 编辑配置
 vim .env
 ```
 
-主要配置项：
-
-| 配置项 | 说明 |
-|--------|------|
-| `DEVCLOUD_SERVICE_URL` | DevCloud 服务地址 |
-| `BOT_KEY` | 企微机器人的 Webhook Key |
-| `DEFAULT_CHAT_ID` | 默认发送消息的群 ID |
-| `CALLBACK_TOKEN` | 飞鸽回调 Token |
-| `CALLBACK_AES_KEY` | 飞鸽回调 AES Key |
-
-### 3. 部署 DevCloud 服务
-
-在 DevCloud 上运行：
-
+**必填配置：**
 ```bash
-cd hil-mcp
+# 机器人的 Webhook Key（必填）
+BOT_KEY=your-bot-key-here
+```
+
+**启动服务：**
+```bash
+# 直接启动
 python -m devcloud_service.app
+
+# 或后台运行
+nohup python -m devcloud_service.app >> devcloud.log 2>&1 &
 ```
 
-服务将在 `8080` 端口启动。
+### 3. 配置飞鸽传书回调
 
-### 4. 配置飞鸽传书回调
-
-使用 [飞鸽配置工具](https://nops.woa.com/pigeon/v1/tools/webui#bot) 生成回调配置：
-
-- **URL**: `http://your-devcloud-service/callback`
-- **env**: `devcloud`
-- **robot_callback_format**: `json`
-
-### 5. 运行 MCP Server
-
-```bash
-python -m mcp_server.server
+在飞鸽传书管理后台配置回调地址：
+```
+http://your-server:8080/callback
 ```
 
-### 6. 配置 Cursor/Claude
+### 4. 配置 MCP Server（本地端）
 
-在 MCP 配置中添加：
+在 Cursor 的 MCP 配置文件中添加（`~/.cursor/mcp.json`）：
 
 ```json
 {
@@ -93,151 +87,130 @@ python -m mcp_server.server
       "args": ["-m", "mcp_server.server"],
       "cwd": "/path/to/hil-mcp",
       "env": {
-        "DEVCLOUD_SERVICE_URL": "http://your-devcloud-service"
+        "DEVCLOUD_SERVICE_URL": "http://your-server:8080",
+        "DEFAULT_CHAT_ID": "your-chat-id",
+        "DEFAULT_TIMEOUT": "1200",
+        "POLL_INTERVAL": "2",
+        "http_proxy": "",
+        "https_proxy": "",
+        "all_proxy": ""
       }
     }
   }
 }
 ```
 
-## MCP Tools
+**配置说明：**
+- `DEVCLOUD_SERVICE_URL`: DevCloud 服务的访问地址
+- `DEFAULT_CHAT_ID`: 默认发送消息的 Chat ID（群聊或私聊）
+- `DEFAULT_TIMEOUT`: 等待回复超时时间（秒），默认 1200（20分钟）
+- `http_proxy` 等: 设置为空以禁用代理
 
-### send_and_wait_reply
+### 5. 获取 Chat ID
 
-发送消息并等待用户回复。
+方法1：直接在企微中 @机器人 发送任意消息，机器人会自动回复 Chat ID
 
-**参数**:
-- `message` (str): 要发送的消息内容
-- `chat_id` (str, 可选): 目标群 ID 或个人会话 ID
-- `image_paths` (list[str], 可选): 本地图片文件路径列表
-- `timeout` (int, 可选): 等待超时时间，默认 300 秒
+方法2：查看服务器日志，找到 `chatid` 字段
 
-**返回**:
-```json
-{
-  "status": "success",
-  "replies": [
-    {
-      "msg_type": "text",
-      "content": "用户回复内容",
-      "from_user": {"name": "张三", "alias": "zhangsan"},
-      "timestamp": "2024-01-01T10:30:00"
-    }
-  ],
-  "message": "收到 1 条回复"
-}
+## 使用方法
+
+### AI Agent 调用示例
+
+```python
+# 发送消息并等待回复
+result = await send_and_wait_reply(
+    message="请确认是否继续？",
+    project_name="my-project",  # 可选，用于标识消息来源
+    timeout=300  # 可选，超时时间（秒）
+)
+
+# 仅发送消息，不等待回复
+result = await send_message_only(
+    message="任务已完成！"
+)
 ```
 
-### send_message_only
+### 用户回复方式
 
-仅发送消息，不等待回复。
+1. **单会话场景**：直接回复即可
+2. **多会话场景**：使用「引用回复」功能精确选择要回复的消息
 
-**参数**:
-- `message` (str): 要发送的消息内容
-- `chat_id` (str, 可选): 目标群 ID 或个人会话 ID
-- `image_paths` (list[str], 可选): 本地图片文件路径列表
+## 一键部署
 
-## API 接口
+修改代码后，使用部署脚本快速同步到服务器：
 
-### DevCloud 服务
-
-| 接口 | 方法 | 说明 |
-|------|------|------|
-| `/send` | POST | 发送消息并创建会话 |
-| `/callback` | POST | 接收飞鸽回调 |
-| `/poll/{session_id}` | GET | 轮询获取回复 |
-| `/upload-image` | POST | 上传图片 |
-| `/health` | GET | 健康检查 |
-
-## 使用示例
-
-### AI 发送消息并等待确认
-
-```
-AI: 我将调用 send_and_wait_reply 工具向您发送确认请求...
-
-[发送消息] "请确认以下方案是否可行：
-1. 使用 Redis 作为缓存
-2. 部署在 DevCloud 上
-3. 使用飞鸽传书作为消息通道
-
-请回复「同意」或「修改」"
-
-[等待用户回复...]
-
-用户回复: "同意，请继续"
-
-AI: 好的，我收到了您的确认，将继续执行...
+```bash
+./deploy.sh
 ```
 
-### AI 发送图片
+## 环境变量说明
 
-```
-AI: 我已生成了架构图，正在发送给您查看...
+### 服务器端（.env）
 
-[调用 send_and_wait_reply]
-- message: "这是系统架构图，请审阅："
-- image_paths: ["/tmp/architecture.png"]
-- timeout: 300
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `DEVCLOUD_PORT` | 服务监听端口 | 8080 |
+| `BOT_KEY` | 机器人 Webhook Key | 必填 |
+| `CALLBACK_AUTH_KEY` | 回调鉴权 Key | 可选 |
+| `CALLBACK_AUTH_VALUE` | 回调鉴权 Value | 可选 |
+| `DATA_DIR` | 数据存储目录 | ./data |
+| `SESSION_EXPIRE_SECONDS` | 会话过期时间 | 3600 |
 
-[等待回复...]
-```
+### 本地端（Cursor MCP 配置）
 
-## 目录结构
-
-```
-hil-mcp/
-├── mcp_server/                 # MCP Server（本地运行）
-│   ├── __init__.py
-│   ├── server.py              # FastMCP 主程序
-│   ├── wecom_client.py        # DevCloud 服务客户端
-│   └── config.py              # 配置
-│
-├── devcloud_service/           # DevCloud 服务
-│   ├── __init__.py
-│   ├── app.py                 # FastAPI 主程序
-│   ├── storage.py             # 会话存储（JSONL）
-│   ├── config.py              # 配置
-│   └── handlers/
-│       ├── callback.py        # 飞鸽回调处理
-│       ├── send.py            # 发送消息
-│       └── poll.py            # 轮询接口
-│
-├── data/                       # 数据目录（运行时创建）
-│   └── sessions.jsonl         # 会话存储
-│
-├── requirements.txt
-├── pyproject.toml
-├── .env.example
-└── README.md
-```
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `DEVCLOUD_SERVICE_URL` | 服务地址 | 必填 |
+| `DEFAULT_CHAT_ID` | 默认 Chat ID | 必填 |
+| `DEFAULT_TIMEOUT` | 超时时间（秒） | 1200 |
+| `POLL_INTERVAL` | 轮询间隔（秒） | 2 |
 
 ## 常见问题
 
-### 1. 用户回复后没有收到？
+### Q: 出现 502 Bad Gateway 错误
+A: 检查是否设置了 HTTP 代理。在 MCP 配置中添加空代理设置：
+```json
+"http_proxy": "",
+"https_proxy": "",
+"all_proxy": ""
+```
 
-- 确认用户在企微中 @机器人 回复
-- 检查飞鸽回调配置是否正确
-- 查看 DevCloud 服务日志
+### Q: 如何获取私聊的 Chat ID？
+A: 直接私聊机器人发送任意消息，机器人会自动回复 Chat ID。
 
-### 2. 图片发送失败？
+### Q: 多个项目同时发消息怎么区分？
+A: 使用「引用回复」功能。系统会在每条消息前添加 `[#short_id project_name]` 标识，用户引用回复时会自动匹配。
 
-- 确认图片文件存在且可读
-- 检查图片格式（支持 jpg/png/gif/webp）
-- 查看上传接口返回的错误信息
+## 开发说明
 
-### 3. 会话超时？
+### 项目结构
 
-- 默认超时 300 秒（5分钟）
-- 可通过 `timeout` 参数调整
-- 超时后需要重新发送消息
+```
+hil-mcp/
+├── devcloud_service/       # 服务端代码
+│   ├── app.py              # FastAPI 应用
+│   ├── config.py           # 配置管理
+│   ├── storage.py          # 会话存储
+│   └── handlers/           # 请求处理器
+│       ├── callback.py     # 飞鸽回调处理
+│       ├── send.py         # 发送消息
+│       └── poll.py         # 轮询回复
+├── mcp_server/             # MCP 客户端代码
+│   ├── server.py           # MCP Server
+│   ├── config.py           # 配置管理
+│   └── wecom_client.py     # API 客户端
+├── deploy.sh               # 一键部署脚本
+├── .env.example            # 环境变量示例
+└── requirements.txt        # Python 依赖
+```
 
-## 参考文档
+### 依赖
 
-- [飞鸽传书文档](https://iwiki.woa.com/p/541885776)
-- [机器人回调文档](https://iwiki.woa.com/p/4012683444)
-- [企业微信机器人](https://developer.work.weixin.qq.com/document/path/91770)
-- [MCP 规范](https://modelcontextprotocol.io/)
+- Python 3.10+
+- FastAPI
+- fly-pigeon（腾讯内部飞鸽传书 SDK）
+- mcp（Model Context Protocol SDK）
+- pydantic-settings
 
 ## License
 
