@@ -1,7 +1,7 @@
 """
-DevCloud 服务客户端
+服务客户端
 
-用于 MCP Server 调用 DevCloud 服务
+用于 MCP Server 调用后端服务（支持 DevCloud 直连 和 Relay 模式）
 """
 import base64
 import logging
@@ -16,11 +16,48 @@ logger = logging.getLogger(__name__)
 
 
 class WeComClient:
-    """企业微信客户端（通过 DevCloud 服务）"""
+    """企业微信客户端（支持 DevCloud 直连 和 Relay 模式）"""
     
-    def __init__(self, base_url: str | None = None):
-        self.base_url = (base_url or config.devcloud_service_url).rstrip("/")
+    def __init__(self, base_url: str | None = None, mode: str | None = None):
+        # 注意：不在初始化时缓存 base_url，而是每次调用时从 config 读取
+        # 这样可以支持命令行参数覆盖配置
+        self._base_url_override = base_url
+        self._mode_override = mode
         self.timeout = httpx.Timeout(30.0, connect=10.0)
+    
+    @property
+    def base_url(self) -> str:
+        """每次调用时从 config 读取，支持命令行参数覆盖"""
+        return (self._base_url_override or config.devcloud_service_url).rstrip("/")
+    
+    @property
+    def is_hil_server(self) -> bool:
+        """
+        判断是否为 HIL Server（而非旧的 DevCloud Service）
+        
+        HIL Server 统一使用 /api 前缀
+        旧的 DevCloud Service 不使用前缀
+        """
+        mode = self._mode_override or config.service_mode
+        
+        if mode in ("relay", "hil"):
+            return True
+        elif mode == "direct":
+            # direct 模式可能是 HIL Server 的 direct 模式，也可能是旧的 DevCloud Service
+            # 通过端口判断：8080 是旧的 DevCloud Service
+            url = self.base_url.lower()
+            return ":8080" not in url
+        else:  # auto
+            # 自动检测：
+            # - 端口 8080 -> 旧的 DevCloud Service（无前缀）
+            # - 其他（如 80, 443, 8081）-> HIL Server（有 /api 前缀）
+            url = self.base_url.lower()
+            return ":8080" not in url
+    
+    @property
+    def api_prefix(self) -> str:
+        """API 路径前缀"""
+        return "/api" if self.is_hil_server else ""
     
     async def send_message(
         self,
@@ -31,6 +68,7 @@ class WeComClient:
         images: list[str] | None = None,
         mention_list: list[str] | None = None,
         project_name: str | None = None,
+        timeout: int | None = None,
     ) -> dict:
         """
         发送消息
@@ -43,11 +81,12 @@ class WeComClient:
             images: 图片 URL 列表
             mention_list: @的用户列表
             project_name: 项目名称，用于标识消息来源
+            timeout: 会话超时时间（秒），传给服务端以保持两边一致
         
         Returns:
             包含 session_id 的响应
         """
-        url = f"{self.base_url}/send"
+        url = f"{self.base_url}{self.api_prefix}/send"
         
         payload = {
             "message": message,
@@ -64,6 +103,8 @@ class WeComClient:
             payload["mention_list"] = mention_list
         if project_name:
             payload["project_name"] = project_name
+        if timeout is not None:
+            payload["timeout"] = timeout
         
         logger.info(f"发送消息: url={url}, payload={payload}")
         
@@ -82,7 +123,7 @@ class WeComClient:
         Returns:
             包含 image_url 的响应
         """
-        url = f"{self.base_url}/upload-image"
+        url = f"{self.base_url}{self.api_prefix}/upload-image"
         
         path = Path(image_path)
         if not path.exists():
@@ -120,7 +161,7 @@ class WeComClient:
         Returns:
             会话状态和回复
         """
-        url = f"{self.base_url}/poll/{session_id}"
+        url = f"{self.base_url}{self.api_prefix}/poll/{session_id}"
         
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.get(url)
@@ -136,7 +177,7 @@ class WeComClient:
         Args:
             session_id: 会话 ID
         """
-        url = f"{self.base_url}/session/{session_id}/timeout"
+        url = f"{self.base_url}{self.api_prefix}/session/{session_id}/timeout"
         
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             response = await client.post(url)

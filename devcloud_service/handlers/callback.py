@@ -22,11 +22,15 @@ def send_chat_id_hint(chat_id: str, chat_type: str, from_user: dict) -> None:
     
     这样用户可以拿到 chat_id 去配置 MCP
     """
+    from datetime import datetime
+    
     try:
         bot = Bot(bot_key=config.bot_key)
         
         user_name = from_user.get("name", "用户")
         type_desc = "私聊" if chat_type == "single" else "群聊"
+        # 添加时间戳避免企业微信消息去重
+        timestamp = datetime.now().strftime("%H:%M:%S")
         
         message = f"""👋 你好 {user_name}！
 
@@ -36,6 +40,7 @@ def send_chat_id_hint(chat_id: str, chat_type: str, from_user: dict) -> None:
 
 📋 **Chat ID**: `{chat_id}`
 📌 **会话类型**: {type_desc}
+🕐 **时间**: {timestamp}
 
 你可以将此 Chat ID 配置到 MCP 的环境变量中：
 ```

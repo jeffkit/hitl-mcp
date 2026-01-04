@@ -138,11 +138,21 @@ class SessionStorage:
         chat_type: str,
         message: str,
         images: list[str] | None = None,
-        project_name: str = ""
+        project_name: str = "",
+        timeout: int | None = None
     ) -> Session:
-        """创建新会话"""
+        """创建新会话
+        
+        Args:
+            timeout: 会话超时时间（秒），由 MCP 传入。如果不传，使用服务端默认配置。
+        """
         session_id = str(uuid.uuid4())
         short_id = session_id[:8]  # 短 ID 用于消息中显示
+        
+        # 使用 MCP 传入的 timeout，否则使用服务端默认配置
+        expire_seconds = timeout if timeout is not None else config.session_expire_seconds
+        expire_at = (datetime.now() + timedelta(seconds=expire_seconds)).isoformat()
+        
         session = Session(
             session_id=session_id,
             chat_id=chat_id,
@@ -150,7 +160,8 @@ class SessionStorage:
             message=message,
             project_name=project_name,
             short_id=short_id,
-            images=images or []
+            images=images or [],
+            expire_at=expire_at  # 使用计算好的过期时间
         )
         
         self._cache[session_id] = session

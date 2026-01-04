@@ -1,26 +1,42 @@
 [project]
 name = "hil-mcp"
-version = "0.1.0"
-description = "Human-in-the-Loop MCP for WeCom (企业微信) via 飞鸽传书"
+version = "0.1.1"
+description = "Human-in-the-Loop MCP Server for WeCom (企业微信) - 让 AI 能够与人类实时交互"
 readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Kong Jie"}
+]
+keywords = ["mcp", "wecom", "human-in-the-loop", "ai", "claude"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Communications :: Chat",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "mcp>=1.0.0",
     "httpx>=0.27.0",
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
-    "fastapi>=0.115.0",
-    "uvicorn>=0.32.0",
-    "python-dotenv>=1.0.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/user/hil-mcp"
+Repository = "https://github.com/user/hil-mcp"
 
 [project.scripts]
 hil-mcp = "mcp_server.server:main"
-hil-devcloud = "devcloud_service.app:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["mcp_server", "devcloud_service"]
+packages = ["mcp_server"]

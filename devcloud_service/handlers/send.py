@@ -27,6 +27,7 @@ class SendMessageRequest(BaseModel):
     images: list[str] | None = None  # 图片 URL 列表（已上传到某处的 URL）
     mention_list: list[str] | None = None  # @的用户列表
     project_name: str | None = None  # 项目名称，用于标识消息来源
+    timeout: int | None = None  # 会话超时时间（秒），由 MCP 传入，两边保持一致
 
 
 class SendMessageResponse(BaseModel):
@@ -79,10 +80,16 @@ def send_to_wecom(
                 msg_content=message,
             )
         elif msg_type == "image" and images:
-            # fly-pigeon 支持图片 URL
+            # fly-pigeon 支持: 本地文件路径、base64 字符串、在线 URL
+            image_content = images[0]
+            # 如果是 data URL 格式，提取纯 base64 部分
+            if image_content.startswith("data:"):
+                # 格式: data:image/png;base64,xxxxx
+                image_content = image_content.split(",", 1)[1] if "," in image_content else image_content
+            
             result = bot.image(
+                msg_content=image_content,
                 chat_id=chat_id,
-                image_url=images[0],
             )
         else:
             result = bot.text(
@@ -134,7 +141,8 @@ async def send_message(request: SendMessageRequest):
             chat_type=request.chat_type,
             message=request.message,
             images=request.images,
-            project_name=request.project_name or ""
+            project_name=request.project_name or "",
+            timeout=request.timeout  # 由 MCP 传入的超时时间
         )
         
         # 在消息中添加会话标识头

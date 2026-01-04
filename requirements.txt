@@ -4,9 +4,10 @@ httpx>=0.27.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 
-# DevCloud Service dependencies
+# Relay Server & DevCloud Worker dependencies
 fastapi>=0.115.0
 uvicorn>=0.32.0
+websockets>=12.0
 
 # Common
 python-dotenv>=1.0.0

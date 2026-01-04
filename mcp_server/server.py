@@ -4,8 +4,9 @@ Human-in-the-Loop MCP Server
 让 AI 能够发送消息到企业微信并等待用户回复
 
 运行方式:
-    python -m mcp_server.server
+    python -m mcp_server.server --service-url https://xxx --chat-id xxx --project-name xxx
 """
+import argparse
 import asyncio
 import logging
 import time
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 # 创建 MCP 实例
 mcp = FastMCP(
     "wecom-hil",
-    description="企业微信 Human-in-the-Loop MCP - 发送消息并等待用户回复"
+    instructions="企业微信 Human-in-the-Loop MCP - 发送消息并等待用户回复"
 )
 
 # 创建客户端
@@ -40,8 +41,7 @@ async def send_and_wait_reply(
     message: Annotated[str, Field(description="要发送给用户的消息内容")],
     chat_id: Annotated[str | None, Field(description="目标群 ID 或个人会话 ID。如果不指定，使用默认配置")] = None,
     image_paths: Annotated[list[str] | None, Field(description="要发送的本地图片文件路径列表")] = None,
-    timeout: Annotated[int, Field(description="等待用户回复的超时时间（秒）", ge=10, le=3600)] = 1200,  # 默认 20 分钟
-    project_name: Annotated[str | None, Field(description="项目名称，用于标识消息来源。当多个项目同时发送消息时，用户可以通过引用回复来区分回复给哪个项目")] = None,
+    project_name: Annotated[str | None, Field(description="项目名称，用于标识消息来源。如果不指定，使用默认配置")] = None,
 ) -> dict:
     """
     发送消息到企业微信并等待用户回复。
@@ -72,11 +72,14 @@ async def send_and_wait_reply(
         "message": "描述信息"
     }
     """
+    # 使用配置中的超时时间（由 MCP 统一管理，不受 AI 控制）
+    timeout = config.default_timeout
+    
     try:
         # 如果没有指定 chat_id，使用配置中的默认值
         logger.info(f"原始 chat_id={chat_id}, config.default_chat_id={config.default_chat_id}")
         effective_chat_id = chat_id or config.default_chat_id or None
-        logger.info(f"开始发送消息: message={message[:50]}..., effective_chat_id={effective_chat_id}")
+        logger.info(f"开始发送消息: message={message[:50]}..., effective_chat_id={effective_chat_id}, timeout={timeout}, project_name={project_name}")
         
         # 处理图片上传
         image_urls = []
@@ -87,17 +90,21 @@ async def send_and_wait_reply(
                     result = await client.upload_image(path)
                     if result.get("success") and result.get("image_url"):
                         image_urls.append(result["image_url"])
+                        logger.info(f"图片上传成功: {path}")
                     else:
                         logger.warning(f"图片上传失败: {path}, {result}")
                 else:
                     logger.warning(f"图片文件不存在: {path}")
         
-        # 发送消息
+        logger.info(f"共上传 {len(image_urls)} 张图片")
+        
+        # 发送消息（把 timeout 传给服务端，确保会话超时时间一致）
         send_result = await client.send_message(
             message=message,
             chat_id=effective_chat_id,
             images=image_urls if image_urls else None,
             project_name=project_name,
+            timeout=timeout,
         )
         
         if not send_result.get("success"):
@@ -121,44 +128,59 @@ async def send_and_wait_reply(
         start_time = time.time()
         poll_interval = config.poll_interval
         
-        while time.time() - start_time < timeout:
-            try:
-                result = await client.poll_replies(session_id)
+        try:
+            while time.time() - start_time < timeout:
+                try:
+                    result = await client.poll_replies(session_id)
+                    
+                    if result.get("has_reply"):
+                        replies = result.get("replies", [])
+                        logger.info(f"收到用户回复: {len(replies)} 条")
+                        return {
+                            "status": "success",
+                            "replies": replies,
+                            "message": f"收到 {len(replies)} 条回复"
+                        }
+                    
+                    if result.get("status") == "not_found":
+                        return {
+                            "status": "error",
+                            "replies": [],
+                            "message": "会话不存在或已过期"
+                        }
+                    
+                except Exception as e:
+                    logger.warning(f"轮询失败: {e}")
                 
-                if result.get("has_reply"):
-                    replies = result.get("replies", [])
-                    logger.info(f"收到用户回复: {len(replies)} 条")
-                    return {
-                        "status": "success",
-                        "replies": replies,
-                        "message": f"收到 {len(replies)} 条回复"
-                    }
-                
-                if result.get("status") == "not_found":
-                    return {
-                        "status": "error",
-                        "replies": [],
-                        "message": "会话不存在或已过期"
-                    }
-                
-            except Exception as e:
-                logger.warning(f"轮询失败: {e}")
+                # 等待一段时间再轮询
+                await asyncio.sleep(poll_interval)
             
-            # 等待一段时间再轮询
-            await asyncio.sleep(poll_interval)
+            # 超时
+            logger.info(f"等待超时: session_id={session_id}")
+            
+            # 标记会话超时
+            await client.mark_timeout(session_id)
+            
+            return {
+                "status": "timeout",
+                "replies": [],
+                "message": f"等待 {timeout} 秒后超时，未收到用户回复"
+            }
         
-        # 超时
-        logger.info(f"等待超时: session_id={session_id}")
+        except asyncio.CancelledError:
+            # 用户取消了 MCP 调用，通知服务端清理会话
+            logger.info(f"用户取消了等待: session_id={session_id}")
+            try:
+                await client.mark_timeout(session_id)
+                logger.info(f"已通知服务端清理会话: session_id={session_id}")
+            except Exception as e:
+                logger.warning(f"通知服务端清理会话失败: {e}")
+            # 重新抛出 CancelledError，让上层正确处理取消
+            raise
         
-        # 标记会话超时
-        await client.mark_timeout(session_id)
-        
-        return {
-            "status": "timeout",
-            "replies": [],
-            "message": f"等待 {timeout} 秒后超时，未收到用户回复"
-        }
-        
+    except asyncio.CancelledError:
+        # 如果在发送消息阶段被取消，直接抛出
+        raise
     except Exception as e:
         logger.error(f"发送消息并等待回复失败: {e}", exc_info=True)
         return {
@@ -173,7 +195,7 @@ async def send_message_only(
     message: Annotated[str, Field(description="要发送给用户的消息内容")],
     chat_id: Annotated[str | None, Field(description="目标群 ID 或个人会话 ID")] = None,
     image_paths: Annotated[list[str] | None, Field(description="要发送的本地图片文件路径列表")] = None,
-    project_name: Annotated[str | None, Field(description="项目名称，用于标识消息来源")] = None,
+    project_name: Annotated[str | None, Field(description="项目名称，用于标识消息来源。如果不指定，使用默认配置")] = None,
 ) -> dict:
     """
     仅发送消息到企业微信，不等待回复。
@@ -227,9 +249,73 @@ async def send_message_only(
         }
 
 
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="WeCom HIL MCP Server")
+    parser.add_argument(
+        "--service-url",
+        dest="service_url",
+        help="服务的访问地址（DevCloud 直连或 Relay Server）"
+    )
+    parser.add_argument(
+        "--mode",
+        dest="mode",
+        choices=["auto", "direct", "relay", "hil"],
+        help="服务模式: auto（自动检测）, direct（旧 DevCloud 直连）, relay/hil（HIL Server）"
+    )
+    parser.add_argument(
+        "--chat-id",
+        dest="chat_id",
+        help="默认发送消息的 Chat ID（群聊或私聊）"
+    )
+    parser.add_argument(
+        "--project-name",
+        dest="project_name",
+        help="默认项目名称，用于标识消息来源"
+    )
+    parser.add_argument(
+        "--timeout",
+        dest="timeout",
+        type=int,
+        help="默认等待回复超时时间（秒）"
+    )
+    parser.add_argument(
+        "--poll-interval",
+        dest="poll_interval",
+        type=int,
+        help="轮询获取回复的间隔（秒）"
+    )
+    return parser.parse_args()
+
+
 def main():
     """主函数"""
-    logger.info("启动 WeCom HIL MCP Server...")
+    args = parse_args()
+    
+    # 命令行参数覆盖配置（优先级：命令行 > 环境变量 > 默认值）
+    if args.service_url:
+        config.devcloud_service_url = args.service_url
+    if args.mode:
+        config.service_mode = args.mode
+    if args.chat_id:
+        config.default_chat_id = args.chat_id
+    if args.project_name:
+        config.default_project_name = args.project_name
+    if args.timeout:
+        config.default_timeout = args.timeout
+    if args.poll_interval:
+        config.poll_interval = args.poll_interval
+    
+    # 检测服务模式
+    mode_desc = "HIL Server" if client.is_hil_server else "DevCloud 直连"
+    
+    logger.info(f"启动 WeCom HIL MCP Server...")
+    logger.info(f"  服务地址: {config.devcloud_service_url}")
+    logger.info(f"  服务模式: {mode_desc}")
+    logger.info(f"  默认 Chat ID: {config.default_chat_id or '(未设置)'}")
+    logger.info(f"  默认项目名: {config.default_project_name or '(未设置)'}")
+    logger.info(f"  超时时间: {config.default_timeout}s")
+    
     mcp.run()
 
 
