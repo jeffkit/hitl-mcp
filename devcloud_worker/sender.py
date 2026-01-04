@@ -73,8 +73,26 @@ def send_to_wecom(
                 msg_content=message,
             )
         
-        logger.info(f"fly-pigeon 响应: {result}")
-        return result or {"errcode": 0, "errmsg": "ok"}
+        # 记录响应内容
+        response_data = None
+        if hasattr(result, 'json'):
+            try:
+                response_data = result.json()
+            except Exception:
+                pass
+        elif isinstance(result, dict):
+            response_data = result
+        
+        logger.info(f"fly-pigeon 响应: status={result}, data={response_data}")
+        
+        # 检查是否真的发送成功
+        if response_data:
+            errcode = response_data.get("errcode", 0)
+            if errcode != 0:
+                logger.error(f"企微发送失败: errcode={errcode}, errmsg={response_data.get('errmsg')}")
+                return response_data
+        
+        return response_data or {"errcode": 0, "errmsg": "ok"}
         
     except Exception as e:
         logger.error(f"fly-pigeon 发送失败: {e}", exc_info=True)
@@ -117,10 +135,17 @@ async def handle_send_message(payload: dict) -> dict:
         )
         
         # 发送文本消息
-        send_to_wecom(
+        result = send_to_wecom(
             message=formatted_message,
             chat_id=chat_id
         )
+        
+        # 检查发送结果
+        if isinstance(result, dict) and result.get("errcode", 0) != 0:
+            return {
+                "success": False,
+                "error": f"发送失败: {result.get('errmsg', '未知错误')}"
+            }
         
         # 发送图片
         if images:
