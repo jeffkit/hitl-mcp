@@ -12,6 +12,7 @@
 - 📋 **自动回复 chat_id** - 方便用户获取配置信息
 - ⚡ **一键安装** - 通过 `uvx` 或 `pipx` 无需预先安装
 - 🌐 **双模式支持** - Relay 中转模式（公网）和 Direct 直连模式（内网）
+- 🔄 **消息转发服务** - 支持用户主动发消息触发外部服务（Forward Service）
 
 ---
 
@@ -413,6 +414,108 @@ result = await send_message_only(
 
 ---
 
+## Forward Service（消息转发服务）
+
+Forward Service 是一个独立的服务，用于处理「用户主动发消息 → 目标URL → 返回结果」的反向流程。
+
+### 架构
+
+```
+┌─────────────────┐                    ┌─────────────────┐
+│   企微机器人 B   │  ←────回调────────   │    企业微信      │
+│ (Forward 专用)  │                    │                 │
+└────────┬────────┘                    └────────┬────────┘
+         │                                      ↑
+         │ HTTP                                 │ fly-pigeon
+         ▼                                      │
+┌─────────────────┐      HTTP        ┌─────────────────┐
+│ Forward Service │ ───────────────▶ │    目标 URL     │
+│  (内网/DevCloud) │ ◀─────────────── │   (公网服务)    │
+└─────────────────┘      响应        └─────────────────┘
+```
+
+**与 HIL 链路物理隔离**：使用不同的企微机器人，互不干扰。
+
+### 部署
+
+```bash
+# 1. 配置环境变量
+export FORWARD_BOT_KEY=your-bot-key      # 新机器人的 Webhook Key
+export FORWARD_URL=https://your-api.com/handle  # 目标 URL
+export FORWARD_PORT=8083                 # 服务端口（默认 8083）
+
+# 2. 启动服务
+nohup python -m forward_service.app >> forward.log 2>&1 &
+```
+
+### 配置飞鸽回调
+
+在飞鸽传书后台为**新机器人**配置回调地址：
+
+```
+http://your-devcloud-server:8083/callback
+```
+
+### 目标 URL 接口规范
+
+Forward Service 会将用户消息转发到目标 URL，目标 URL 需要实现以下接口：
+
+**请求**：
+```json
+POST /handle
+{
+    "chat_id": "wokSFfCgAAxxxxxx",
+    "chat_type": "group",
+    "from_user": {
+        "userid": "zhangsan",
+        "name": "张三",
+        "alias": "zhangsan"
+    },
+    "msg_type": "text",
+    "content": "用户发送的消息内容",
+    "image_url": null,
+    "raw_data": { ... }
+}
+```
+
+**响应**：
+```json
+{
+    "reply": "处理结果消息",
+    "msg_type": "text"
+}
+```
+
+| 响应字段 | 类型 | 说明 |
+|---------|------|------|
+| `reply` | string | 要回复给用户的消息 |
+| `msg_type` | string | 消息类型：`text` 或 `markdown` |
+
+### 环境变量
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `FORWARD_BOT_KEY` | 企微机器人 Webhook Key | 必填 |
+| `FORWARD_URL` | 默认转发目标 URL | 必填（或配置 FORWARD_RULES） |
+| `FORWARD_RULES` | chat_id → URL 映射（JSON） | 可选 |
+| `FORWARD_PORT` | 服务端口 | 8083 |
+| `FORWARD_TIMEOUT` | 转发请求超时时间（秒） | 30 |
+
+### 高级配置：多目标 URL
+
+如果不同群/私聊需要转发到不同的目标 URL，可以配置 `FORWARD_RULES`：
+
+```bash
+export FORWARD_RULES='{"chat_id_1": "https://api1.com/handle", "chat_id_2": "https://api2.com/handle"}'
+export FORWARD_URL="https://default-api.com/handle"  # 默认 URL
+```
+
+匹配优先级：
+1. `FORWARD_RULES` 中的精确匹配
+2. `FORWARD_URL` 默认 URL
+
+---
+
 ## 项目结构
 
 ```
@@ -438,8 +541,14 @@ hil-mcp/
 │   ├── config.py           # 配置管理
 │   └── wecom_client.py     # API 客户端
 │
+├── forward_service/        # Forward Service（消息转发服务）
+│   ├── app.py              # FastAPI 应用
+│   ├── config.py           # 配置管理
+│   └── sender.py           # 消息发送
+│
 ├── deploy_hil.sh           # HIL Server 部署脚本（示例）
 ├── deploy_worker.sh        # DevCloud Worker 部署脚本（示例）
+├── deploy_forward.sh       # Forward Service 部署脚本（示例）
 └── requirements.txt        # Python 依赖
 ```
 

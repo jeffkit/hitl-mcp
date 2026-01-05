@@ -158,18 +158,29 @@ class WebSocketClient:
         self._running = True
         # 用于跟踪正在处理的请求任务
         self._pending_tasks: set[asyncio.Task] = set()
+        # Worker 端心跳超时检测（如果超过这个时间没收到 ping，主动断开重连）
+        # 设置为 heartbeat_interval * 3，给足够的容错空间
+        worker_heartbeat_timeout = config.heartbeat_interval * 3
         
         while self._running:
             try:
                 await self.connect()
+                last_ping_time = asyncio.get_event_loop().time()
                 
-                # 接收消息循环
-                async for data in self._ws:
+                # 接收消息循环，带超时检测
+                while self._ws:
                     try:
+                        # 使用 wait_for 添加超时检测
+                        data = await asyncio.wait_for(
+                            self._ws.recv(),
+                            timeout=worker_heartbeat_timeout
+                        )
+                        
                         message = json.loads(data)
                         msg_type = message.get("type")
                         
                         if msg_type == "ping":
+                            last_ping_time = asyncio.get_event_loop().time()
                             logger.info("收到心跳 ping，发送 pong")
                             await self.send({"type": "pong"})
                         elif msg_type == "request":
@@ -181,6 +192,12 @@ class WebSocketClient:
                         else:
                             logger.warning(f"未知消息类型: {msg_type}")
                             
+                    except asyncio.TimeoutError:
+                        # 心跳超时，主动断开重连
+                        logger.warning(f"Worker 端心跳超时（{worker_heartbeat_timeout}s 未收到消息），主动断开重连")
+                        if self._ws:
+                            await self._ws.close()
+                        break
                     except json.JSONDecodeError:
                         logger.warning(f"无效的 JSON: {data[:100]}")
                     except Exception as e:
