@@ -120,5 +120,10 @@ if __name__ == "__main__":
         "hil_server.app:app",
         host=config.host,
         port=config.port,
-        reload=False
+        reload=False,
+        # 禁用 uvicorn 的 WebSocket keepalive ping
+        # 因为通过 nginx 代理时，协议级 ping 会导致 keepalive ping timeout
+        # 我们使用应用层的心跳机制来保持连接
+        ws_ping_interval=None,
+        ws_ping_timeout=None,
     )
