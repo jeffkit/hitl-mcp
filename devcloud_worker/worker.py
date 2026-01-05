@@ -60,11 +60,14 @@ class WebSocketClient:
         
         logger.info(f"连接到 HIL Server: {url}")
         
+        # 禁用 websockets 库的内置 ping/pong 机制
+        # 因为 HIL Server 端使用 FastAPI WebSocket，有自己的心跳逻辑
+        # websockets 的 ping 和 FastAPI 的心跳不兼容，会导致 keepalive ping timeout
         self._ws = await websockets.connect(
             url,
-            ping_interval=config.heartbeat_interval,
-            ping_timeout=config.heartbeat_timeout,
-            close_timeout=10,  # 关闭连接超时
+            ping_interval=None,   # 禁用自动 ping
+            ping_timeout=None,    # 禁用 ping 超时检测
+            close_timeout=10,     # 关闭连接超时
         )
         
         logger.info("WebSocket 连接成功")

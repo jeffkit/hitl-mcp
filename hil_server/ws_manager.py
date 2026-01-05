@@ -197,7 +197,8 @@ class WebSocketManager:
                     await self._send_chat_id_hint(chat_id, chat_type, from_user)
                 elif error.startswith("multiple_sessions"):
                     logger.warning(f"多个等待中的会话，需要用户引用回复")
-                    sessions = result.get("sessions", [])
+                    # 注意：storage 返回的键是 waiting_sessions
+                    sessions = result.get("waiting_sessions", [])
                     await self._send_multiple_sessions_hint(chat_id, sessions, from_user)
                 else:
                     logger.warning(f"回调处理失败: {error}")
