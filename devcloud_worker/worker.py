@@ -170,6 +170,7 @@ class WebSocketClient:
                         msg_type = message.get("type")
                         
                         if msg_type == "ping":
+                            logger.info("收到心跳 ping，发送 pong")
                             await self.send({"type": "pong"})
                         elif msg_type == "request":
                             # 使用 create_task 并发处理请求，避免阻塞消息接收

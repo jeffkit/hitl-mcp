@@ -284,6 +284,7 @@ DEFAULT_CHAT_ID={chat_id}
             for worker in list(self._workers.values()):
                 try:
                     await worker.websocket.send_json({"type": "ping"})
+                    logger.debug(f"已发送心跳 ping 到 Worker: {worker.worker_id}")
                 except Exception as e:
                     logger.warning(f"发送心跳失败: {worker.worker_id}, {e}")
                     worker.is_alive = False
