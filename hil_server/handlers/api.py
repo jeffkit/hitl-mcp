@@ -7,6 +7,7 @@ HTTP API 处理器
 - direct: 直接调用 fly-pigeon
 """
 import logging
+from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from pydantic import BaseModel
 
@@ -14,6 +15,7 @@ from ..config import config
 from ..ws_manager import ws_manager
 from ..storage import storage
 from ..sender import send_message_direct
+from ..idle_hint_config import idle_hint_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["API"])
@@ -30,6 +32,7 @@ class SendMessageRequest(BaseModel):
     mention_list: list[str] | None = None
     project_name: str | None = None
     timeout: int | None = None  # 会话超时时间（秒）
+    wait_reply: bool = True  # 是否等待回复（False 则不创建会话）
 
 
 class SendMessageResponse(BaseModel):
@@ -110,38 +113,45 @@ async def send_message(request: SendMessageRequest):
     
     try:
         timeout = request.timeout or 300
+        session = None
+        short_id = ""
         
-        # 1. 创建会话
-        session = await storage.create_session(
-            chat_id=request.chat_id,
-            chat_type=request.chat_type,
-            message=request.message,
-            project_name=request.project_name or "",
-            images=request.images,
-            timeout=timeout
-        )
-        
-        logger.info(f"创建会话: session_id={session.session_id}, short_id={session.short_id}, mode={config.effective_mode}")
+        # 1. 只有需要等待回复时才创建会话
+        if request.wait_reply:
+            session = await storage.create_session(
+                chat_id=request.chat_id,
+                chat_type=request.chat_type,
+                message=request.message,
+                project_name=request.project_name or "",
+                images=request.images,
+                timeout=timeout
+            )
+            short_id = session.short_id
+            logger.info(f"创建会话: session_id={session.session_id}, short_id={short_id}, mode={config.effective_mode}")
+        else:
+            logger.info(f"仅发送消息（不等待回复）: chat_id={request.chat_id}, mode={config.effective_mode}")
         
         # 2. 根据模式发送消息
         if config.is_direct_mode:
             # Direct 模式：直接调用 fly-pigeon
             result = await send_message_direct(
-                short_id=session.short_id,
+                short_id=short_id,
                 message=request.message,
                 chat_id=request.chat_id,
                 project_name=request.project_name,
                 images=request.images,
+                wait_reply=request.wait_reply,
             )
         else:
             # Relay 模式：通过 WebSocket 转发给 Worker
             payload = {
-                "short_id": session.short_id,
+                "short_id": short_id,
                 "message": request.message,
                 "chat_id": request.chat_id,
                 "chat_type": request.chat_type,
                 "images": request.images,
                 "project_name": request.project_name,
+                "wait_reply": request.wait_reply,
             }
             
             result = await ws_manager.send_request(
@@ -151,7 +161,8 @@ async def send_message(request: SendMessageRequest):
             )
         
         if not result.get("success", True):
-            await storage.mark_timeout(session.session_id)
+            if session:
+                await storage.mark_timeout(session.session_id)
             return SendMessageResponse(
                 success=False,
                 error=result.get("error", "发送失败")
@@ -159,7 +170,7 @@ async def send_message(request: SendMessageRequest):
         
         return SendMessageResponse(
             success=True,
-            session_id=session.session_id,
+            session_id=session.session_id if session else None,
             message="消息发送成功"
         )
         
@@ -230,13 +241,98 @@ async def handle_callback(
         if result.get("success"):
             logger.info(f"回调处理成功: session_id={result.get('session_id')}")
         else:
-            logger.warning(f"回调处理: {result.get('error')}")
+            error = result.get("error", "unknown")
+            chat_id = result.get("chat_id") or data.get("chatid", "")
+            chat_type = data.get("chattype", "group")
+            from_user = data.get("from", {})
+            
+            if error == "no_waiting_session":
+                logger.warning(f"未找到等待中的会话: chat_id={chat_id}")
+                # Direct 模式：直接发送空闲提示消息
+                await _send_idle_hint_direct(chat_id, chat_type, from_user, data)
+            elif error.startswith("multiple_sessions"):
+                logger.warning(f"多个等待中的会话，需要用户引用回复")
+                # Direct 模式：发送多会话提示
+                sessions = result.get("waiting_sessions", [])
+                await _send_multiple_sessions_hint_direct(chat_id, sessions, from_user)
+            else:
+                logger.warning(f"回调处理: {error}")
         
         return {"errcode": 0, "errmsg": "ok"}
         
     except Exception as e:
         logger.error(f"处理回调失败: {e}", exc_info=True)
         return {"errcode": -1, "errmsg": str(e)}
+
+
+async def _send_idle_hint_direct(chat_id: str, chat_type: str, from_user: dict, callback_data: dict):
+    """Direct 模式：发送空闲提示消息"""
+    message_template = idle_hint_config.get_message_template(chat_id)
+    
+    if not message_template:
+        logger.info(f"空闲提示已禁用: chat_id={chat_id}")
+        return
+    
+    config_entry = type('obj', (object,), {
+        'enabled': True,
+        'message_template': message_template
+    })()
+    
+    if not config_entry or not config_entry.enabled:
+        logger.info(f"空闲提示已禁用: chat_id={chat_id}")
+        return
+    
+    user_name = from_user.get("name", "用户")
+    chat_type_cn = "群聊" if chat_type == "group" else "私聊"
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # 使用简单的字符串替换，避免 .format() 对模板中的 JSON 示例 {} 报错
+    message = config_entry.message_template
+    message = message.replace("{user_name}", user_name)
+    message = message.replace("{chat_id}", chat_id)
+    message = message.replace("{chat_type}", chat_type_cn)
+    message = message.replace("{timestamp}", timestamp)
+    
+    logger.info(f"发送空闲提示消息: chat_id={chat_id}")
+    await send_message_direct(
+        short_id="",
+        message=message,
+        chat_id=chat_id,
+        project_name=None,
+        images=None,
+        wait_reply=False,
+    )
+
+
+async def _send_multiple_sessions_hint_direct(chat_id: str, sessions: list, from_user: dict):
+    """Direct 模式：发送多会话提示消息"""
+    user_name = from_user.get("name", "用户")
+    
+    # 构建会话列表
+    session_list = "\n".join([
+        f"  [{i+1}] **{s.get('project_name', '未命名项目')}** - `[#{s['short_id']}]`"
+        for i, s in enumerate(sessions)
+    ])
+    
+    message = f"""👋 {user_name}，检测到有 **{len(sessions)}** 个项目正在等待你的回复：
+
+{session_list}
+
+📌 **如何回复特定项目：**
+请使用「引用回复」功能，引用对应项目的消息后再回复。
+
+或者在回复中包含项目的短 ID，例如：
+`[#abc123] 你的回复内容`"""
+    
+    logger.info(f"发送多会话提示: chat_id={chat_id}, sessions={len(sessions)}")
+    await send_message_direct(
+        short_id="",
+        message=message,
+        chat_id=chat_id,
+        project_name=None,
+        images=None,
+        wait_reply=False,
+    )
 
 
 @router.post("/upload-image", response_model=UploadImageResponse)

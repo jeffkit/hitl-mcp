@@ -2,6 +2,12 @@
 WebSocket 连接管理器
 
 管理与 DevCloud Worker 的 WebSocket 连接
+
+TODO: 多 Worker 路由支持
+- 每个 Worker 可以使用不同的 bot_key
+- 根据回调中的 bot_key 路由到对应 Worker
+- 发送消息时根据 chat_id/bot_key 选择 Worker
+- 需要在 get_available_worker 中实现路由逻辑
 """
 import asyncio
 import json
@@ -15,6 +21,7 @@ from fastapi import WebSocket
 
 from .config import config
 from .storage import storage
+from .idle_hint_config import idle_hint_config
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +34,30 @@ class WorkerConnection:
     connected_at: datetime = field(default_factory=datetime.now)
     last_heartbeat: datetime = field(default_factory=datetime.now)
     is_alive: bool = True
+    # 扩展信息
+    ip_address: str = ""
+    hostname: str = ""
+    callback_port: int = 0
+    bot_key: str = ""  # 部分显示
+    hil_url: str = ""
+    config_file: str = ""
+    forward_service_url: str = ""  # 关联的 Forward Service 地址
+    
+    def to_dict(self) -> dict:
+        """转换为字典（用于 API 返回）"""
+        return {
+            "worker_id": self.worker_id,
+            "ip_address": self.ip_address,
+            "hostname": self.hostname,
+            "callback_port": self.callback_port,
+            "bot_key": self.bot_key,
+            "hil_url": self.hil_url,
+            "config_file": self.config_file,
+            "forward_service_url": self.forward_service_url,
+            "connected_at": self.connected_at.isoformat(),
+            "last_heartbeat": self.last_heartbeat.isoformat(),
+            "is_alive": self.is_alive
+        }
 
 
 class WebSocketManager:
@@ -47,7 +78,8 @@ class WebSocketManager:
     async def register_worker(
         self,
         worker_id: str,
-        websocket: WebSocket
+        websocket: WebSocket,
+        worker_info: dict | None = None
     ) -> WorkerConnection:
         """注册 Worker 连接"""
         async with self._lock:
@@ -59,13 +91,27 @@ class WebSocketManager:
                 except Exception:
                     pass
             
+            # 从 worker_info 提取扩展信息
+            info = worker_info or {}
+            
             connection = WorkerConnection(
                 worker_id=worker_id,
-                websocket=websocket
+                websocket=websocket,
+                ip_address=info.get("ip_address", ""),
+                hostname=info.get("hostname", ""),
+                callback_port=info.get("callback_port", 0),
+                bot_key=info.get("bot_key", ""),
+                hil_url=info.get("hil_url", ""),
+                config_file=info.get("config_file", ""),
+                forward_service_url=info.get("forward_service_url", "")
             )
             self._workers[worker_id] = connection
-            logger.info(f"Worker 已注册: {worker_id}")
+            logger.info(f"Worker 已注册: {worker_id}, ip={connection.ip_address}")
             return connection
+    
+    def get_all_workers(self) -> list[dict]:
+        """获取所有 Worker 信息（用于管理台）"""
+        return [w.to_dict() for w in self._workers.values()]
     
     async def unregister_worker(self, worker_id: str) -> None:
         """注销 Worker 连接"""
@@ -78,6 +124,19 @@ class WebSocketManager:
         """更新心跳时间"""
         if worker_id in self._workers:
             self._workers[worker_id].last_heartbeat = datetime.now()
+    
+    async def _update_worker_info(self, worker_id: str, worker_info: dict) -> None:
+        """更新 Worker 扩展信息"""
+        if worker_id in self._workers:
+            worker = self._workers[worker_id]
+            worker.ip_address = worker_info.get("ip_address", worker.ip_address)
+            worker.hostname = worker_info.get("hostname", worker.hostname)
+            worker.callback_port = worker_info.get("callback_port", worker.callback_port)
+            worker.bot_key = worker_info.get("bot_key", worker.bot_key)
+            worker.hil_url = worker_info.get("hil_url", worker.hil_url)
+            worker.config_file = worker_info.get("config_file", worker.config_file)
+            worker.forward_service_url = worker_info.get("forward_service_url", worker.forward_service_url)
+            logger.info(f"Worker 信息已更新: {worker_id}, ip={worker.ip_address}")
     
     async def get_available_worker(self) -> WorkerConnection | None:
         """获取一个可用的 Worker"""
@@ -151,6 +210,11 @@ class WebSocketManager:
         if msg_type == "pong":
             # 心跳响应
             await self.update_heartbeat(worker_id)
+        
+        elif msg_type == "register":
+            # Worker 注册信息更新
+            worker_info = message.get("worker_info", {})
+            await self._update_worker_info(worker_id, worker_info)
             
         elif msg_type == "response":
             # 请求响应
@@ -206,27 +270,29 @@ class WebSocketManager:
             logger.warning(f"未知回调事件: {event}")
     
     async def _send_chat_id_hint(self, chat_id: str, chat_type: str, from_user: dict) -> None:
-        """让 Worker 发送 Chat ID 提示"""
+        """
+        让 Worker 发送 Chat ID 提示
+        
+        使用 JSON 配置文件，支持热更新和按 chat_id 自定义配置
+        """
         from datetime import datetime
         
         user_name = from_user.get("name", "用户")
         type_desc = "私聊" if chat_type == "single" else "群聊"
         timestamp = datetime.now().strftime("%H:%M:%S")
         
-        message = f"""👋 你好 {user_name}！
-
-当前没有等待中的会话需要你回复。
-
-如果你想配置 MCP 使用此{type_desc}，请使用以下信息：
-
-📋 **Chat ID**: `{chat_id}`
-📌 **会话类型**: {type_desc}
-🕐 **时间**: {timestamp}
-
-你可以将此 Chat ID 配置到 MCP 的环境变量中：
-```
-DEFAULT_CHAT_ID={chat_id}
-```"""
+        # 从配置文件获取并格式化消息（支持热更新）
+        message = idle_hint_config.format_message(
+            chat_id=chat_id,
+            user_name=user_name,
+            chat_type=type_desc,
+            timestamp=timestamp
+        )
+        
+        # 如果配置禁用了提示消息，则不发送
+        if message is None:
+            logger.info(f"提示消息已禁用，跳过发送: chat_id={chat_id}")
+            return
         
         try:
             await self.send_request(

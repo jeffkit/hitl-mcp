@@ -1,6 +1,6 @@
 [project]
-name = "hil-mcp"
-version = "0.1.1"
+name = "hitl-mcp"
+version = "0.2.1"
 description = "Human-in-the-Loop MCP Server for WeCom (企业微信) - 让 AI 能够与人类实时交互"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,11 +28,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/user/hil-mcp"
-Repository = "https://github.com/user/hil-mcp"
+Homepage = "https://github.com/user/hitl-mcp"
+Repository = "https://github.com/user/hitl-mcp"
 
 [project.scripts]
-hil-mcp = "mcp_server.server:main"
+hitl-mcp = "mcp_server.server:main"
 
 [build-system]
 requires = ["hatchling"]

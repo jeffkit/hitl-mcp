@@ -1,0 +1,13 @@
+{
+  "version": "1.0.0",
+  "keys": [
+    {
+      "id": "7b848e40-bc4d-41b3-9f12-e1f22807d4b7",
+      "projectId": "/Users/kongjie/projects/hil-mcp",
+      "keyHash": "$2a$10$f1swZ7Zvwq.xUAySwVFzJOVFYYrP0o.PAkiVL9sdMLCzJkzEopKFu",
+      "encryptedKey": "2795c8e568aaa195e750e162:5ee58a7abcc035f59b9c0d5d3d6c8209:0c26072473dbbf445bfc68bd5263026f4d861d147288da43492abd278c1b0eb40ce3d580871bc11c68c83d2c1687df343f07",
+      "description": "给AI-editor控制",
+      "createdAt": "2026-01-06T14:58:28.363Z"
+    }
+  ]
+}

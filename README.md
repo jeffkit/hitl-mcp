@@ -10,6 +10,7 @@
 - 💬 **多会话冲突检测** - 自动提示用户使用引用回复
 - ⏰ **20分钟默认超时**
 - 📋 **自动回复 chat_id** - 方便用户获取配置信息
+- ⚙️ **空闲提示配置** - JSON 配置文件 + 热更新 + 管理台可视化配置
 - ⚡ **一键安装** - 通过 `uvx` 或 `pipx` 无需预先安装
 - 🌐 **双模式支持** - Relay 中转模式（公网）和 Direct 直连模式（内网）
 - 🔄 **消息转发服务** - 支持用户主动发消息触发外部服务（Forward Service）
@@ -91,7 +92,7 @@ HIL Server 通过配置自动选择模式：
       "command": "uvx",
       "args": [
         "hil-mcp",
-        "--service-url", "https://your-domain.com",
+        "--service-url", "http://hitl.woa.com/api",
         "--chat-id", "your-chat-id",
         "--project-name", "my-project"
       ],
@@ -115,7 +116,7 @@ HIL Server 通过配置自动选择模式：
       "args": [
         "run",
         "hil-mcp",
-        "--service-url", "https://your-domain.com",
+        "--service-url", "http://hitl.woa.com/api",
         "--chat-id", "your-chat-id"
       ],
       "env": {
@@ -142,7 +143,7 @@ pip install hil-mcp
     "wecom-hil": {
       "command": "hil-mcp",
       "args": [
-        "--service-url", "https://your-domain.com",
+        "--service-url", "http://hitl.woa.com/api",
         "--chat-id", "your-chat-id"
       ],
       "env": {
@@ -157,14 +158,12 @@ pip install hil-mcp
 
 ### 命令行参数说明
 
-| 参数 | 说明 | 默认值 |
-|------|------|--------|
-| `--service-url` | HIL Server 地址（支持 HTTP/HTTPS） | `http://localhost:8080` |
-| `--mode` | 服务模式：`auto`/`direct`/`relay` | `auto` |
-| `--chat-id` | 默认 Chat ID（群聊或私聊） | - |
-| `--project-name` | 项目名称，用于标识消息来源 | - |
-| `--timeout` | 等待回复超时时间（秒） | `1200` |
-| `--poll-interval` | 轮询间隔（秒） | `2` |
+| 参数 | 说明 | 是否必填 | 默认值 |
+|------|------|----------|--------|
+| `--service-url` | HIL Server 地址（如 `http://hitl.woa.com/api`） | ✅ 必填 | `http://localhost:8081` |
+| `--chat-id` | 默认 Chat ID（群聊或私聊） | ✅ 必填 | - |
+| `--project-name` | 项目名称，用于标识消息来源 | 可选 | - |
+| `--timeout` | 等待回复超时时间（秒） | 可选 | `1200` (20 分钟) |
 
 ### 获取 Chat ID
 
@@ -365,28 +364,76 @@ curl http://localhost:8080/health
 | `HIL_WORKER_TOKEN` | Worker 连接鉴权 Token | 可选 |
 | `HEARTBEAT_INTERVAL` | 心跳间隔（秒） | 30 |
 | `HEARTBEAT_TIMEOUT` | 心跳超时（秒） | 90 |
+| `IDLE_HINT_MESSAGE_TEMPLATE` | 空闲状态提示消息模板（支持变量） | 见下方说明 |
+| `ADMIN_USERNAME` | 管理台登录用户名 | admin |
+| `ADMIN_PASSWORD` | 管理台登录密码 | jarvis2026 |
+| `ADMIN_TOKEN_SECRET` | JWT Token 密钥 | hil-mcp-secret-key-2026 |
 
 ### DevCloud Worker
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `HIL_URL` | HIL Server 的 WebSocket 地址 | `ws://localhost:8081/ws` |
+| `HIL_URL` | HIL Server 的 WebSocket 地址（Worker 模式） | `ws://localhost:8081/ws` |
 | `HIL_TOKEN` | 连接 HIL Server 的鉴权 Token | 可选 |
 | `BOT_KEY` | 飞鸽机器人 Webhook Key | 必填 |
 | `CALLBACK_PORT` | 回调服务监听端口 | 8082 |
 | `CALLBACK_AUTH_KEY` | 回调鉴权 Header 名称 | 可选 |
 | `CALLBACK_AUTH_VALUE` | 回调鉴权 Header 值 | 可选 |
 
-### MCP Server
+### MCP Server (MCP 客户端)
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `DEVCLOUD_SERVICE_URL` | HIL Server 地址 | 必填 |
-| `SERVICE_MODE` | 服务模式：auto/direct/relay | auto |
+| `SERVICE_URL` | HIL Server 地址（如 `http://hitl.woa.com/api`） | `http://localhost:8081` |
 | `DEFAULT_CHAT_ID` | 默认 Chat ID | 必填 |
 | `DEFAULT_PROJECT_NAME` | 默认项目名称 | 可选 |
-| `DEFAULT_TIMEOUT` | 超时时间（秒） | 1200 |
-| `POLL_INTERVAL` | 轮询间隔（秒） | 2 |
+| `DEFAULT_TIMEOUT` | 超时时间（秒） | `1200` (20 分钟) |
+
+### 空闲状态提示消息配置
+
+`IDLE_HINT_MESSAGE_TEMPLATE` 用于自定义当用户发送消息但机器人并非处于等待回复状态时的自动回复内容。
+
+**支持的变量：**
+- `{user_name}` - 发送消息的用户名称
+- `{chat_id}` - 当前会话的 Chat ID
+- `{chat_type}` - 会话类型（"私聊" 或 "群聊"）
+- `{timestamp}` - 当前时间戳（格式：HH:MM:SS）
+
+**默认模板：**
+```
+👋 你好 {user_name}！
+
+当前没有等待中的会话需要你回复。
+
+如果你想配置 MCP 使用此{chat_type}，请使用以下信息：
+
+📋 **Chat ID**: `{chat_id}`
+📌 **会话类型**: {chat_type}
+🕐 **时间**: {timestamp}
+
+你可以将此 Chat ID 配置到 MCP 的环境变量中：
+```
+DEFAULT_CHAT_ID={chat_id}
+```
+```
+
+**自定义示例：**
+```bash
+# 简洁版本
+export IDLE_HINT_MESSAGE_TEMPLATE="Hi {user_name}，当前无等待中的消息。Chat ID: {chat_id}"
+
+# Markdown 格式版本
+export IDLE_HINT_MESSAGE_TEMPLATE="👋 {user_name}，当前无等待消息\n\n📋 **Chat ID**: \`{chat_id}\`\n🕐 {timestamp}"
+
+# 自定义指引版本
+export IDLE_HINT_MESSAGE_TEMPLATE="嗨 {user_name}！\n\n当前没有需要处理的消息哦～\n\n💡 如需配置机器人，请联系管理员并提供：\n- Chat ID: \`{chat_id}\`\n- 类型: {chat_type}"
+```
+
+**注意事项：**
+- 如果不配置此变量，将使用默认模板
+- 消息支持 Markdown 格式（使用飞鸽传书的 `markdown` 接口）
+- 变量使用 Python 的 `str.format()` 语法，确保所有 `{变量名}` 正确闭合
+- 建议在消息中包含 `{chat_id}`，方便用户获取配置信息
 
 ---
 
@@ -411,6 +458,50 @@ result = await send_message_only(
 
 1. **单会话场景**：直接回复即可
 2. **多会话场景**：使用「引用回复」功能精确选择要回复的消息
+
+---
+
+## 空闲提示消息配置
+
+当用户在配置的 Chat ID 中发送消息，但机器人并非处于等待回复状态时，会自动回复一条提示消息，显示当前的 Chat ID 等信息。
+
+### 核心特性
+
+- ✅ **JSON 配置文件存储** - `data/idle_hint_config.json`
+- ✅ **热更新** - 修改后立即生效，无需重启服务
+- ✅ **全局默认 + Chat ID 特定配置** - 支持为不同群组配置不同消息
+- ✅ **管理台可视化配置** - 无需手动编辑文件
+- ✅ **支持变量替换** - `{user_name}`, `{chat_id}`, `{chat_type}`, `{timestamp}`
+
+### 快速开始
+
+**通过管理台配置（推荐）：**
+
+1. 访问管理台：`http://your-server:8081/admin`
+2. 登录后点击"空闲提示配置"标签页
+3. 编辑全局默认配置或添加 Chat ID 特定配置
+4. 保存后立即生效 ✨
+
+**消息模板示例：**
+
+```
+👋 你好 {user_name}！
+
+当前没有等待中的会话需要你回复。
+
+如果你想配置 MCP 使用此{chat_type}，请使用以下信息：
+
+📋 **Chat ID**: `{chat_id}`
+📌 **会话类型**: {chat_type}
+🕐 **时间**: {timestamp}
+
+你可以将此 Chat ID 配置到 MCP 的环境变量中：
+```
+DEFAULT_CHAT_ID={chat_id}
+```
+```
+
+详细文档：[空闲提示消息配置指南](docs/idle-hint-config-guide.md)
 
 ---
 

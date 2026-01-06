@@ -4,7 +4,7 @@ Human-in-the-Loop MCP Server
 让 AI 能够发送消息到企业微信并等待用户回复
 
 运行方式:
-    python -m mcp_server.server --service-url https://xxx --chat-id xxx --project-name xxx
+    python -m mcp_server.server --service-url http://hitl.woa.com/api --chat-id xxx --project-name xxx
 """
 import argparse
 import asyncio
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # 创建 MCP 实例
 mcp = FastMCP(
-    "wecom-hil",
+    "hitl-mcp",
     instructions="企业微信 Human-in-the-Loop MCP - 发送消息并等待用户回复"
 )
 
@@ -222,12 +222,13 @@ async def send_message_only(
                     if result.get("success") and result.get("image_url"):
                         image_urls.append(result["image_url"])
         
-        # 发送消息
+        # 发送消息（不等待回复，不创建会话）
         send_result = await client.send_message(
             message=message,
             chat_id=effective_chat_id,
             images=image_urls if image_urls else None,
             project_name=project_name,
+            wait_reply=False,  # 不创建会话
         )
         
         if send_result.get("success"):
@@ -255,13 +256,7 @@ def parse_args():
     parser.add_argument(
         "--service-url",
         dest="service_url",
-        help="服务的访问地址（DevCloud 直连或 Relay Server）"
-    )
-    parser.add_argument(
-        "--mode",
-        dest="mode",
-        choices=["auto", "direct", "relay", "hil"],
-        help="服务模式: auto（自动检测）, direct（旧 DevCloud 直连）, relay/hil（HIL Server）"
+        help="HIL Server 的访问地址（如 http://hitl.woa.com 或 http://hitl.woa.com/api）"
     )
     parser.add_argument(
         "--chat-id",
@@ -277,13 +272,7 @@ def parse_args():
         "--timeout",
         dest="timeout",
         type=int,
-        help="默认等待回复超时时间（秒）"
-    )
-    parser.add_argument(
-        "--poll-interval",
-        dest="poll_interval",
-        type=int,
-        help="轮询获取回复的间隔（秒）"
+        help="默认等待回复超时时间（秒），默认 1200 秒（20 分钟）"
     )
     return parser.parse_args()
 
@@ -294,27 +283,20 @@ def main():
     
     # 命令行参数覆盖配置（优先级：命令行 > 环境变量 > 默认值）
     if args.service_url:
-        config.devcloud_service_url = args.service_url
-    if args.mode:
-        config.service_mode = args.mode
+        config.service_url = args.service_url
     if args.chat_id:
         config.default_chat_id = args.chat_id
     if args.project_name:
         config.default_project_name = args.project_name
     if args.timeout:
         config.default_timeout = args.timeout
-    if args.poll_interval:
-        config.poll_interval = args.poll_interval
-    
-    # 检测服务模式
-    mode_desc = "HIL Server" if client.is_hil_server else "DevCloud 直连"
     
     logger.info(f"启动 WeCom HIL MCP Server...")
-    logger.info(f"  服务地址: {config.devcloud_service_url}")
-    logger.info(f"  服务模式: {mode_desc}")
+    logger.info(f"  服务地址: {config.service_url}")
     logger.info(f"  默认 Chat ID: {config.default_chat_id or '(未设置)'}")
     logger.info(f"  默认项目名: {config.default_project_name or '(未设置)'}")
     logger.info(f"  超时时间: {config.default_timeout}s")
+    logger.info(f"  轮询间隔: {config.poll_interval}s")
     
     mcp.run()
 

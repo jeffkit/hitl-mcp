@@ -17,6 +17,8 @@ from urllib.parse import urlencode
 import websockets
 from fastapi import FastAPI, Request, Header
 
+import httpx
+
 from .config import config
 from .sender import handle_send_message, handle_upload_image, handle_send_hint
 from .callback_handler import callback_handler
@@ -72,6 +74,39 @@ class WebSocketClient:
         
         logger.info("WebSocket 连接成功")
         self._reconnect_delay = config.reconnect_delay
+        
+        # 发送注册信息
+        await self._send_register_info()
+    
+    async def _send_register_info(self) -> None:
+        """发送 Worker 注册信息"""
+        import socket
+        
+        # 获取本机 IP
+        try:
+            hostname = socket.gethostname()
+            ip_address = socket.gethostbyname(hostname)
+        except Exception:
+            hostname = "unknown"
+            ip_address = "unknown"
+        
+        # 构造注册信息
+        register_info = {
+            "type": "register",
+            "worker_info": {
+                "worker_id": config.worker_id,
+                "ip_address": ip_address,
+                "hostname": hostname,
+                "callback_port": config.callback_port,
+                "bot_key": config.bot_key[:8] + "..." if config.bot_key else "",
+                "hil_url": config.hil_url,
+                "config_file": config.config_file,
+                "forward_service_url": f"http://{ip_address}:8083"  # 假设 Forward 在同一台机器
+            }
+        }
+        
+        await self.send(register_info)
+        logger.info(f"已发送 Worker 注册信息: {register_info['worker_info']}")
     
     async def disconnect(self) -> None:
         """断开连接"""
@@ -117,6 +152,126 @@ class WebSocketClient:
         await self.send(message)
         logger.info("已转发回调到 Relay")
     
+    async def _proxy_forward_request(self, payload: dict, endpoint: str) -> dict:
+        """
+        代理请求 Forward Service
+        
+        Args:
+            payload: 包含 url 的请求参数
+            endpoint: API 端点（如 /admin/status）
+        
+        Returns:
+            Forward Service 的响应
+        """
+        forward_url = payload.get("url", "")
+        if not forward_url:
+            return {"error": "Forward Service URL not provided"}
+        
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                response = await client.get(f"{forward_url}{endpoint}")
+                if response.status_code == 200:
+                    return response.json()
+                return {"error": f"HTTP {response.status_code}"}
+        except Exception as e:
+            logger.warning(f"代理请求 Forward Service 失败: {e}")
+            return {"error": str(e)}
+    
+    def _get_config(self) -> dict:
+        """获取 Worker 配置"""
+        return {
+            "worker_id": config.worker_id,
+            "bot_key": config.bot_key,
+            "hil_url": config.hil_url,
+            "callback_port": config.callback_port,
+            "config_file": config.config_file
+        }
+    
+    async def _update_config(self, payload: dict) -> dict:
+        """
+        更新 Worker 配置
+        
+        Args:
+            payload: 包含要更新的配置项
+        
+        Returns:
+            更新结果
+        """
+        import json
+        import os
+        
+        try:
+            # 读取当前配置
+            config_file = config.config_file
+            if not os.path.exists(config_file):
+                return {"success": False, "error": "配置文件不存在"}
+            
+            with open(config_file, "r", encoding="utf-8") as f:
+                current_config = json.load(f)
+            
+            # 更新配置
+            if "bot_key" in payload:
+                current_config["bot_key"] = payload["bot_key"]
+            if "hil_url" in payload:
+                current_config["hil_url"] = payload["hil_url"]
+            if "callback_port" in payload:
+                current_config["callback_port"] = payload["callback_port"]
+            
+            # 保存配置
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(current_config, f, ensure_ascii=False, indent=2)
+            
+            logger.info(f"Worker 配置已更新: {config_file}")
+            
+            return {
+                "success": True, 
+                "message": "配置已保存，需要重启服务生效",
+                "config": current_config
+            }
+        except Exception as e:
+            logger.error(f"更新 Worker 配置失败: {e}")
+            return {"success": False, "error": str(e)}
+
+    async def _proxy_forward_rule_request(
+        self, 
+        payload: dict, 
+        method: str, 
+        chat_id: str = ""
+    ) -> dict:
+        """
+        代理转发规则管理请求
+        
+        Args:
+            payload: 包含 url 和 rule 的请求参数
+            method: HTTP 方法（POST/PUT/DELETE）
+            chat_id: 规则的 chat_id（PUT/DELETE 时需要）
+        """
+        forward_url = payload.get("url", "")
+        if not forward_url:
+            return {"error": "Forward Service URL not provided"}
+        
+        endpoint = f"{forward_url}/admin/rules"
+        if chat_id:
+            endpoint = f"{endpoint}/{chat_id}"
+        
+        try:
+            async with httpx.AsyncClient(timeout=5) as client:
+                if method == "POST":
+                    rule = payload.get("rule", {})
+                    response = await client.post(endpoint, json=rule)
+                elif method == "PUT":
+                    rule = payload.get("rule", {})
+                    response = await client.put(endpoint, json=rule)
+                elif method == "DELETE":
+                    response = await client.delete(endpoint)
+                else:
+                    return {"error": f"Unsupported method: {method}"}
+                
+                return response.json()
+        except Exception as e:
+            logger.warning(f"代理规则管理请求失败: {e}")
+            return {"error": str(e)}
+    
     async def handle_request(self, message: dict) -> None:
         """处理来自 Relay 的请求"""
         request_id = message.get("id")
@@ -142,6 +297,44 @@ class WebSocketClient:
                 # 发送提示消息（如 Chat ID 提示）
                 result = await handle_send_hint(payload)
                 await self.send_response(request_id, result.get("success", True), result)
+            
+            # ========== Forward Service 代理请求 ==========
+            elif action == "get_forward_status":
+                result = await self._proxy_forward_request(payload, "/admin/status")
+                await self.send_response(request_id, True, result)
+            
+            elif action == "get_forward_logs":
+                limit = payload.get("limit", 20)
+                result = await self._proxy_forward_request(payload, f"/admin/logs?limit={limit}")
+                await self.send_response(request_id, True, result)
+            
+            elif action == "get_forward_rules":
+                result = await self._proxy_forward_request(payload, "/admin/rules")
+                await self.send_response(request_id, True, result)
+            
+            # ========== Forward Service 规则管理代理 ==========
+            elif action == "add_forward_rule":
+                result = await self._proxy_forward_rule_request(payload, "POST")
+                await self.send_response(request_id, True, result)
+            
+            elif action == "update_forward_rule":
+                chat_id = payload.get("chat_id", "")
+                result = await self._proxy_forward_rule_request(payload, "PUT", chat_id)
+                await self.send_response(request_id, True, result)
+            
+            elif action == "delete_forward_rule":
+                chat_id = payload.get("chat_id", "")
+                result = await self._proxy_forward_rule_request(payload, "DELETE", chat_id)
+                await self.send_response(request_id, True, result)
+            
+            # ========== Worker 配置管理 ==========
+            elif action == "get_worker_config":
+                result = self._get_config()
+                await self.send_response(request_id, True, result)
+            
+            elif action == "update_worker_config":
+                result = await self._update_config(payload)
+                await self.send_response(request_id, True, result)
                 
             else:
                 await self.send_response(

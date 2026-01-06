@@ -60,6 +60,30 @@ class HILConfig(BaseSettings):
         description="心跳超时时间（秒），应大于 heartbeat_interval * 2"
     )
     
+    # ========== Forward Service 配置（用于统一管理台）==========
+    forward_service_url: str = Field(
+        default="",
+        alias="FORWARD_SERVICE_URL",
+        description="Forward Service 地址（如 http://localhost:8083）"
+    )
+    
+    # ========== 管理台认证配置 ==========
+    admin_username: str = Field(
+        default="admin",
+        alias="ADMIN_USERNAME",
+        description="管理台登录用户名"
+    )
+    admin_password: str = Field(
+        default="jarvis2026",
+        alias="ADMIN_PASSWORD",
+        description="管理台登录密码"
+    )
+    admin_token_secret: str = Field(
+        default="hil-mcp-secret-key-2026",
+        alias="ADMIN_TOKEN_SECRET",
+        description="JWT Token 密钥"
+    )
+    
     @property
     def effective_mode(self) -> str:
         """获取实际运行模式"""

@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企业微信 HIL MCP - 让 AI 与人类实时交互</title>
+    <meta name="description" content="Human-in-the-Loop MCP for WeCom - 让 AI Agent 能够通过企业微信与用户实时交互">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-container">
+            <div class="logo">🤖 HITL-Walle</div>
+            <ul class="nav-links">
+                <li><a href="/" class="active">首页</a></li>
+                <li><a href="/docs">使用文档</a></li>
+                <li><span class="status-indicator" id="service-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">检查中...</span>
+                </span></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- 英雄区域 -->
+    <section class="hero">
+        <div class="container">
+            <h1>HITL-Walle</h1>
+            <p class="hero-subtitle-large">AI Agent 监工神器 🎯</p>
+            <p class="hero-subtitle">让 AI 不再"摸鱼"，工作更饱和 | 离开工位也能结对编程 | 全天候 Agent 协同</p>
+            
+            <div class="hero-value-props">
+                <div class="value-prop">
+                    <div class="value-icon">👀</div>
+                    <div class="value-text">
+                        <strong>实时监工</strong>
+                        <p>AI 每做完一件事就来问你：行不行？</p>
+                    </div>
+                </div>
+                <div class="value-prop">
+                    <div class="value-icon">🏃</div>
+                    <div class="value-text">
+                        <strong>工作饱和</strong>
+                        <p>有疑问马上问，不瞎猜不跑偏</p>
+                    </div>
+                </div>
+                <div class="value-prop">
+                    <div class="value-icon">📱</div>
+                    <div class="value-text">
+                        <strong>移动协同</strong>
+                        <p>手机上也能审查代码，随时随地结对</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="cta-buttons">
+                <a href="/docs" class="btn btn-primary btn-large">
+                    🚀 立即开始
+                    <span>→</span>
+                </a>
+            </div>
+            
+            <p class="hero-hint">💡 只需 2 分钟配置，AI 立刻学会主动汇报工作</p>
+        </div>
+    </section>
+
+    <!-- 功能特性 -->
+    <section class="features">
+        <div class="container">
+            <h2 class="section-title">✨ 核心特性</h2>
+            
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">👀</div>
+                    <h3>AI 学会请示汇报</h3>
+                    <p>在关键决策点主动问你，不再自作主张。方案不确定？问你。任务完成？让你确认。</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">📱</div>
+                    <h3>全天候协同，随时随地</h3>
+                    <p>企业微信手机端随时响应。食堂吃饭、会议室开会、通勤路上，哪里都能审查 AI 的工作，不用守在电脑前。</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">🖼️</div>
+                    <h3>双向图文交互</h3>
+                    <p>AI 可以发送截图、代码片段给你；你也可以拍照发图给 AI。UI 改成这样？拍张图发过去。设计稿审查？直接截图沟通。</p>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">🎯</div>
+                    <h3>多项目精准匹配</h3>
+                    <p>支持多个项目并行，每条消息都有标识。用企微的"引用回复"精确回复特定 AI，多个任务不会串台。</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 工作原理 -->
+    <section class="how-it-works">
+        <div class="container">
+            <h2 class="section-title">💬 工作原理</h2>
+            
+            <div class="workflow-simple">
+                <div class="workflow-step">
+                    <div class="workflow-icon">🤔</div>
+                    <h3>AI 有疑问</h3>
+                    <p>遇到不确定的选择</p>
+                </div>
+                <div class="workflow-arrow">→</div>
+                <div class="workflow-step">
+                    <div class="workflow-icon">📲</div>
+                    <h3>企微询问</h3>
+                    <p>发消息到手机</p>
+                </div>
+                <div class="workflow-arrow">→</div>
+                <div class="workflow-step">
+                    <div class="workflow-icon">👍</div>
+                    <h3>你回复确认</h3>
+                    <p>直接回复意见</p>
+                </div>
+                <div class="workflow-arrow">→</div>
+                <div class="workflow-step">
+                    <div class="workflow-icon">✅</div>
+                    <h3>AI 继续干活</h3>
+                    <p>按你的指示执行</p>
+                </div>
+            </div>
+
+            <div class="workflow-example">
+                <div class="example-card">
+                    <div class="example-header">
+                        <span class="example-tag">典型场景</span>
+                    </div>
+                    <div class="example-messages">
+                        <div class="message ai-message">
+                            <strong>🤖 AI:</strong> 已完成用户登录功能，要不要加个验证码？
+                        </div>
+                        <div class="message user-message">
+                            <strong>👤 你:</strong> 加上吧，用滑动验证码
+                        </div>
+                        <div class="message ai-message">
+                            <strong>🤖 AI:</strong> 好的，已添加滑动验证码并测试通过！
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 系统架构 -->
+    <section class="architecture">
+        <div class="container">
+            <h2 class="section-title">🏗️ 系统架构</h2>
+            
+            <div class="architecture-diagram">
+                <h3 style="color: var(--primary-color); margin-bottom: 2rem;">Direct 模式（内网部署）</h3>
+                <pre>
+┌─────────────────┐      HTTP       ┌─────────────────┐     fly-pigeon    ┌─────────────────┐
+│   MCP Server    │ ───────────────▶│   HIL Server    │ ─────────────────▶│   企业微信       │
+│  (AI Agent)     │ ◀───────────────│   (内网部署)     │ ◀─────────────────│   (飞鸽传书)     │
+└─────────────────┘                 └─────────────────┘      回调          └─────────────────┘
+                </pre>
+                
+                <div style="margin-top: 2rem; color: var(--text-secondary);">
+                    <p><strong style="color: var(--secondary-color);">✓ 适用场景：</strong></p>
+                    <ul style="margin-left: 2rem; line-height: 2;">
+                        <li>MCP Server 和 HIL Server 都在内网运行</li>
+                        <li>可以直接访问飞鸽传书 API</li>
+                        <li>简化部署，无需额外的 Worker 组件</li>
+                        <li>响应速度快，架构简单</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- MCP 工具说明 -->
+    <section class="features" style="padding-bottom: 100px;">
+        <div class="container">
+            <h2 class="section-title">🛠️ MCP 工具</h2>
+            
+            <div class="features-grid" style="grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));">
+                <div class="feature-card">
+                    <div class="feature-icon">📤</div>
+                    <h3>send_and_wait_reply</h3>
+                    <p style="margin-bottom: 1rem;">发送消息到企业微信并等待用户回复。</p>
+                    
+                    <div class="code-block" style="margin-top: 1rem;">
+                        <pre style="font-size: 0.85rem;"><code>参数:
+  message: 要发送的消息内容
+  chat_id: 目标群或私聊 ID (可选)
+  image_paths: 图片路径列表 (可选)
+  project_name: 项目名称 (可选)
+
+返回:
+  status: success | timeout | error
+  replies: 用户回复列表
+  message: 描述信息</code></pre>
+                    </div>
+                </div>
+                
+                <div class="feature-card">
+                    <div class="feature-icon">📨</div>
+                    <h3>send_message_only</h3>
+                    <p style="margin-bottom: 1rem;">仅发送消息，不等待回复。适用于通知场景。</p>
+                    
+                    <div class="code-block" style="margin-top: 1rem;">
+                        <pre style="font-size: 0.85rem;"><code>参数:
+  message: 要发送的消息内容
+  chat_id: 目标群或私聊 ID (可选)
+  image_paths: 图片路径列表 (可选)
+  project_name: 项目名称 (可选)
+
+返回:
+  status: success | error
+  message: 描述信息</code></pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <p>&copy; 2026 HITL-Walle. 内部使用.</p>
+                <ul class="footer-links">
+                    <li><a href="/">首页</a></li>
+                    <li><a href="/docs">使用文档</a></li>
+                    <li><span style="color: var(--text-secondary);">|</span></li>
+                    <li style="color: var(--text-secondary);">联系我：kongjie</li>
+                </ul>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

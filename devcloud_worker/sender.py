@@ -14,17 +14,29 @@ from .config import config
 logger = logging.getLogger(__name__)
 
 
-def format_message_with_header(message: str, short_id: str, project_name: str | None = None) -> str:
+def format_message_with_header(message: str, short_id: str, project_name: str | None = None, wait_reply: bool = True) -> str:
     """
-    在消息前添加会话标识头
+    格式化消息
     
-    格式: [#short_id 项目名] 消息内容
+    - 如果有 short_id，在消息前添加会话标识头: [#short_id 项目名] 消息内容
+    - 如果没有 short_id（readonly 消息），不添加头部
+    - 如果 wait_reply=True，在消息底部添加「请回复」提示
     """
-    if project_name:
-        header = f"[#{short_id} {project_name}]"
-    else:
-        header = f"[#{short_id}]"
-    return f"{header}\n{message}"
+    formatted_message = message
+    
+    # 1. 添加会话标识头（仅当有 short_id 时）
+    if short_id:
+        if project_name:
+            header = f"[#{short_id} {project_name}]"
+        else:
+            header = f"[#{short_id}]"
+        formatted_message = f"{header}\n{formatted_message}"
+    
+    # 2. 添加「请回复」提示（仅当需要回复时）
+    if wait_reply:
+        formatted_message = f"{formatted_message}\n\n---\n📮 **请回复**"
+    
+    return formatted_message
 
 
 def send_to_wecom(
@@ -105,33 +117,33 @@ async def handle_send_message(payload: dict) -> dict:
     
     Args:
         payload: 请求参数（由 Relay Server 传入）
-            - short_id: 会话短 ID（由 Relay 生成）
+            - short_id: 会话短 ID（由 Relay 生成，空字符串表示不等待回复）
             - message: 消息内容
             - chat_id: 群/私聊 ID
             - images: 图片列表
             - project_name: 项目名称
+            - wait_reply: 是否等待回复（默认 True）
     
     Returns:
         { success: bool, error?: str }
     """
-    short_id = payload.get("short_id")
+    short_id = payload.get("short_id", "")
     message = payload.get("message", "")
     chat_id = payload.get("chat_id")
     images = payload.get("images")
     project_name = payload.get("project_name")
+    wait_reply = payload.get("wait_reply", True)
     
     if not chat_id:
         return {"success": False, "error": "未指定 chat_id"}
     
-    if not short_id:
-        return {"success": False, "error": "未指定 short_id"}
-    
     try:
-        # 添加会话标识头
+        # 格式化消息（添加头部和回复提示）
         formatted_message = format_message_with_header(
             message,
             short_id,
-            project_name
+            project_name,
+            wait_reply
         )
         
         # 发送文本消息

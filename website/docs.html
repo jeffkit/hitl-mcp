@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>使用文档 - 企业微信 HIL MCP</title>
+    <meta name="description" content="企业微信 HIL MCP 使用文档和 Feedback Protocol 指南">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        .docs-container {
+            max-width: 900px;
+            margin: 120px auto 50px;
+            padding: 0 2rem;
+        }
+        
+        .docs-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+        
+        .docs-header h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .docs-toc {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 3rem;
+        }
+        
+        .docs-toc h3 {
+            margin-bottom: 1rem;
+            color: var(--primary-color);
+        }
+        
+        .docs-toc ul {
+            list-style: none;
+            display: grid;
+            gap: 0.5rem;
+        }
+        
+        .docs-toc a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.3s ease;
+            padding: 0.5rem;
+            display: block;
+            border-radius: 6px;
+        }
+        
+        .docs-toc a:hover {
+            color: var(--primary-color);
+            background: rgba(0, 102, 255, 0.1);
+        }
+        
+        .docs-section {
+            margin-bottom: 4rem;
+            scroll-margin-top: 100px;
+        }
+        
+        .docs-section h2 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--border-color);
+            color: var(--text-primary);
+        }
+        
+        .docs-section h3 {
+            font-size: 1.5rem;
+            margin: 2rem 0 1rem;
+            color: var(--secondary-color);
+        }
+        
+        .docs-section h4 {
+            font-size: 1.2rem;
+            margin: 1.5rem 0 1rem;
+            color: var(--text-primary);
+        }
+        
+        .docs-section p {
+            color: var(--text-secondary);
+            line-height: 1.8;
+            margin-bottom: 1rem;
+        }
+        
+        .docs-section ul,
+        .docs-section ol {
+            color: var(--text-secondary);
+            line-height: 1.8;
+            margin: 1rem 0 1rem 2rem;
+        }
+        
+        .docs-section li {
+            margin-bottom: 0.5rem;
+        }
+        
+        .docs-section strong {
+            color: var(--text-primary);
+        }
+        
+        .docs-section code {
+            background: var(--code-bg);
+            color: var(--secondary-color);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        
+        .alert {
+            background: var(--card-bg);
+            border-left: 4px solid var(--primary-color);
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            border-radius: 8px;
+        }
+        
+        .alert-success {
+            border-left-color: var(--success);
+        }
+        
+        .alert-warning {
+            border-left-color: var(--warning);
+        }
+        
+        .alert-info {
+            border-left-color: var(--primary-color);
+        }
+        
+        .alert h4 {
+            margin: 0 0 0.5rem 0;
+            color: var(--text-primary);
+        }
+        
+        .feedback-protocol {
+            background: linear-gradient(135deg, rgba(0, 102, 255, 0.1), rgba(0, 204, 136, 0.1));
+            border: 2px solid var(--primary-color);
+            border-radius: 12px;
+            padding: 2rem;
+            margin: 2rem 0;
+        }
+        
+        .feedback-protocol h3 {
+            color: var(--primary-color);
+            margin-top: 0;
+        }
+        
+        .table-responsive {
+            overflow-x: auto;
+            margin: 1.5rem 0;
+        }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card-bg);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        th {
+            background: rgba(0, 102, 255, 0.1);
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        
+        td {
+            color: var(--text-secondary);
+        }
+        
+        tr:last-child td {
+            border-bottom: none;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-container">
+            <div class="logo">🤖 HITL-Walle</div>
+            <ul class="nav-links">
+                <li><a href="/">首页</a></li>
+                <li><a href="/docs" class="active">使用文档</a></li>
+                <li><span class="status-indicator" id="service-status">
+                    <span class="status-dot"></span>
+                    <span class="status-text">检查中...</span>
+                </span></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- 文档内容 -->
+    <div class="docs-container">
+        <div class="docs-header">
+            <h1>📚 使用文档</h1>
+            <p style="color: var(--text-secondary); font-size: 1.2rem;">
+                完整的配置指南和最佳实践
+            </p>
+        </div>
+
+        <!-- 目录 -->
+        <div class="docs-toc">
+            <h3>📑 目录</h3>
+            <ul>
+                <li><a href="#quick-start">1. 快速开始（2 分钟）</a></li>
+                <li><a href="#usage">2. 使用方法</a></li>
+                <li><a href="#best-practices">3. 最佳实践</a></li>
+                <li><a href="#troubleshooting">4. 常见问题</a></li>
+            </ul>
+        </div>
+
+        <!-- 1. 快速开始 -->
+        <section class="docs-section" id="quick-start">
+            <h2>🚀 1. 快速开始（2 分钟）</h2>
+            
+            <div class="alert alert-success" style="background: linear-gradient(135deg, rgba(0, 204, 136, 0.1), rgba(0, 102, 255, 0.1)); border-left-color: var(--secondary-color);">
+                <h4>📱 第一步：添加企微机器人</h4>
+                <p style="font-size: 1.1rem; margin-top: 0.5rem;">
+                    在企业微信中搜索并添加 <strong style="color: var(--secondary-color);">HITL-Walle</strong> 机器人
+                    <br>
+                    向它发送任意消息，机器人会回复详细的接入指南和你的 Chat ID
+                </p>
+            </div>
+            
+            <h3>⚙️ 第二步：配置 Agent 的 MCP</h3>
+            <p>以 Cursor 为例，在 MCP 配置文件（<code>~/.cursor/mcp.json</code>）中添加：</p>
+            
+            <div class="code-block">
+                <div class="code-header">
+                    <span class="code-language">~/.cursor/mcp.json</span>
+                    <button class="copy-btn" onclick="copyCode(this)">复制代码</button>
+                </div>
+                <pre><code>{
+  "mcpServers": {
+    "wecom-hil": {
+      "command": "uvx",
+      "args": [
+        "hitl-mcp",
+        "--service-url", "https://hitl.woa.com/api",
+        "--chat-id", "你的Chat ID"
+      ]
+    }
+  }
+}</code></pre>
+            </div>
+            
+            <div class="alert alert-warning">
+                <h4>⚠️ 注意事项</h4>
+                <ul style="margin: 0.5rem 0 0 1.5rem;">
+                    <li>将上面的 <code>你的Chat ID</code> 替换为机器人回复给你的实际 Chat ID</li>
+                    <li>Windows 用户请将 <code>uvx</code> 改为 <code>uvx.exe</code></li>
+                    <li>其他 Agent（如 Claude Desktop、Windsurf 等）请参考各自的 MCP 配置文档</li>
+                </ul>
+            </div>
+            
+            <h3>🎯 第三步：配置 Feedback Protocol（强烈推荐）</h3>
+            <p>在 Cursor 的 Rules 或 <code>.cursorrules</code> 文件中添加以下规则，让 AI 学会主动汇报工作：</p>
+            
+            <div class="code-block">
+                <div class="code-header">
+                    <span class="code-language">.cursorrules 或 Cursor Rules</span>
+                    <button class="copy-btn" onclick="copyCode(this)">复制代码</button>
+                </div>
+                <pre><code>**Feedback Protocol**  
+
+**Core Rule:** Always use the `send_and_wait_reply` tool to verify your work - never assume you got it right.  
+
+### **When to Request Feedback:**  
+1. **When You Need Clarification**  
+   - If any part of the request is unclear or missing details  
+   - Example: *"Should I focus more on [A] or [B] for this analysis?"*  
+
+2. **When You Complete a Task**  
+   - After delivering any result, big or small  
+   - Example: *"Here's the draft: [summary]. Does this meet your needs?"*  
+
+**How to Use the Tool Properly:**  
+- Always phrase requests clearly and specifically  
+- Offer options when possible (e.g., "Should I use approach X or Y?")  
+- Never proceed without getting explicit confirmation  
+
+**Golden Rule:** Your work isn't done until the user says "This is exactly what I needed." Keep improving until you hear those words.</code></pre>
+            </div>
+            
+            <h3>🎉 完成！</h3>
+            <p>配置完成后，AI 遇到疑问或完成任务时，会自动发消息到你的企业微信征求意见。你可以：</p>
+            <ul>
+                <li>📱 在手机上随时随地审查 AI 的工作</li>
+                <li>💬 直接回复你的意见，AI 会根据反馈继续改进</li>
+                <li>🔄 多轮迭代，直到满意为止</li>
+            </ul>
+            
+            <div class="alert alert-info">
+                <h4>💡 提示</h4>
+                <p>配置生效后，你会在 Agent 的工具列表中看到 <code>send_and_wait_reply</code> 和 <code>send_message_only</code> 两个工具。</p>
+            </div>
+        </section>
+
+        <!-- 2. 使用方法 -->
+        <section class="docs-section" id="usage">
+            <h2>🚀 2. 使用方法</h2>
+            
+            <h3>工具 1: send_and_wait_reply</h3>
+            <p>发送消息到企业微信并等待用户回复。这是最常用的工具。</p>
+            
+            <div class="code-block">
+                <div class="code-header">
+                    <span class="code-language">使用示例</span>
+                </div>
+                <pre><code>工具参数:
+  message: "请确认是否继续执行此操作？"
+  project_name: "my-project"  (可选)
+  image_paths: ["/path/to/screenshot.png"]  (可选)
+
+返回结果:
+  {
+    "status": "success",
+    "replies": [
+      {
+        "msg_type": "text",
+        "content": "确认，可以继续",
+        "from_user": {"name": "张三", "alias": "zhangsan"},
+        "timestamp": "2024-01-01T10:30:00"
+      }
+    ],
+    "message": "收到 1 条回复"
+  }</code></pre>
+            </div>
+            
+            <h3>工具 2: send_message_only</h3>
+            <p>仅发送消息，不等待回复。适用于通知场景。</p>
+            
+            <div class="code-block">
+                <div class="code-header">
+                    <span class="code-language">使用示例</span>
+                </div>
+                <pre><code>工具参数:
+  message: "任务已完成！"
+  project_name: "my-project"  (可选)
+
+返回结果:
+  {
+    "status": "success",
+    "message": "消息发送成功"
+  }</code></pre>
+            </div>
+            
+            <h3>多会话场景</h3>
+            <p>当多个项目同时发送消息时，系统会在消息前添加 <code>[#short_id project_name]</code> 标识。</p>
+            <p><strong>用户回复方式：</strong></p>
+            <ul>
+                <li><strong>单会话场景：</strong>直接回复即可</li>
+                <li><strong>多会话场景：</strong>使用「引用回复」功能精确选择要回复的消息</li>
+            </ul>
+            
+            <div class="alert alert-info">
+                <h4>💡 引用回复</h4>
+                <p>在企业微信中长按消息，选择「引用」，然后输入回复内容。系统会自动匹配到正确的会话。</p>
+            </div>
+        </section>
+
+        <!-- 3. 最佳实践 -->
+        <section class="docs-section" id="best-practices">
+            <h2>💡 3. 最佳实践</h2>
+            
+            <h3>1. 为不同项目使用不同的 Project Name</h3>
+            <p>通过 <code>--project-name</code> 参数区分不同项目，方便在多项目并行时识别消息来源。</p>
+            
+            <div class="code-block">
+                <pre><code>"args": [
+  "hitl-mcp",
+  "--service-url", "https://hitl.woa.com/api",
+  "--chat-id", "your-chat-id",
+  "--project-name", "frontend-project"  // 前端项目
+]</code></pre>
+            </div>
+            
+            <h3>2. 合理设置超时时间</h3>
+            <p>根据任务特点设置合适的超时时间：</p>
+            <ul>
+                <li><strong>快速确认：</strong>300 秒（5 分钟）</li>
+                <li><strong>一般任务：</strong>1200 秒（20 分钟，默认）</li>
+                <li><strong>复杂审批：</strong>3600 秒（1 小时）</li>
+            </ul>
+            
+            <h3>3. 使用引用回复避免混淆</h3>
+            <p>在多个会话同时进行时，建议使用企业微信的「引用回复」功能，确保回复准确传达。</p>
+            
+            <h3>4. 配合 Feedback Protocol 使用</h3>
+            <p>
+                <strong>强烈推荐</strong>配置 Feedback Protocol 规则，让 AI 主动寻求反馈，
+                避免方向性错误，提高工作效率。
+            </p>
+            
+            <h3>5. 利用图片功能</h3>
+            <p>对于 UI 相关的任务，可以让 AI 发送截图到企业微信，方便直观地确认效果。</p>
+        </section>
+
+        <!-- 4. 常见问题 -->
+        <section class="docs-section" id="troubleshooting">
+            <h2>🔧 4. 常见问题</h2>
+            
+            <h3>Q: 出现 502 Bad Gateway 错误</h3>
+            <p><strong>原因：</strong>通常是设置了 HTTP 代理。</p>
+            <p><strong>解决方案：</strong>在 MCP 配置中禁用代理：</p>
+            <div class="code-block">
+                <pre><code>"env": {
+  "http_proxy": "",
+  "https_proxy": "",
+  "all_proxy": ""
+}</code></pre>
+            </div>
+            
+            <h3>Q: 机器人没有回复</h3>
+            <p><strong>可能原因：</strong></p>
+            <ol>
+                <li>Chat ID 配置错误</li>
+                <li>机器人未加入该群</li>
+                <li>服务未正常运行</li>
+            </ol>
+            <p><strong>解决方案：</strong></p>
+            <ol>
+                <li>检查 Chat ID 是否正确（重新 @机器人 获取）</li>
+                <li>确认机器人在群中</li>
+                <li>访问 <a href="/health" target="_blank" style="color: var(--primary-color);">/health</a> 检查服务状态</li>
+            </ol>
+            
+            <h3>Q: 如何获取私聊的 Chat ID？</h3>
+            <p>直接私聊机器人发送任意消息，机器人会自动回复 Chat ID。</p>
+            
+            <h3>Q: 多个项目同时发消息怎么区分？</h3>
+            <p>使用「引用回复」功能。系统会在每条消息前添加 <code>[#short_id project_name]</code> 标识，用户引用回复时会自动匹配。</p>
+            
+            <h3>Q: 超时后会怎样？</h3>
+            <p>会话会自动清理，AI 会收到超时状态。如果用户之后再回复，机器人会提示该会话已过期。</p>
+            
+            <h3>Q: 如何配置不同群组的提示消息？</h3>
+            <p>访问 <a href="/admin" style="color: var(--primary-color);">管理台</a>，在"空闲提示配置"标签页中为不同的 Chat ID 配置自定义消息。</p>
+            
+            <div class="alert alert-info">
+                <h4>📞 需要帮助？</h4>
+                <p>如果遇到其他问题，请查看 <a href="/" style="color: var(--primary-color);">首页</a> 或访问 <a href="/admin" style="color: var(--primary-color);">管理台</a> 查看系统状态。</p>
+            </div>
+        </section>
+    </div>
+
+    <!-- 页脚 -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <p>&copy; 2026 HITL-Walle. 内部使用.</p>
+                <ul class="footer-links">
+                    <li><a href="/">首页</a></li>
+                    <li><a href="/docs">使用文档</a></li>
+                    <li><span style="color: var(--text-secondary);">|</span></li>
+                    <li style="color: var(--text-secondary);">联系我：kongjie</li>
+                </ul>
+            </div>
+        </div>
+    </footer>
+
+    <script src="/static/js/main.js"></script>
+</body>
+</html>

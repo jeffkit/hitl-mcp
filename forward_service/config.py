@@ -60,25 +60,97 @@ class Config:
     callback_auth_key: str = ""
     callback_auth_value: str = ""
     
+    # 配置文件路径
+    config_file: str = ""
+    
     def __post_init__(self):
-        """从环境变量加载配置"""
-        self.bot_key = os.getenv("FORWARD_BOT_KEY", self.bot_key)
-        self.forward_url = os.getenv("FORWARD_URL", self.forward_url)
-        self.port = int(os.getenv("FORWARD_PORT", str(self.port)))
-        self.timeout = int(os.getenv("FORWARD_TIMEOUT", str(self.timeout)))
+        """加载配置（优先级：JSON 配置文件 > 环境变量 > 默认值）"""
+        # 1. 先从 JSON 配置文件加载
+        self._load_config_file()
+        
+        # 2. 环境变量可覆盖配置文件的值
+        if os.getenv("FORWARD_BOT_KEY"):
+            self.bot_key = os.getenv("FORWARD_BOT_KEY")
+        if os.getenv("FORWARD_URL"):
+            self.forward_url = os.getenv("FORWARD_URL")
+        if os.getenv("FORWARD_PORT"):
+            self.port = int(os.getenv("FORWARD_PORT"))
+        if os.getenv("FORWARD_TIMEOUT"):
+            self.timeout = int(os.getenv("FORWARD_TIMEOUT"))
         
         # 回调鉴权
-        self.callback_auth_key = os.getenv("CALLBACK_AUTH_KEY", "")
-        self.callback_auth_value = os.getenv("CALLBACK_AUTH_VALUE", "")
+        self.callback_auth_key = os.getenv("CALLBACK_AUTH_KEY", self.callback_auth_key)
+        self.callback_auth_value = os.getenv("CALLBACK_AUTH_VALUE", self.callback_auth_value)
         
-        # 解析转发规则
+        # 解析环境变量中的转发规则（会与配置文件规则合并）
         rules_str = os.getenv("FORWARD_RULES", "")
         if rules_str:
             try:
-                self.forward_rules = json.loads(rules_str)
-                logger.info(f"已加载 {len(self.forward_rules)} 条转发规则")
+                env_rules = json.loads(rules_str)
+                self.forward_rules.update(env_rules)
+                logger.info(f"从环境变量加载了 {len(env_rules)} 条转发规则")
             except json.JSONDecodeError as e:
                 logger.warning(f"解析 FORWARD_RULES 失败: {e}")
+        
+        # 从 data/forward_rules.json 加载规则（补充）
+        self._load_rules()
+    
+    def _get_config_file_path(self) -> str:
+        """获取主配置文件路径"""
+        # 支持通过环境变量指定配置文件
+        if os.getenv("FORWARD_CONFIG_FILE"):
+            return os.getenv("FORWARD_CONFIG_FILE")
+        # 默认在项目根目录
+        return os.path.join(os.path.dirname(__file__), "..", "forward_config.json")
+    
+    def _load_config_file(self):
+        """从 JSON 配置文件加载"""
+        config_file = self._get_config_file_path()
+        
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                self.bot_key = data.get("bot_key", self.bot_key)
+                self.forward_url = data.get("default_url", self.forward_url)
+                self.port = data.get("port", self.port)
+                self.timeout = data.get("timeout", self.timeout)
+                self.forward_rules = data.get("rules", self.forward_rules)
+                self.config_file = config_file
+                
+                logger.info(f"从 {config_file} 加载配置: bot_key={self.bot_key[:8]}..., rules={len(self.forward_rules)}")
+            except Exception as e:
+                logger.error(f"加载配置文件失败: {e}")
+        else:
+            logger.info(f"配置文件不存在: {config_file}，使用环境变量配置")
+    
+    def save_config(self):
+        """保存配置到 JSON 文件"""
+        config_file = self._get_config_file_path()
+        
+        try:
+            data = {
+                "bot_key": self.bot_key,
+                "port": self.port,
+                "timeout": self.timeout,
+                "default_url": self.forward_url,
+                "rules": self.forward_rules,
+                "description": "Forward Service - 反向消息流"
+            }
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            logger.info(f"配置已保存到 {config_file}")
+            return {"success": True, "message": "配置已保存"}
+        except Exception as e:
+            logger.error(f"保存配置失败: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def reload_config(self):
+        """重新加载配置"""
+        self._load_config_file()
+        self._load_rules()
+        return {"success": True, "message": "配置已重新加载"}
     
     def get_agent_config(self, chat_id: str) -> AgentConfig | None:
         """
@@ -149,6 +221,64 @@ class Config:
                     "type": "full"
                 }
         return result
+    
+    # ============== 规则管理方法（支持持久化） ==============
+    
+    def _get_rules_file_path(self) -> str:
+        """获取规则文件路径"""
+        return os.path.join(os.path.dirname(__file__), "..", "data", "forward_rules.json")
+    
+    def _save_rules(self):
+        """保存规则到文件"""
+        rules_file = self._get_rules_file_path()
+        os.makedirs(os.path.dirname(rules_file), exist_ok=True)
+        
+        try:
+            with open(rules_file, "w", encoding="utf-8") as f:
+                json.dump(self.forward_rules, f, ensure_ascii=False, indent=2)
+            logger.info(f"规则已保存到 {rules_file}")
+        except Exception as e:
+            logger.error(f"保存规则失败: {e}")
+    
+    def _load_rules(self):
+        """从文件加载规则"""
+        rules_file = self._get_rules_file_path()
+        
+        if os.path.exists(rules_file):
+            try:
+                with open(rules_file, "r", encoding="utf-8") as f:
+                    file_rules = json.load(f)
+                    # 合并文件规则（文件规则优先级低于环境变量）
+                    for chat_id, rule in file_rules.items():
+                        if chat_id not in self.forward_rules:
+                            self.forward_rules[chat_id] = rule
+                    logger.info(f"从 {rules_file} 加载了 {len(file_rules)} 条规则")
+            except Exception as e:
+                logger.error(f"加载规则文件失败: {e}")
+    
+    def add_rule(self, chat_id: str, rule: dict) -> dict:
+        """添加或更新转发规则"""
+        self.forward_rules[chat_id] = rule
+        self._save_rules()
+        return {"success": True, "message": f"规则已添加: {chat_id}"}
+    
+    def update_rule(self, chat_id: str, rule: dict) -> dict:
+        """更新转发规则"""
+        if chat_id not in self.forward_rules:
+            return {"success": False, "error": f"规则不存在: {chat_id}"}
+        
+        self.forward_rules[chat_id] = rule
+        self._save_rules()
+        return {"success": True, "message": f"规则已更新: {chat_id}"}
+    
+    def delete_rule(self, chat_id: str) -> dict:
+        """删除转发规则"""
+        if chat_id not in self.forward_rules:
+            return {"success": False, "error": f"规则不存在: {chat_id}"}
+        
+        del self.forward_rules[chat_id]
+        self._save_rules()
+        return {"success": True, "message": f"规则已删除: {chat_id}"}
     
     def validate(self) -> list[str]:
         """

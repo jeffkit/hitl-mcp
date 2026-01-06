@@ -9,13 +9,16 @@ HIL Server 主应用 (Human-in-the-Loop Server)
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from .config import config
 from .ws_manager import ws_manager
 from .storage import storage
-from .handlers import api_router, ws_router
+from .handlers import api_router, ws_router, admin_router
 
 # 配置日志
 logging.basicConfig(
@@ -68,22 +71,39 @@ async def lifespan(app: FastAPI):
     logger.info("HIL Server 关闭")
 
 
-# 创建 FastAPI 应用
+# 创建 FastAPI 应用（将 Swagger UI 移到 /api-docs）
 app = FastAPI(
     title="HIL Server",
     description="Human-in-the-Loop Server - 支持 Relay 和 Direct 两种模式",
     version="2.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/api-docs",
+    redoc_url="/api-redoc"
 )
 
 # 注册路由
 app.include_router(api_router)
 app.include_router(ws_router)
+app.include_router(admin_router)
+
+# 挂载静态文件
+website_dir = Path(__file__).parent.parent / "website"
+if website_dir.exists():
+    static_dir = website_dir / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
 @app.get("/")
 async def root():
-    """根路径"""
+    """根路径 - 返回首页"""
+    website_dir = Path(__file__).parent.parent / "website"
+    index_file = website_dir / "index.html"
+    
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    
+    # 如果首页不存在，返回 API 信息
     mode = config.effective_mode
     result = {
         "service": "HIL Server",
@@ -96,6 +116,18 @@ async def root():
         result["worker_connected"] = ws_manager.has_worker
     
     return result
+
+
+@app.get("/docs")
+async def docs_page():
+    """文档页面"""
+    website_dir = Path(__file__).parent.parent / "website"
+    docs_file = website_dir / "docs.html"
+    
+    if docs_file.exists():
+        return FileResponse(str(docs_file))
+    
+    return {"error": "Documentation not found"}
 
 
 @app.get("/health")

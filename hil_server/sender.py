@@ -10,17 +10,29 @@ from .config import config
 logger = logging.getLogger(__name__)
 
 
-def format_message_with_header(message: str, short_id: str, project_name: str | None = None) -> str:
+def format_message_with_header(message: str, short_id: str, project_name: str | None = None, wait_reply: bool = True) -> str:
     """
-    在消息前添加会话标识头
+    格式化消息
     
-    格式: [#short_id 项目名] 消息内容
+    - 如果有 short_id，在消息前添加会话标识头: [#short_id 项目名] 消息内容
+    - 如果没有 short_id（readonly 消息），不添加头部
+    - 如果 wait_reply=True，在消息底部添加「请回复」提示
     """
-    if project_name:
-        header = f"[#{short_id} {project_name}]"
-    else:
-        header = f"[#{short_id}]"
-    return f"{header}\n{message}"
+    formatted_message = message
+    
+    # 1. 添加会话标识头（仅当有 short_id 时）
+    if short_id:
+        if project_name:
+            header = f"[#{short_id} {project_name}]"
+        else:
+            header = f"[#{short_id}]"
+        formatted_message = f"{header}\n{formatted_message}"
+    
+    # 2. 添加「请回复」提示（仅当需要回复时）
+    if wait_reply:
+        formatted_message = f"{formatted_message}\n\n---\n📮 **请回复**"
+    
+    return formatted_message
 
 
 def send_to_wecom(
@@ -84,16 +96,20 @@ async def send_message_direct(
     chat_id: str,
     project_name: str | None = None,
     images: list[str] | None = None,
+    wait_reply: bool = True,
 ) -> dict:
     """
     直接发送消息（Direct 模式）
+    
+    Args:
+        wait_reply: 是否等待回复（影响消息格式）
     
     Returns:
         { success: bool, error?: str }
     """
     try:
-        # 添加会话标识头
-        formatted_message = format_message_with_header(message, short_id, project_name)
+        # 格式化消息（添加头部和回复提示）
+        formatted_message = format_message_with_header(message, short_id, project_name, wait_reply)
         
         # 发送文本消息
         send_to_wecom(

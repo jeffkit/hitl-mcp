@@ -349,6 +349,50 @@ async def admin_logs(limit: int = 20):
     }
 
 
+# ============== 规则管理 API ==============
+
+class RuleInput(BaseModel):
+    """规则输入模型"""
+    chat_id: str
+    url_template: str
+    agent_id: str = ""
+    api_key: str = ""
+    name: str = ""
+    timeout: int = 60
+
+
+@app.post("/admin/rules")
+async def add_rule(rule: RuleInput):
+    """添加转发规则"""
+    rule_data = {
+        "url_template": rule.url_template,
+        "agent_id": rule.agent_id,
+        "api_key": rule.api_key,
+        "name": rule.name,
+        "timeout": rule.timeout
+    }
+    return config.add_rule(rule.chat_id, rule_data)
+
+
+@app.put("/admin/rules/{chat_id}")
+async def update_rule(chat_id: str, rule: RuleInput):
+    """更新转发规则"""
+    rule_data = {
+        "url_template": rule.url_template,
+        "agent_id": rule.agent_id,
+        "api_key": rule.api_key,
+        "name": rule.name,
+        "timeout": rule.timeout
+    }
+    return config.update_rule(chat_id, rule_data)
+
+
+@app.delete("/admin/rules/{chat_id}")
+async def delete_rule(chat_id: str):
+    """删除转发规则"""
+    return config.delete_rule(chat_id)
+
+
 # ============== 回调处理 ==============
 
 @app.post("/callback")

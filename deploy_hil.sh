@@ -62,6 +62,7 @@ fi
 # 设置环境变量
 export HIL_PORT=$HIL_PORT
 export HIL_WORKER_TOKEN=""
+export FORWARD_SERVICE_URL="http://9.135.76.10:8083"
 
 # 启动新进程（后台运行，使用虚拟环境的 python）
 echo "启动 HIL Server..."
