@@ -14,7 +14,7 @@ import httpx
 import jwt
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 from pydantic import BaseModel
 
 from ..config import config
@@ -131,11 +131,8 @@ async def verify_auth(user: str = Depends(get_current_user)):
 
 @router.get("")
 async def admin_page():
-    """管理台页面"""
-    admin_html = STATIC_DIR / "admin.html"
-    if admin_html.exists():
-        return FileResponse(admin_html)
-    return {"error": "Admin page not found", "path": str(admin_html)}
+    """管理台页面 - 重定向到新版管理台"""
+    return RedirectResponse(url="/console", status_code=302)
 
 
 # ============== API 路由 ==============
@@ -698,92 +695,6 @@ async def delete_idle_hint_config(
             "success": False,
             "error": str(e)
         }
-
-
-# ============== 通用代理 API (支持所有 Forward Service API) ==============
-
-@router.api_route("/api/forward/proxy/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def proxy_to_forward(
-    path: str,
-    request: Request,
-    user: str = Depends(get_current_user)
-):
-    """
-    通用代理：透明转发到 Forward Service
-
-    使用场景：
-    - 前端: fetch('/admin/api/forward/proxy/admin/bots')
-    - 转发到: {FORWARD_SERVICE_URL}/admin/bots
-
-    支持 GET, POST, PUT, DELETE, PATCH 方法
-    自动处理 Direct 模式和 Relay 模式的差异
-    """
-    if not config.forward_service_url:
-        raise HTTPException(status_code=503, detail="Forward Service 未配置")
-
-    target_url = f"{config.forward_service_url}/{path}"
-
-    # 获取请求方法和 body
-    method = request.method
-    headers = {
-        k: v for k, v in request.headers.items()
-        if k.lower() not in ["host", "authorization"]  # 过滤掉认证头
-    }
-
-    # 处理 body
-    if request.method in ["POST", "PUT", "PATCH"]:
-        body = await request.body()
-    else:
-        body = None
-
-    # 根据 mode 选择转发方式
-    if config.is_direct_mode:
-        return await _http_proxy(method, target_url, headers, body)
-    else:
-        return await _ws_proxy(method, target_url, body)
-
-
-async def _http_proxy(method: str, url: str, headers: dict, body: bytes | None) -> dict:
-    """Direct 模式：直接 HTTP 请求"""
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.request(
-                method=method,
-                url=url,
-                headers=headers,
-                content=body
-            )
-            return response.json()
-    except httpx.HTTPStatusError as e:
-        logger.error(f"代理请求失败: {e.response.status_code}")
-        raise HTTPException(status_code=e.response.status_code, detail=f"代理失败: {e.response.text}")
-    except Exception as e:
-        logger.error(f"代理请求失败: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"代理失败: {str(e)}")
-
-
-async def _ws_proxy(method: str, url: str, body: bytes | None) -> dict:
-    """Relay 模式：通过 Worker 转发"""
-    if not ws_manager.has_worker:
-        raise HTTPException(status_code=503, detail="No worker connected")
-
-    try:
-        payload = {
-            "method": method,
-            "url": url
-        }
-        if body:
-            payload["body"] = body.decode("utf-8")
-
-        result = await ws_manager.send_request(
-            action="http_proxy",
-            payload=payload,
-            timeout=10
-        )
-        return result
-    except Exception as e:
-        logger.error(f"Worker 代理失败: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"代理失败: {str(e)}")
 
 
 # ============== Forward Config 管理（新增 - 多 Bot 支持） ==============
