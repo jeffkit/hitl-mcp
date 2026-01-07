@@ -210,7 +210,8 @@ async def forward_to_agent_with_bot(
     # 构建请求体（AgentStudio 格式）
     request_body = {"message": content}
     if session_id:
-        request_body["session_id"] = session_id
+        # 使用 camelCase 格式以匹配 Agent 期望
+        request_body["sessionId"] = session_id
     
     start_time = datetime.now()
     
