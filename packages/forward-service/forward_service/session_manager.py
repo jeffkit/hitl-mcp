@@ -191,16 +191,29 @@ class SessionManager:
             切换到的 UserSession，如果没找到返回 None
         """
         async with self._db_manager.get_session() as db:
-            # 查找目标会话
+            # 查找目标会话（使用 like 进行前缀匹配）
+            # 先尝试精确匹配 short_id
             result = await db.execute(
                 select(UserSession)
                 .where(and_(
                     UserSession.user_id == user_id,
                     UserSession.chat_id == chat_id,
-                    UserSession.short_id.startswith(short_id)
+                    UserSession.short_id == short_id
                 ))
             )
             target = result.scalar_one_or_none()
+            
+            # 如果精确匹配没找到，尝试用 session_id 前缀匹配
+            if not target:
+                result = await db.execute(
+                    select(UserSession)
+                    .where(and_(
+                        UserSession.user_id == user_id,
+                        UserSession.chat_id == chat_id,
+                        UserSession.session_id.like(f"{short_id}%")
+                    ))
+                )
+                target = result.scalar_one_or_none()
             
             if not target:
                 return None
