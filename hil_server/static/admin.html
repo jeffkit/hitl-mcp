@@ -1238,6 +1238,24 @@ DEFAULT_CHAT_ID={chat_id}
             return await response.json();
         }
 
+        async function putData(endpoint, data) {
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify(data)
+            });
+            
+            if (response.status === 401) {
+                logout();
+                throw new Error('登录已过期');
+            }
+            
+            return await response.json();
+        }
+
         async function deleteData(endpoint) {
             const response = await fetch(`${API_BASE}${endpoint}`, {
                 method: 'DELETE',
