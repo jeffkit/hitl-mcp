@@ -86,8 +86,11 @@ app.include_router(api_router)
 app.include_router(ws_router)
 app.include_router(admin_router)
 
-# 挂载静态文件
-website_dir = Path(__file__).parent.parent / "website"
+# 仓库根目录（packages/hil-server/hil_server/app.py -> 根目录）
+REPO_ROOT = Path(__file__).parent.parent.parent.parent
+
+# 挂载静态文件（website 在仓库根目录）
+website_dir = REPO_ROOT / "website"
 if website_dir.exists():
     static_dir = website_dir / "static"
     if static_dir.exists():
@@ -102,7 +105,7 @@ if console_dir.exists():
 @app.get("/")
 async def root():
     """根路径 - 返回首页"""
-    website_dir = Path(__file__).parent.parent / "website"
+    website_dir = REPO_ROOT / "website"
     index_file = website_dir / "index.html"
     
     if index_file.exists():
@@ -139,7 +142,7 @@ async def console_spa(path: str = ""):
 @app.get("/docs")
 async def docs_page():
     """文档页面"""
-    website_dir = Path(__file__).parent.parent / "website"
+    website_dir = REPO_ROOT / "website"
     docs_file = website_dir / "docs.html"
     
     if docs_file.exists():
