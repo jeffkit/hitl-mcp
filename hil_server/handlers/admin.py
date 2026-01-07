@@ -229,6 +229,25 @@ async def get_forward_rules(user: str = Depends(get_current_user)):
     return await _get_forward_service_rules()
 
 
+
+@router.get("/api/forward/config")
+async def get_forward_config(user: str = Depends(get_current_user)):
+    """获取 Forward Service 完整配置（需要登录）"""
+    return await _get_forward_service_config()
+
+
+@router.put("/api/forward/config")
+async def update_forward_config(request: Request, user: str = Depends(get_current_user)):
+    """更新 Forward Service 完整配置（需要登录）"""
+    data = await request.json()
+    return await _update_forward_service_config(data)
+
+
+@router.post("/api/forward/config/reload")
+async def reload_forward_config(user: str = Depends(get_current_user)):
+    """重新加载 Forward Service 配置（需要登录）"""
+    return await _reload_forward_service_config()
+
 # ============== 转发规则管理 API ==============
 
 @router.post("/api/forward/rules")
@@ -679,3 +698,125 @@ async def delete_idle_hint_config(
             "success": False,
             "error": str(e)
         }
+
+
+# ============== Forward Config 管理（新增 - 多 Bot 支持） ==============
+
+async def _get_forward_service_config() -> dict:
+    """获取 Forward Service 完整配置"""
+    if not config.forward_service_url:
+        return {"error": "FORWARD_SERVICE_URL not configured"}
+    
+    if config.is_direct_mode:
+        return await _http_get_forward_config()
+    else:
+        return await _ws_get_forward_config()
+
+
+async def _update_forward_service_config(config_data: dict) -> dict:
+    """更新 Forward Service 配置"""
+    if not config.forward_service_url:
+        return {"error": "FORWARD_SERVICE_URL not configured"}
+    
+    if config.is_direct_mode:
+        return await _http_update_forward_config(config_data)
+    else:
+        return await _ws_update_forward_config(config_data)
+
+
+async def _reload_forward_service_config() -> dict:
+    """重新加载 Forward Service 配置"""
+    if not config.forward_service_url:
+        return {"error": "FORWARD_SERVICE_URL not configured"}
+    
+    if config.is_direct_mode:
+        return await _http_reload_forward_config()
+    else:
+        return await _ws_reload_forward_config()
+
+
+async def _http_get_forward_config() -> dict:
+    """通过 HTTP 获取 Forward Service 完整配置"""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{config.forward_service_url}/admin/config")
+            if response.status_code == 200:
+                return response.json()
+            return {"error": f"HTTP {response.status_code}"}
+    except Exception as e:
+        logger.warning(f"获取 Forward Service 配置失败: {e}")
+        return {"error": str(e)}
+
+
+async def _http_update_forward_config(config_data: dict) -> dict:
+    """通过 HTTP 更新 Forward Service 配置"""
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.put(
+                f"{config.forward_service_url}/admin/config",
+                json=config_data
+            )
+            if response.status_code == 200:
+                return response.json()
+            return {"error": f"HTTP {response.status_code}"}
+    except Exception as e:
+        logger.warning(f"更新 Forward Service 配置失败: {e}")
+        return {"error": str(e)}
+
+
+async def _http_reload_forward_config() -> dict:
+    """通过 HTTP 重新加载 Forward Service 配置"""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.post(f"{config.forward_service_url}/admin/config/reload")
+            if response.status_code == 200:
+                return response.json()
+            return {"error": f"HTTP {response.status_code}"}
+    except Exception as e:
+        logger.warning(f"重新加载 Forward Service 配置失败: {e}")
+        return {"error": str(e)}
+
+
+async def _ws_get_forward_config() -> dict:
+    """通过 Worker 代理获取 Forward Service 配置"""
+    try:
+        response = await ws_manager.send_request(
+            action="http_get",
+            payload={"url": f"{config.forward_service_url}/admin/config"},
+            timeout=5
+        )
+        return response
+    except Exception as e:
+        logger.warning(f"通过 Worker 获取 Forward Service 配置失败: {e}")
+        return {"error": str(e)}
+
+
+async def _ws_update_forward_config(config_data: dict) -> dict:
+    """通过 Worker 代理更新 Forward Service 配置"""
+    try:
+        response = await ws_manager.send_request(
+            action="http_put",
+            payload={
+                "url": f"{config.forward_service_url}/admin/config",
+                "data": config_data
+            },
+            timeout=10
+        )
+        return response
+    except Exception as e:
+        logger.warning(f"通过 Worker 更新 Forward Service 配置失败: {e}")
+        return {"error": str(e)}
+
+
+async def _ws_reload_forward_config() -> dict:
+    """通过 Worker 代理重新加载 Forward Service 配置"""
+    try:
+        response = await ws_manager.send_request(
+            action="http_post",
+            payload={"url": f"{config.forward_service_url}/admin/config/reload"},
+            timeout=5
+        )
+        return response
+    except Exception as e:
+        logger.warning(f"通过 Worker 重新加载 Forward Service 配置失败: {e}")
+        return {"error": str(e)}

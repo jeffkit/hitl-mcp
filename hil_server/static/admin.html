@@ -886,7 +886,8 @@
                 <div class="tabs">
                     <div class="tab active" onclick="switchTab('sessions')">HIL 会话</div>
                     <div class="tab" onclick="switchTab('logs')">Forward 日志</div>
-                    <div class="tab" onclick="switchTab('rules')">转发规则</div>
+                    <div class="tab" onclick="switchTab('rules')">转发规则（旧）</div>
+                    <div class="tab" onclick="switchTab('bot-config')">Bot 配置</div>
                     <div class="tab" onclick="switchTab('idle-hint')">空闲提示配置</div>
                 </div>
             </div>
@@ -934,6 +935,46 @@
             </div>
 
             <!-- 空闲提示配置 -->
+            <!-- Bot 配置 -->
+            <div id="bot-config-panel" class="data-table" style="display: none;">
+                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary); font-size: 13px;">配置多个 Bot 及其访问控制（JSON 格式编辑）</span>
+                    <div>
+                        <button class="btn" onclick="saveBotConfig()" style="margin-right: 8px;">💾 保存配置</button>
+                        <button class="btn" onclick="reloadBotConfig()">🔄 重新加载</button>
+                    </div>
+                </div>
+
+                <div style="padding: 20px;">
+                    <div style="margin-bottom: 12px; color: var(--text-secondary); font-size: 13px;">
+                        编辑 <code style="background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px;">data/forward_bots.json</code> 配置文件
+                    </div>
+                    
+                    <textarea id="bot-config-editor" style="
+                        width: 100%;
+                        min-height: 600px;
+                        background: var(--bg-primary);
+                        border: 1px solid var(--border-color);
+                        border-radius: 8px;
+                        padding: 16px;
+                        color: var(--text-primary);
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 13px;
+                        line-height: 1.6;
+                        resize: vertical;
+                    " placeholder="加载中..."></textarea>
+                    
+                    <div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border-radius: 6px; font-size: 12px; color: var(--text-secondary); line-height: 1.8;">
+                        <strong style="color: var(--accent-blue);">配置说明：</strong><br>
+                        • <strong>default_bot_key</strong>: 默认 Bot Key（兜底机器人）<br>
+                        • <strong>bots</strong>: Bot 配置对象，key 为 bot_key<br>
+                        • <strong>access_control.mode</strong>: allow_all（允许所有）/ whitelist（白名单）/ blacklist（黑名单）<br>
+                        • <strong>forward_config.url_template</strong>: 支持 {agent_id} 占位符<br>
+                        • <strong>enabled</strong>: 是否启用该 Bot
+                    </div>
+                </div>
+            </div>
+
             <div id="idle-hint-panel" class="data-table" style="display: none;">
                 <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-color);">
                     <span style="color: var(--text-secondary); font-size: 13px;">配置当用户发送消息但机器人未在等待回复时的自动回复消息（支持热更新）</span>
@@ -1532,11 +1573,13 @@ DEFAULT_CHAT_ID={chat_id}
             document.getElementById('sessions-panel').style.display = tab === 'sessions' ? 'block' : 'none';
             document.getElementById('logs-panel').style.display = tab === 'logs' ? 'block' : 'none';
             document.getElementById('rules-panel').style.display = tab === 'rules' ? 'block' : 'none';
+            document.getElementById('bot-config-panel').style.display = tab === 'bot-config' ? 'block' : 'none';
             document.getElementById('idle-hint-panel').style.display = tab === 'idle-hint' ? 'block' : 'none';
 
             if (tab === 'sessions') loadSessions();
             else if (tab === 'logs') loadLogs();
             else if (tab === 'rules') loadRules();
+            else if (tab === 'bot-config') loadBotConfig();
             else if (tab === 'idle-hint') loadIdleHintConfigs();
         }
 
@@ -1665,6 +1708,93 @@ DEFAULT_CHAT_ID={chat_id}
                 alert('保存失败: ' + error.message);
             }
         });
+
+        // ============== Bot 配置相关 ==============
+        async function loadBotConfig() {
+            const editor = document.getElementById('bot-config-editor');
+            
+            try {
+                const data = await fetchData('/admin/api/forward/config');
+                
+                if (data.error) {
+                    editor.value = `错误: ${data.error}`;
+                    return;
+                }
+                
+                // 格式化 JSON（美化显示）
+                editor.value = JSON.stringify(data, null, 2);
+            } catch (error) {
+                editor.value = `加载失败: ${error.message}`;
+            }
+        }
+
+        async function saveBotConfig() {
+            const editor = document.getElementById('bot-config-editor');
+            const content = editor.value;
+            
+            try {
+                // 验证 JSON 格式
+                const configData = JSON.parse(content);
+                
+                // 验证必要字段
+                if (!configData.default_bot_key) {
+                    alert('❌ 配置错误：缺少 default_bot_key 字段');
+                    return;
+                }
+                
+                if (!configData.bots || typeof configData.bots !== 'object') {
+                    alert('❌ 配置错误：缺少 bots 字段或格式不正确');
+                    return;
+                }
+                
+                if (Object.keys(configData.bots).length === 0) {
+                    alert('❌ 配置错误：至少需要配置一个 Bot');
+                    return;
+                }
+                
+                // 确认保存
+                if (!confirm('确定要保存配置吗？服务会自动重新加载配置。')) {
+                    return;
+                }
+                
+                // 发送到服务器
+                const result = await putData('/admin/api/forward/config', configData);
+                
+                if (result.success) {
+                    alert('✅ 配置已保存并生效');
+                    await loadBotConfig();
+                    await loadOverview();  // 刷新概览
+                } else {
+                    alert('❌ 保存失败: ' + (result.error || '未知错误'));
+                }
+            } catch (e) {
+                if (e instanceof SyntaxError) {
+                    alert('❌ JSON 格式错误: ' + e.message);
+                } else {
+                    alert('❌ 保存失败: ' + e.message);
+                }
+            }
+        }
+
+        async function reloadBotConfig() {
+            if (!confirm('确定要重新加载配置吗？将从文件读取最新配置。')) {
+                return;
+            }
+            
+            try {
+                const result = await postData('/admin/api/forward/config/reload', {});
+                
+                if (result.success) {
+                    alert('✅ 配置已重新加载');
+                    await loadBotConfig();
+                    await loadOverview();
+                } else {
+                    alert('❌ 重新加载失败: ' + (result.error || '未知错误'));
+                }
+            } catch (e) {
+                alert('❌ 重新加载失败: ' + e.message);
+            }
+        }
 
         // ============== 空闲提示配置相关 ==============
         let editingIdleHintChatId = null;
