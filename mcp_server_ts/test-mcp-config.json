@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "wecom-hil-ts-test": {
+      "command": "node",
+      "args": [
+        "/Users/kongjie/projects/hil-mcp/mcp_server_ts/dist/index.js",
+        "--service-url",
+        "https://hitl.woa.com/api",
+        "--chat-id",
+        "wokSFfCgAAimChUpCX7QnUR8_mlwkU3A",
+        "--timeout",
+        "3600"
+      ],
+      "env": {
+        "http_proxy": "",
+        "https_proxy": "",
+        "all_proxy": ""
+      }
+    }
+  },
+  "_comment": [
+    "测试配置 - 将此配置添加到 ~/.cursor/mcp.json 中",
+    "重启 Cursor 后即可测试 TypeScript 版本的 MCP Server"
+  ]
+}

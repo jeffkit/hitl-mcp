@@ -1,0 +1,31 @@
+{
+  "mcpServers": {
+    "wecom-hil-ts": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@hitl/mcp-server",
+        "--service-url", "http://hitl.woa.com/api",
+        "--chat-id", "your-chat-id-here",
+        "--project-name", "my-project"
+      ],
+      "env": {
+        "http_proxy": "",
+        "https_proxy": "",
+        "all_proxy": ""
+      }
+    }
+  },
+  "_comment": [
+    "这是 TypeScript 版本的 MCP 配置示例。",
+    "将此配置添加到 ~/.cursor/mcp.json 中。",
+    "",
+    "注意事项：",
+    "1. 将 'your-chat-id-here' 替换为你的实际 Chat ID",
+    "2. 将 'http://hitl.woa.com/api' 替换为你的 HIL Server 地址",
+    "3. 如果在内网环境，确保禁用代理（http_proxy 等设置为空字符串）",
+    "",
+    "本地开发时的配置：",
+    "将 command 设为 'node'，args 第一项设为项目的 dist/index.js 绝对路径"
+  ]
+}

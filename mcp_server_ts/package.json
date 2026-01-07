@@ -1,0 +1,59 @@
+{
+  "name": "@hitl/mcp-server",
+  "version": "0.2.1",
+  "description": "Human-in-the-Loop MCP Server for WeCom (企业微信) - TypeScript Implementation",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "hitl-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "pnpm run build",
+    "typecheck": "tsc --noEmit",
+    "test": "node dist/index.js --help",
+    "test:logic": "tsx test-logic.ts"
+  },
+  "keywords": [
+    "mcp",
+    "wecom",
+    "wechat",
+    "enterprise-wechat",
+    "human-in-the-loop",
+    "hitl",
+    "ai",
+    "claude",
+    "cursor",
+    "typescript",
+    "model-context-protocol"
+  ],
+  "author": "Kong Jie",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/hil-mcp.git",
+    "directory": "mcp_server_ts"
+  },
+  "homepage": "https://github.com/user/hil-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/user/hil-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "commander": "^12.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

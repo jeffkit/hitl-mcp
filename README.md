@@ -79,7 +79,18 @@ HIL Server 通过配置自动选择模式：
 
 ## 快速开始（MCP 客户端配置）
 
-### 方式一：使用 uvx（推荐）
+本项目提供了 **Python 版**和 **TypeScript 版**两种实现，功能完全一致，可根据环境选择：
+
+| 版本 | 推荐场景 | 安装方式 |
+|------|---------|---------|
+| **Python 版** | Python 环境友好，uvx 一键运行 | `uvx hil-mcp` |
+| **TypeScript 版** | Node.js 环境友好，npx 一键运行 | `npx @hitl/mcp-server` |
+
+---
+
+### Python 版
+
+#### 方式一：使用 uvx（推荐）
 
 > `uvx` 是 Python 生态中的 `npx`，无需预先安装包，直接运行。
 
@@ -106,7 +117,7 @@ HIL Server 通过配置自动选择模式：
 }
 ```
 
-### 方式二：使用 pipx
+#### 方式二：使用 pipx
 
 ```json
 {
@@ -129,7 +140,7 @@ HIL Server 通过配置自动选择模式：
 }
 ```
 
-### 方式三：传统方式（pip install）
+#### 方式三：传统方式（pip install）
 
 ```bash
 pip install hil-mcp
@@ -155,6 +166,104 @@ pip install hil-mcp
   }
 }
 ```
+
+---
+
+### TypeScript 版
+
+#### 方式一：使用 npx（推荐）
+
+> 无需预先安装，直接运行。适合 Node.js 环境。
+
+在 Cursor 的 MCP 配置文件中添加（`~/.cursor/mcp.json`）：
+
+```json
+{
+  "mcpServers": {
+    "wecom-hil-ts": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@hitl/mcp-server",
+        "--service-url", "http://hitl.woa.com/api",
+        "--chat-id", "your-chat-id",
+        "--project-name", "my-project"
+      ],
+      "env": {
+        "http_proxy": "",
+        "https_proxy": "",
+        "all_proxy": ""
+      }
+    }
+  }
+}
+```
+
+#### 方式二：全局安装
+
+```bash
+# 使用 pnpm（推荐）
+pnpm add -g @hitl/mcp-server
+
+# 或使用 npm
+npm install -g @hitl/mcp-server
+```
+
+然后配置：
+
+```json
+{
+  "mcpServers": {
+    "wecom-hil-ts": {
+      "command": "hitl-mcp",
+      "args": [
+        "--service-url", "http://hitl.woa.com/api",
+        "--chat-id", "your-chat-id"
+      ],
+      "env": {
+        "http_proxy": "",
+        "https_proxy": "",
+        "all_proxy": ""
+      }
+    }
+  }
+}
+```
+
+#### 方式三：从源码运行（开发）
+
+```bash
+git clone https://github.com/user/hil-mcp.git
+cd hil-mcp/mcp_server_ts
+pnpm install
+pnpm run build
+```
+
+然后配置：
+
+```json
+{
+  "mcpServers": {
+    "wecom-hil-ts": {
+      "command": "node",
+      "args": [
+        "/path/to/hil-mcp/mcp_server_ts/dist/index.js",
+        "--service-url", "http://hitl.woa.com/api",
+        "--chat-id", "your-chat-id"
+      ],
+      "env": {
+        "http_proxy": "",
+        "https_proxy": "",
+        "all_proxy": ""
+      }
+    }
+  }
+}
+```
+
+> 📖 TypeScript 版详细文档：[mcp_server_ts/README.md](./mcp_server_ts/README.md)
+
+---
 
 ### 命令行参数说明
 
@@ -627,10 +736,20 @@ hil-mcp/
 │   ├── sender.py           # 消息发送（调用 fly-pigeon）
 │   └── callback_handler.py # 回调转发
 │
-├── mcp_server/             # MCP 客户端
+├── mcp_server/             # MCP 客户端（Python 版）
 │   ├── server.py           # MCP Server
 │   ├── config.py           # 配置管理
 │   └── wecom_client.py     # API 客户端
+│
+├── mcp_server_ts/          # MCP 客户端（TypeScript 版）
+│   ├── src/
+│   │   ├── index.ts        # 入口文件（命令行解析）
+│   │   ├── server.ts       # MCP Server 主程序
+│   │   ├── config.ts       # 配置管理
+│   │   └── wecom-client.ts # HTTP 客户端
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── README.md           # TypeScript 版详细文档
 │
 ├── forward_service/        # Forward Service（消息转发服务）
 │   ├── app.py              # FastAPI 应用
@@ -640,7 +759,8 @@ hil-mcp/
 ├── deploy_hil.sh           # HIL Server 部署脚本（示例）
 ├── deploy_worker.sh        # DevCloud Worker 部署脚本（示例）
 ├── deploy_forward.sh       # Forward Service 部署脚本（示例）
-└── requirements.txt        # Python 依赖
+├── requirements.txt        # Python 依赖
+└── pyproject.toml          # Python 项目配置
 ```
 
 ---
