@@ -482,11 +482,13 @@ async def _http_get_forward_logs(limit: int) -> dict:
         async with httpx.AsyncClient(timeout=5) as client:
             response = await client.get(f"{config.forward_service_url}/admin/logs?limit={limit}")
             if response.status_code == 200:
-                return response.json()
-            return {"error": f"HTTP {response.status_code}"}
+                data = response.json()
+                # 添加 success 字段以适配前端
+                return {"success": True, "logs": data.get("logs", [])}
+            return {"success": False, "error": f"HTTP {response.status_code}", "logs": []}
     except Exception as e:
         logger.warning(f"获取 Forward Service 日志失败: {e}")
-        return {"error": str(e)}
+        return {"success": False, "error": str(e), "logs": []}
 
 
 async def _http_get_forward_rules() -> dict:
@@ -594,17 +596,19 @@ async def _ws_get_forward_status() -> dict:
 async def _ws_get_forward_logs(limit: int) -> dict:
     """通过 Worker 代理获取 Forward Service 日志"""
     if not ws_manager.has_worker:
-        return {"error": "No worker connected"}
+        return {"success": False, "error": "No worker connected", "logs": []}
     
     try:
-        return await ws_manager.send_request(
+        data = await ws_manager.send_request(
             action="get_forward_logs",
             payload={"url": config.forward_service_url, "limit": limit},
             timeout=10
         )
+        # 添加 success 字段以适配前端
+        return {"success": True, "logs": data.get("logs", [])}
     except Exception as e:
         logger.warning(f"通过 Worker 获取 Forward Service 日志失败: {e}")
-        return {"error": str(e)}
+        return {"success": False, "error": str(e), "logs": []}
 
 
 async def _ws_get_forward_rules() -> dict:
