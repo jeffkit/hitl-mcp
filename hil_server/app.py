@@ -93,6 +93,11 @@ if website_dir.exists():
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+# 挂载新版管理台（React）
+console_dir = Path(__file__).parent / "console" / "dist"
+if console_dir.exists():
+    app.mount("/console/assets", StaticFiles(directory=str(console_dir / "assets")), name="console-assets")
+
 
 @app.get("/")
 async def root():
@@ -116,6 +121,19 @@ async def root():
         result["worker_connected"] = ws_manager.has_worker
     
     return result
+
+
+@app.get("/console/{path:path}")
+@app.get("/console")
+async def console_spa(path: str = ""):
+    """新版管理台（React SPA）- 所有路由返回 index.html"""
+    console_dir = Path(__file__).parent / "console" / "dist"
+    index_file = console_dir / "index.html"
+    
+    if index_file.exists():
+        return FileResponse(str(index_file))
+    
+    return {"error": "Console not found. Run 'pnpm build' in hil_server/console/"}
 
 
 @app.get("/docs")
