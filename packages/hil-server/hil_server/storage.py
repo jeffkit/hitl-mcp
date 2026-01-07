@@ -5,13 +5,21 @@ Relay Server 存储模块
 1. 待处理的请求（等待 Worker 响应）
 2. 会话数据（等待用户回复）
 3. 回调匹配逻辑
+
+支持数据库持久化（可选）
 """
 import asyncio
 import uuid
 import re
+import logging
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field, asdict
 from typing import Any
+
+from sqlalchemy import select, update, and_
+from sqlalchemy.orm import selectinload
+
+logger = logging.getLogger(__name__)
 
 # 匹配消息中的会话标识 [#short_id] 或 [#short_id 项目名]
 SESSION_ID_PATTERN = re.compile(r'\[#([a-f0-9]{8})(?:\s+[^\]]+)?\]')
@@ -179,18 +187,89 @@ def extract_reply_from_callback(data: dict) -> tuple[Reply, str | None]:
 
 
 class RelayStorage:
-    """Relay Server 存储管理器"""
+    """
+    Relay Server 存储管理器
     
-    def __init__(self):
+    支持两种模式：
+    1. 内存模式（默认）：会话存储在内存中，重启丢失
+    2. 数据库模式：会话持久化到数据库，重启后可恢复
+    
+    设置环境变量 HIL_USE_DATABASE=true 启用数据库模式
+    """
+    
+    def __init__(self, use_database: bool = False):
         # 待处理的请求 (request_id -> PendingRequest)
         self._pending_requests: dict[str, PendingRequest] = {}
-        # 会话数据 (session_id -> Session)
+        # 会话数据 (session_id -> Session) - 内存缓存
         self._sessions: dict[str, Session] = {}
         # short_id -> session_id 映射
         self._short_id_map: dict[str, str] = {}
         # chat_id -> list[session_id] 映射（同一个 chat 可能有多个等待中的会话）
         self._chat_id_map: dict[str, list[str]] = {}
         self._lock = asyncio.Lock()
+        
+        # 数据库模式
+        self._use_database = use_database
+        self._db_manager = None
+    
+    async def init_database(self):
+        """初始化数据库连接"""
+        if not self._use_database:
+            return
+        
+        from .database import init_database, get_db_manager
+        from .models import HILSession
+        
+        await init_database()
+        self._db_manager = get_db_manager()
+        
+        # 从数据库加载等待中的会话到内存缓存
+        await self._load_waiting_sessions()
+        logger.info("数据库模式已启用，等待中的会话已加载到内存")
+    
+    async def _load_waiting_sessions(self):
+        """从数据库加载等待中的会话"""
+        if not self._db_manager:
+            return
+        
+        from .models import HILSession
+        
+        async with self._db_manager.session() as db:
+            result = await db.execute(
+                select(HILSession)
+                .where(
+                    and_(
+                        HILSession.status == "waiting",
+                        HILSession.expire_at > datetime.now()
+                    )
+                )
+                .options(selectinload(HILSession.replies))
+            )
+            db_sessions = result.scalars().all()
+            
+            for db_session in db_sessions:
+                session = Session(
+                    session_id=db_session.session_id,
+                    short_id=db_session.short_id,
+                    chat_id=db_session.chat_id,
+                    chat_type=db_session.chat_type,
+                    message=db_session.message,
+                    project_name=db_session.project_name,
+                    images=db_session.images or [],
+                    status=db_session.status,
+                    replies=[r.to_dict() for r in db_session.replies],
+                    created_at=db_session.created_at,
+                    expire_at=db_session.expire_at
+                )
+                
+                self._sessions[session.session_id] = session
+                self._short_id_map[session.short_id] = session.session_id
+                
+                if session.chat_id not in self._chat_id_map:
+                    self._chat_id_map[session.chat_id] = []
+                self._chat_id_map[session.chat_id].append(session.session_id)
+            
+            logger.info(f"从数据库加载了 {len(db_sessions)} 个等待中的会话")
     
     # ========== 请求管理 ==========
     
@@ -246,6 +325,7 @@ class RelayStorage:
         async with self._lock:
             session_id = str(uuid.uuid4())
             short_id = session_id[:8]
+            expire_at = datetime.now() + timedelta(seconds=timeout)
             
             session = Session(
                 session_id=session_id,
@@ -255,9 +335,27 @@ class RelayStorage:
                 message=message,
                 project_name=project_name,
                 images=images or [],
-                expire_at=datetime.now() + timedelta(seconds=timeout)
+                expire_at=expire_at
             )
             
+            # 保存到数据库（如果启用）
+            if self._db_manager:
+                from .models import HILSession
+                async with self._db_manager.session() as db:
+                    db_session = HILSession(
+                        session_id=session_id,
+                        short_id=short_id,
+                        chat_id=chat_id,
+                        chat_type=chat_type,
+                        message=message,
+                        project_name=project_name,
+                        images=images or [],
+                        status="waiting",
+                        expire_at=expire_at
+                    )
+                    db.add(db_session)
+            
+            # 添加到内存缓存
             self._sessions[session_id] = session
             self._short_id_map[short_id] = session_id
             
@@ -300,8 +398,32 @@ class RelayStorage:
             if not session:
                 return False
             
-            session.replies.append(asdict(reply))
+            reply_dict = asdict(reply)
+            session.replies.append(reply_dict)
             session.status = "replied"
+            
+            # 更新数据库（如果启用）
+            if self._db_manager:
+                from .models import HILSession, HILReply
+                async with self._db_manager.session() as db:
+                    # 更新会话状态
+                    await db.execute(
+                        update(HILSession)
+                        .where(HILSession.session_id == session_id)
+                        .values(status="replied", updated_at=datetime.now())
+                    )
+                    
+                    # 添加回复记录
+                    db_reply = HILReply(
+                        session_id=session_id,
+                        msg_type=reply.msg_type,
+                        content=reply.content,
+                        image_url=reply.image_url,
+                        from_user=reply.from_user,
+                        raw_data=reply.raw_data,
+                        timestamp=datetime.fromisoformat(reply.timestamp) if isinstance(reply.timestamp, str) else reply.timestamp
+                    )
+                    db.add(db_reply)
             
             # 清理映射
             self._short_id_map.pop(session.short_id, None)
@@ -321,6 +443,16 @@ class RelayStorage:
                 return False
             
             session.status = "timeout"
+            
+            # 更新数据库（如果启用）
+            if self._db_manager:
+                from .models import HILSession
+                async with self._db_manager.session() as db:
+                    await db.execute(
+                        update(HILSession)
+                        .where(HILSession.session_id == session_id)
+                        .values(status="timeout", updated_at=datetime.now())
+                    )
             
             # 清理映射
             self._short_id_map.pop(session.short_id, None)
@@ -405,7 +537,7 @@ class RelayStorage:
             for rid in expired_requests:
                 self.fail_request(rid, "Request timeout")
             
-            # 清理过期的会话
+            # 清理过期的会话（内存）
             expired_sessions = [
                 sid for sid, s in self._sessions.items()
                 if s.expire_at < now
@@ -419,7 +551,87 @@ class RelayStorage:
                             self._chat_id_map[session.chat_id].remove(sid)
                         except ValueError:
                             pass
+            
+            # 清理过期的会话（数据库）
+            if self._db_manager and expired_sessions:
+                from .models import HILSession
+                async with self._db_manager.session() as db:
+                    await db.execute(
+                        update(HILSession)
+                        .where(
+                            and_(
+                                HILSession.status == "waiting",
+                                HILSession.expire_at < now
+                            )
+                        )
+                        .values(status="expired", updated_at=now)
+                    )
+    
+    async def get_all_sessions(self, limit: int = 100, offset: int = 0) -> list[dict]:
+        """
+        获取所有会话（用于管理台展示）
+        
+        优先从数据库获取，否则从内存获取
+        """
+        if self._db_manager:
+            from .models import HILSession
+            async with self._db_manager.session() as db:
+                result = await db.execute(
+                    select(HILSession)
+                    .options(selectinload(HILSession.replies))
+                    .order_by(HILSession.created_at.desc())
+                    .limit(limit)
+                    .offset(offset)
+                )
+                db_sessions = result.scalars().all()
+                return [s.to_dict() for s in db_sessions]
+        else:
+            sessions = list(self._sessions.values())
+            sessions.sort(key=lambda x: x.created_at, reverse=True)
+            return [s.to_dict() for s in sessions[offset:offset + limit]]
+    
+    async def get_session_stats(self) -> dict:
+        """获取会话统计信息"""
+        if self._db_manager:
+            from .models import HILSession
+            from sqlalchemy import func
+            
+            async with self._db_manager.session() as db:
+                # 总数
+                total_result = await db.execute(select(func.count(HILSession.id)))
+                total = total_result.scalar()
+                
+                # 按状态统计
+                stats = {}
+                for status in ["waiting", "replied", "timeout", "expired"]:
+                    result = await db.execute(
+                        select(func.count(HILSession.id))
+                        .where(HILSession.status == status)
+                    )
+                    stats[status] = result.scalar()
+                
+                return {
+                    "total": total,
+                    "waiting": stats.get("waiting", 0),
+                    "replied": stats.get("replied", 0),
+                    "timeout": stats.get("timeout", 0),
+                    "expired": stats.get("expired", 0),
+                }
+        else:
+            sessions = list(self._sessions.values())
+            return {
+                "total": len(sessions),
+                "waiting": len([s for s in sessions if s.status == "waiting"]),
+                "replied": len([s for s in sessions if s.status == "replied"]),
+                "timeout": len([s for s in sessions if s.status == "timeout"]),
+                "expired": 0,
+            }
 
+
+import os
+
+# 检查是否启用数据库模式
+USE_DATABASE = os.getenv("HIL_USE_DATABASE", "").lower() in ("1", "true", "yes")
 
 # 全局存储实例
-storage = RelayStorage()
+storage = RelayStorage(use_database=USE_DATABASE)

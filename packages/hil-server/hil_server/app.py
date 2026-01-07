@@ -56,6 +56,15 @@ async def lifespan(app: FastAPI):
     else:
         logger.info(f"  [Relay 模式] 等待 Worker 连接")
     
+    # 初始化数据库（如果启用）
+    from .storage import USE_DATABASE
+    if USE_DATABASE:
+        logger.info("  [数据库模式] 正在初始化数据库...")
+        await storage.init_database()
+        logger.info("  [数据库模式] 数据库初始化完成")
+    else:
+        logger.info("  [内存模式] 会话存储在内存中")
+    
     # 启动心跳任务（Relay 模式需要）
     task = asyncio.create_task(heartbeat_task())
     
@@ -67,6 +76,11 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
+    
+    # 关闭数据库连接
+    if USE_DATABASE:
+        from .database import close_database
+        await close_database()
     
     logger.info("HIL Server 关闭")
 
