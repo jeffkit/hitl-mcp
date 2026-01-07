@@ -9,9 +9,6 @@ fastapi>=0.115.0
 uvicorn>=0.32.0
 websockets>=12.0
 
-# 飞鸽传书（企业微信机器人）
-fly-pigeon>=2.0.0
-
 # Authentication
 PyJWT>=2.8.0
 
@@ -23,3 +20,7 @@ sqlalchemy>=2.0.0
 aiosqlite>=0.19.0  # SQLite async support (for dev/test)
 pymysql>=1.1.0     # MySQL driver (for production)
 cryptography>=41.0.0  # Required by PyMySQL
+
+# 飞鸽传书（企业微信机器人）- 腾讯内部包
+--extra-index-url http://mirrors.tencent.com/repository/pypi/tencent_pypi/simple
+fly-pigeon>=2.0.0
