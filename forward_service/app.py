@@ -474,6 +474,7 @@ async def handle_callback(
         bot = config.get_bot_or_default(bot_key)
         if not bot:
             logger.warning(f"未找到 bot_key={bot_key} 的配置，且无默认 Bot")
+            # 此时无法确定用哪个 bot，使用旧配置的默认 bot_key（兜底）
             await send_reply(
                 chat_id=chat_id,
                 message="⚠️ Bot 配置错误，请联系管理员",
@@ -501,21 +502,24 @@ async def handle_callback(
                         await send_reply(
                             chat_id=chat_id,
                             message=f"⚠️ {reason}\n\n默认 Bot 也无法访问: {default_reason}",
-                            msg_type="text"
+                            msg_type="text",
+                            bot_key=default_bot.bot_key
                         )
                         return {"errcode": 0, "errmsg": "access denied"}
                 else:
                     await send_reply(
                         chat_id=chat_id,
                         message=f"⚠️ {reason}",
-                        msg_type="text"
+                        msg_type="text",
+                        bot_key=bot.bot_key
                     )
                     return {"errcode": 0, "errmsg": "access denied"}
             else:
                 await send_reply(
                     chat_id=chat_id,
                     message=f"⚠️ {reason}",
-                    msg_type="text"
+                    msg_type="text",
+                    bot_key=bot.bot_key
                 )
                 return {"errcode": 0, "errmsg": "access denied"}
         
@@ -554,19 +558,21 @@ async def handle_callback(
             log_entry.duration_ms = duration_ms
             add_request_log(log_entry)
             
-            # 发送错误提示给用户
+            # 发送错误提示给用户（使用正确的 bot_key）
             await send_reply(
                 chat_id=chat_id,
                 message="⚠️ 处理请求时发生错误，请稍后重试",
-                msg_type="text"
+                msg_type="text",
+                bot_key=bot.bot_key
             )
             return {"errcode": 0, "errmsg": "forward failed"}
         
-        # 发送结果给用户
+        # 发送结果给用户（使用正确的 bot_key）
         send_result = await send_reply(
             chat_id=chat_id,
             message=result.reply,
-            msg_type=result.msg_type
+            msg_type=result.msg_type,
+            bot_key=bot.bot_key
         )
         
         # 更新日志

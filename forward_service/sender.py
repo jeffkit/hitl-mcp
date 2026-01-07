@@ -80,7 +80,8 @@ def send_to_wecom(
 async def send_reply(
     chat_id: str,
     message: str,
-    msg_type: str = "text"
+    msg_type: str = "text",
+    bot_key: str | None = None
 ) -> dict:
     """
     发送回复消息给用户
@@ -89,6 +90,7 @@ async def send_reply(
         chat_id: 群/私聊 ID
         message: 消息内容
         msg_type: 消息类型 (text / markdown)
+        bot_key: 机器人 Key（指定使用哪个机器人发送消息）
     
     Returns:
         发送结果 {"success": bool, "error": str | None}
@@ -97,7 +99,8 @@ async def send_reply(
         result = send_to_wecom(
             message=message,
             chat_id=chat_id,
-            msg_type=msg_type
+            msg_type=msg_type,
+            bot_key=bot_key
         )
         
         if isinstance(result, dict) and result.get("errcode", 0) != 0:
