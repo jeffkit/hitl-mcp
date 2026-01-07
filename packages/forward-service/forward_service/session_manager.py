@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 
 # Slash 命令正则
 SLASH_COMMANDS = {
-    "list": re.compile(r'^/(sess|s)$', re.IGNORECASE),
-    "reset": re.compile(r'^/(reset|r)$', re.IGNORECASE),
-    "change": re.compile(r'^/(change|c)\s+([a-f0-9]{6,8})$', re.IGNORECASE),
+    "list": re.compile(r'^/(sess|s)\s*$', re.IGNORECASE),
+    "reset": re.compile(r'^/(reset|r)\s*$', re.IGNORECASE),
+    # 允许会话 ID 后面有空格或其他内容
+    "change": re.compile(r'^/(change|c)\s+([a-f0-9]{6,8})', re.IGNORECASE),
 }
 
 
