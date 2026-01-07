@@ -23,8 +23,12 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .config import config
+from .config import config as config_v1  # 旧配置（兼容）
+from .config_v2 import config_v2  # 新配置（多 Bot）
 from .sender import send_reply
+
+# 使用新配置系统
+config = config_v2
 
 # 配置日志
 logging.basicConfig(
@@ -136,30 +140,39 @@ def extract_content(data: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
-async def forward_to_agent(
-    chat_id: str,
+async def forward_to_agent_with_bot(
+    bot_key: str | None,
     content: str,
     timeout: int
 ) -> ForwardResponse | None:
     """
-    转发消息到 Agent（适配 AgentStudio API 格式）
+    使用指定 Bot 转发消息到 Agent
     
     Args:
-        chat_id: 群/私聊 ID
+        bot_key: Bot Key
         content: 消息内容
         timeout: 超时时间（秒）
     
     Returns:
         ForwardResponse 或 None
     """
+    # 获取 Bot 配置
+    bot = config.get_bot_or_default(bot_key)
+    if not bot:
+        logger.warning(f"未找到 bot_key={bot_key} 的配置，且无默认 Bot")
+        return None
+    
     # 获取目标 URL
-    target_url = config.get_target_url(chat_id)
+    target_url = bot.forward_config.get_url()
     if not target_url:
-        logger.warning(f"未找到 chat_id={chat_id} 的转发规则")
+        logger.warning(f"Bot {bot.name} 的 forward_config.url_template 未配置")
         return None
     
     # 获取 API Key
-    api_key = config.get_api_key(chat_id)
+    api_key = bot.forward_config.api_key
+    
+    # 使用 Bot 自己的 timeout（如果配置了）
+    bot_timeout = bot.forward_config.timeout or timeout
     
     logger.info(f"转发消息到 Agent: url={target_url}")
     
@@ -174,7 +187,7 @@ async def forward_to_agent(
     start_time = datetime.now()
     
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with httpx.AsyncClient(timeout=bot_timeout) as client:
             response = await client.post(
                 target_url,
                 json=request_body,
@@ -244,10 +257,14 @@ async def lifespan(app: FastAPI):
         for error in errors:
             logger.warning(f"配置警告: {error}")
     
-    logger.info(f"Forward Service 启动")
+    logger.info(f"Forward Service 启动（多 Bot 支持 v2.0）")
     logger.info(f"  端口: {config.port}")
-    logger.info(f"  默认目标 URL: {config.forward_url or '未配置'}")
-    logger.info(f"  转发规则数量: {len(config.forward_rules)}")
+    logger.info(f"  默认 Bot Key: {config.default_bot_key[:10]}..." if config.default_bot_key else "  默认 Bot Key: 未配置")
+    logger.info(f"  Bot 数量: {len(config.bots)}")
+    
+    # 列出所有 Bot
+    for bot_key, bot in config.bots.items():
+        logger.info(f"  - {bot.name} (key={bot_key[:10]}..., enabled={bot.enabled})")
     
     yield
     
@@ -302,8 +319,9 @@ async def health():
     return {
         "status": "healthy" if not errors else "unhealthy",
         "config_errors": errors,
-        "forward_url": config.forward_url or None,
-        "rules_count": len(config.forward_rules)
+        "default_bot_key": config.default_bot_key[:10] + "..." if config.default_bot_key else None,
+        "bots_count": len(config.bots),
+        "version": "2.0.0"
     }
 
 
@@ -314,11 +332,10 @@ async def admin_status():
     """获取服务状态（管理台用）"""
     return {
         "service": "Forward Service",
-        "version": "1.1.0",
+        "version": "2.0.0",  # 升级到 2.0（多 Bot 支持）
         "config": {
-            "bot_key": config.bot_key[:10] + "..." if config.bot_key else None,
-            "forward_url": config.forward_url,
-            "rules_count": len(config.forward_rules),
+            "default_bot_key": config.default_bot_key[:10] + "..." if config.default_bot_key else None,
+            "bots_count": len(config.bots),
             "timeout": config.timeout,
             "port": config.port
         },
@@ -330,12 +347,38 @@ async def admin_status():
     }
 
 
+@app.get("/admin/config")
+async def get_config():
+    """获取完整配置（管理台用）"""
+    return config.get_config_dict()
+
+
+@app.put("/admin/config")
+async def update_config(request: Request):
+    """更新完整配置（管理台用）"""
+    try:
+        data = await request.json()
+        result = config.update_from_dict(data)
+        return result
+    except Exception as e:
+        logger.error(f"更新配置失败: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/admin/config/reload")
+async def reload_config():
+    """重新加载配置"""
+    return config.reload_config()
+
+
+# ============== 兼容性 API（旧版规则管理） ==============
+
 @app.get("/admin/rules")
 async def admin_rules():
-    """获取所有转发规则（管理台用）"""
+    """获取所有 Bot 配置（兼容旧 API）"""
     return {
-        "default_url": config.forward_url,
-        "rules": config.get_all_rules()
+        "default_bot_key": config.default_bot_key,
+        "bots": config.get_all_bots()
     }
 
 
@@ -349,48 +392,8 @@ async def admin_logs(limit: int = 20):
     }
 
 
-# ============== 规则管理 API ==============
-
-class RuleInput(BaseModel):
-    """规则输入模型"""
-    chat_id: str
-    url_template: str
-    agent_id: str = ""
-    api_key: str = ""
-    name: str = ""
-    timeout: int = 60
-
-
-@app.post("/admin/rules")
-async def add_rule(rule: RuleInput):
-    """添加转发规则"""
-    rule_data = {
-        "url_template": rule.url_template,
-        "agent_id": rule.agent_id,
-        "api_key": rule.api_key,
-        "name": rule.name,
-        "timeout": rule.timeout
-    }
-    return config.add_rule(rule.chat_id, rule_data)
-
-
-@app.put("/admin/rules/{chat_id}")
-async def update_rule(chat_id: str, rule: RuleInput):
-    """更新转发规则"""
-    rule_data = {
-        "url_template": rule.url_template,
-        "agent_id": rule.agent_id,
-        "api_key": rule.api_key,
-        "name": rule.name,
-        "timeout": rule.timeout
-    }
-    return config.update_rule(chat_id, rule_data)
-
-
-@app.delete("/admin/rules/{chat_id}")
-async def delete_rule(chat_id: str):
-    """删除转发规则"""
-    return config.delete_rule(chat_id)
+# ============== Bot 管理 API（V2） ==============
+# 注意：旧的规则管理 API 已移除，统一使用 /admin/config 管理所有 Bot
 
 
 # ============== 回调处理 ==============
@@ -401,11 +404,14 @@ async def handle_callback(
     x_api_key: str | None = Header(None, alias="x-api-key")
 ):
     """
-    处理企微机器人回调
+    处理企微机器人回调（多 Bot 支持）
     
-    1. 接收用户消息
-    2. 转发到 Agent
-    3. 将结果发送给用户
+    工作流程：
+    1. 从 webhook_url 提取 bot_key
+    2. 查找对应的 Bot 配置
+    3. 检查访问权限
+    4. 转发到 Agent
+    5. 将结果发送给用户
     """
     # 验证鉴权（可选）
     if config.callback_auth_key and config.callback_auth_value:
@@ -424,6 +430,8 @@ async def handle_callback(
         msg_type = data.get("msgtype", "")
         from_user = data.get("from", {})
         from_user_name = from_user.get("name", "unknown")
+        from_user_id = from_user.get("userid", "unknown")
+        webhook_url = data.get("webhook_url", "")
         
         logger.info(f"收到企微回调: chat_id={chat_id}, msg_type={msg_type}, from={from_user_name}")
         
@@ -432,11 +440,58 @@ async def handle_callback(
             logger.info(f"忽略事件类型: {msg_type}")
             return {"errcode": 0, "errmsg": "ok"}
         
-        # 获取目标 URL（用于日志）
-        target_url = config.get_target_url(chat_id)
-        if not target_url:
-            logger.warning(f"未找到 chat_id={chat_id} 的转发规则")
-            return {"errcode": 0, "errmsg": "no forward rule"}
+        # === 多 Bot 支持：从 webhook_url 提取 bot_key ===
+        bot_key = config.extract_bot_key_from_webhook_url(webhook_url)
+        logger.info(f"提取的 bot_key: {bot_key}")
+        
+        # 获取 Bot 配置（如果找不到会回退到 default_bot）
+        bot = config.get_bot_or_default(bot_key)
+        if not bot:
+            logger.warning(f"未找到 bot_key={bot_key} 的配置，且无默认 Bot")
+            await send_reply(
+                chat_id=chat_id,
+                message="⚠️ Bot 配置错误，请联系管理员",
+                msg_type="text"
+            )
+            return {"errcode": 0, "errmsg": "no bot config"}
+        
+        logger.info(f"使用 Bot: {bot.name} (key={bot.bot_key[:10]}...)")
+        
+        # === 访问控制检查 ===
+        allowed, reason = config.check_access(bot, from_user_id)
+        if not allowed:
+            logger.warning(f"用户 {from_user_name} ({from_user_id}) 被拒绝访问 Bot {bot.name}: {reason}")
+            
+            # 尝试回退到默认 Bot
+            if bot.bot_key != config.default_bot_key:
+                logger.info(f"尝试回退到默认 Bot: {config.default_bot_key}")
+                default_bot = config.get_bot(config.default_bot_key)
+                if default_bot:
+                    default_allowed, default_reason = config.check_access(default_bot, from_user_id)
+                    if default_allowed:
+                        bot = default_bot
+                        logger.info(f"使用默认 Bot: {bot.name}")
+                    else:
+                        await send_reply(
+                            chat_id=chat_id,
+                            message=f"⚠️ {reason}\n\n默认 Bot 也无法访问: {default_reason}",
+                            msg_type="text"
+                        )
+                        return {"errcode": 0, "errmsg": "access denied"}
+                else:
+                    await send_reply(
+                        chat_id=chat_id,
+                        message=f"⚠️ {reason}",
+                        msg_type="text"
+                    )
+                    return {"errcode": 0, "errmsg": "access denied"}
+            else:
+                await send_reply(
+                    chat_id=chat_id,
+                    message=f"⚠️ {reason}",
+                    msg_type="text"
+                )
+                return {"errcode": 0, "errmsg": "access denied"}
         
         # 提取消息内容
         content, image_url = extract_content(data)
@@ -444,6 +499,9 @@ async def handle_callback(
         if not content and not image_url:
             logger.warning("消息内容为空，跳过处理")
             return {"errcode": 0, "errmsg": "empty content"}
+        
+        # 获取目标 URL（用于日志）
+        target_url = bot.forward_config.get_url()
         
         # 初始化日志条目
         log_entry = RequestLog(
@@ -455,9 +513,9 @@ async def handle_callback(
             status="pending"
         )
         
-        # 转发到 Agent
-        result = await forward_to_agent(
-            chat_id=chat_id,
+        # 转发到 Agent（使用 Bot 配置）
+        result = await forward_to_agent_with_bot(
+            bot_key=bot.bot_key,
             content=content or "",
             timeout=config.timeout
         )

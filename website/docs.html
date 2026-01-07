@@ -414,6 +414,70 @@
         <section class="docs-section" id="troubleshooting">
             <h2>🔧 4. 常见问题</h2>
             
+            <h3>Q: MCP Server 启动失败，报错 "spawn uvx ENOENT"</h3>
+            <p><strong>错误信息：</strong></p>
+            <div class="code-block">
+                <pre><code>[error] Client error for command 发生了系统错误 (spawn uvx ENOENT)
+[error] No server info found</code></pre>
+            </div>
+            
+            <p><strong>原因：</strong>系统中没有安装 <code>uv</code>，导致 <code>uvx</code> 命令找不到。</p>
+            
+            <p><strong>解决方案一：安装 uv（推荐）</strong></p>
+            
+            <div class="code-block">
+                <div class="code-header">
+                    <span class="code-language">macOS / Linux</span>
+                    <button class="copy-btn" onclick="copyCode(this)">复制代码</button>
+                </div>
+                <pre><code>curl -LsSf https://astral.sh/uv/install.sh | sh</code></pre>
+            </div>
+            
+            <div class="code-block">
+                <div class="code-header">
+                    <span class="code-language">Windows (PowerShell)</span>
+                    <button class="copy-btn" onclick="copyCode(this)">复制代码</button>
+                </div>
+                <pre><code>powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"</code></pre>
+            </div>
+            
+            <p>安装完成后，重启 Cursor 即可。</p>
+            
+            <p><strong>解决方案二："万能"安装法（让 Cursor 帮你搞定）</strong></p>
+            
+            <p>如果你不想手动配置，可以直接把下面这段话发给 Cursor，让它帮你自动安装和配置：</p>
+            
+            <div class="code-block">
+                <div class="code-header">
+                    <span class="code-language">复制这段话给 Cursor</span>
+                    <button class="copy-btn" onclick="copyCode(this)">复制代码</button>
+                </div>
+                <pre><code>请帮我配置 HITL-Walle MCP Server：
+
+1. 检查系统中是否安装了 uv，如果没有，请根据我的操作系统帮我安装
+2. 在我的 MCP 配置文件（~/.cursor/mcp.json）中添加以下配置：
+
+{
+  "mcpServers": {
+    "wecom-hil": {
+      "command": "uvx",
+      "args": [
+        "hitl-mcp",
+        "--service-url", "https://hitl.woa.com/api",
+        "--chat-id", "请替换为我的Chat ID"
+      ]
+    }
+  }
+}
+
+3. 完成后提醒我重启 Cursor</code></pre>
+            </div>
+            
+            <div class="alert alert-success">
+                <h4>💡 提示</h4>
+                <p>使用"万能"安装法时，Cursor 会自动检测你的操作系统，执行对应的安装命令，并帮你修改配置文件。非常适合不熟悉命令行的用户。</p>
+            </div>
+            
             <h3>Q: 出现 502 Bad Gateway 错误</h3>
             <p><strong>原因：</strong>通常是设置了 HTTP 代理。</p>
             <p><strong>解决方案：</strong>在 MCP 配置中禁用代理：</p>
@@ -448,12 +512,20 @@
             <h3>Q: 超时后会怎样？</h3>
             <p>会话会自动清理，AI 会收到超时状态。如果用户之后再回复，机器人会提示该会话已过期。</p>
             
-            <h3>Q: 如何配置不同群组的提示消息？</h3>
-            <p>访问 <a href="/admin" style="color: var(--primary-color);">管理台</a>，在"空闲提示配置"标签页中为不同的 Chat ID 配置自定义消息。</p>
             
             <div class="alert alert-info">
                 <h4>📞 需要帮助？</h4>
-                <p>如果遇到其他问题，请查看 <a href="/" style="color: var(--primary-color);">首页</a> 或访问 <a href="/admin" style="color: var(--primary-color);">管理台</a> 查看系统状态。</p>
+                <p>如果遇到其他问题，可以：</p>
+                <ul style="margin: 1rem 0 1rem 1.5rem; line-height: 2;">
+                    <li>联系：<strong style="color: var(--primary-color);">kongjie</strong></li>
+                    <li>加入交流群：<a href="https://nops.woa.com/pigeon/v1/tools/add_chat?chatId=ww123456924665619" target="_blank" style="color: var(--primary-color);">点击加群</a></li>
+                </ul>
+                <div style="text-align: center; margin-top: 1.5rem;">
+                    <p style="color: var(--text-secondary); margin-bottom: 0.5rem;">扫码加入交流群</p>
+                    <img src="https://nops.woa.com/pigeon/v1/tools/add_chat?chatId=ww123456924665619&formatType=qrcode&qrSize=6&qrBorder=0&qrLogo=true" 
+                         alt="加群二维码" 
+                         style="max-width: 200px; border-radius: 8px; border: 1px solid var(--border-color);">
+                </div>
             </div>
         </section>
     </div>
