@@ -751,8 +751,8 @@ async def handle_callback(
             slash_cmd = session_mgr.parse_slash_command(content)
             
             if slash_cmd:
-                cmd_type, cmd_arg = slash_cmd
-                logger.info(f"处理 Slash 命令: {cmd_type}, arg={cmd_arg}")
+                cmd_type, cmd_arg, extra_msg = slash_cmd
+                logger.info(f"处理 Slash 命令: {cmd_type}, arg={cmd_arg}, extra={extra_msg[:20] if extra_msg else None}")
                 
                 if cmd_type == "list":
                     # /sess - 列出会话
@@ -786,23 +786,31 @@ async def handle_callback(
                     return {"errcode": 0, "errmsg": "slash command handled"}
                 
                 elif cmd_type == "change":
-                    # /change <short_id> - 切换会话
+                    # /change <short_id> [message] - 切换会话，可选附带消息
                     target_session = await session_mgr.change_session(from_user_id, chat_id, cmd_arg)
-                    if target_session:
-                        await send_reply(
-                            chat_id=chat_id,
-                            message=f"✅ 已切换到会话 `{target_session.short_id}`\n最后消息: {target_session.last_message or '(无)'}",
-                            msg_type="text",
-                            bot_key=bot.bot_key
-                        )
-                    else:
+                    if not target_session:
                         await send_reply(
                             chat_id=chat_id,
                             message=f"❌ 未找到会话 `{cmd_arg}`\n使用 `/s` 查看可用会话",
                             msg_type="text",
                             bot_key=bot.bot_key
                         )
-                    return {"errcode": 0, "errmsg": "slash command handled"}
+                        return {"errcode": 0, "errmsg": "slash command handled"}
+                    
+                    # 如果有附带消息，继续转发给 Agent
+                    if extra_msg:
+                        logger.info(f"会话已切换到 {target_session.short_id}，继续转发消息: {extra_msg[:30]}...")
+                        # 将 content 替换为附带的消息，继续后续的转发流程
+                        content = extra_msg
+                    else:
+                        # 没有附带消息，只显示切换成功
+                        await send_reply(
+                            chat_id=chat_id,
+                            message=f"✅ 已切换到会话 `{target_session.short_id}`\n最后消息: {target_session.last_message or '(无)'}",
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                        return {"errcode": 0, "errmsg": "slash command handled"}
         
         # === 会话管理：获取现有 session_id ===
         current_session_id = None

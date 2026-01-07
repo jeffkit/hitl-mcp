@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 SLASH_COMMANDS = {
     "list": re.compile(r'^/(sess|s)\s*$', re.IGNORECASE),
     "reset": re.compile(r'^/(reset|r)\s*$', re.IGNORECASE),
-    # 允许会话 ID 后面有空格或其他内容
-    "change": re.compile(r'^/(change|c)\s+([a-f0-9]{6,8})', re.IGNORECASE),
+    # 允许会话 ID 后面有空格和消息内容
+    "change": re.compile(r'^/(change|c)\s+([a-f0-9]{6,8})(?:\s+(.+))?$', re.IGNORECASE | re.DOTALL),
 }
 
 
@@ -239,22 +239,29 @@ class SessionManager:
             logger.info(f"会话已切换: user={user_id[:10]}, session={target.short_id}")
             return target
     
-    def parse_slash_command(self, message: str) -> Optional[tuple[str, Optional[str]]]:
+    def parse_slash_command(self, message: str) -> Optional[tuple[str, Optional[str], Optional[str]]]:
         """
         解析 Slash 命令
         
         Returns:
-            (command_type, arg) 或 None
+            (command_type, arg, extra_message) 或 None
             command_type: "list", "reset", "change"
             arg: 命令参数（如 short_id）
+            extra_message: 附带消息（仅 /c 命令支持，如 "/c abc123 你好" 中的 "你好"）
         """
         message = message.strip()
         
         for cmd_type, pattern in SLASH_COMMANDS.items():
             match = pattern.match(message)
             if match:
-                arg = match.group(2) if match.lastindex and match.lastindex >= 2 else None
-                return (cmd_type, arg)
+                if cmd_type == "change":
+                    # change 命令特殊处理：group(2) 是 short_id, group(3) 是附带消息
+                    short_id = match.group(2)
+                    extra_msg = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else None
+                    return (cmd_type, short_id, extra_msg)
+                else:
+                    arg = match.group(2) if match.lastindex and match.lastindex >= 2 else None
+                    return (cmd_type, arg, None)
         
         return None
     
