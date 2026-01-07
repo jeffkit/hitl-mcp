@@ -44,7 +44,7 @@ class SessionManager:
         Returns:
             活跃的 UserSession，如果没有返回 None
         """
-        async with self._db_manager.session() as db:
+        async with self._db_manager.get_session() as db:
             result = await db.execute(
                 select(UserSession)
                 .where(and_(
@@ -75,7 +75,7 @@ class SessionManager:
         short_id = session_id[:8] if len(session_id) >= 8 else session_id
         truncated_message = last_message[:200] if last_message else ""
         
-        async with self._db_manager.session() as db:
+        async with self._db_manager.get_session() as db:
             # 查找是否已存在该 session
             result = await db.execute(
                 select(UserSession)
@@ -136,7 +136,7 @@ class SessionManager:
         """
         列出用户最近的会话
         """
-        async with self._db_manager.session() as db:
+        async with self._db_manager.get_session() as db:
             result = await db.execute(
                 select(UserSession)
                 .where(and_(
@@ -160,7 +160,7 @@ class SessionManager:
         Returns:
             是否成功重置
         """
-        async with self._db_manager.session() as db:
+        async with self._db_manager.get_session() as db:
             result = await db.execute(
                 update(UserSession)
                 .where(and_(
@@ -190,7 +190,7 @@ class SessionManager:
         Returns:
             切换到的 UserSession，如果没找到返回 None
         """
-        async with self._db_manager.session() as db:
+        async with self._db_manager.get_session() as db:
             # 查找目标会话
             result = await db.execute(
                 select(UserSession)
