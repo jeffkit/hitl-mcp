@@ -937,42 +937,8 @@
             <!-- 空闲提示配置 -->
             <!-- Bot 配置 -->
             <div id="bot-config-panel" class="data-table" style="display: none;">
-                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
-                    <span style="color: var(--text-secondary); font-size: 13px;">配置多个 Bot 及其访问控制（JSON 格式编辑）</span>
-                    <div>
-                        <button class="btn" onclick="saveBotConfig()" style="margin-right: 8px;">💾 保存配置</button>
-                        <button class="btn" onclick="reloadBotConfig()">🔄 重新加载</button>
-                    </div>
-                </div>
-
-                <div style="padding: 20px;">
-                    <div style="margin-bottom: 12px; color: var(--text-secondary); font-size: 13px;">
-                        编辑 <code style="background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px;">data/forward_bots.json</code> 配置文件
-                    </div>
-                    
-                    <textarea id="bot-config-editor" style="
-                        width: 100%;
-                        min-height: 600px;
-                        background: var(--bg-primary);
-                        border: 1px solid var(--border-color);
-                        border-radius: 8px;
-                        padding: 16px;
-                        color: var(--text-primary);
-                        font-family: 'JetBrains Mono', monospace;
-                        font-size: 13px;
-                        line-height: 1.6;
-                        resize: vertical;
-                    " placeholder="加载中..."></textarea>
-                    
-                    <div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border-radius: 6px; font-size: 12px; color: var(--text-secondary); line-height: 1.8;">
-                        <strong style="color: var(--accent-blue);">配置说明：</strong><br>
-                        • <strong>default_bot_key</strong>: 默认 Bot Key（兜底机器人）<br>
-                        • <strong>bots</strong>: Bot 配置对象，key 为 bot_key<br>
-                        • <strong>access_control.mode</strong>: allow_all（允许所有）/ whitelist（白名单）/ blacklist（黑名单）<br>
-                        • <strong>forward_config.url_template</strong>: 支持 {agent_id} 占位符<br>
-                        • <strong>enabled</strong>: 是否启用该 Bot
-                    </div>
-                </div>
+                <!-- 内容由 JavaScript 动态生成 -->
+                <div class="loading">加载中...</div>
             </div>
 
             <div id="idle-hint-panel" class="data-table" style="display: none;">
@@ -1101,6 +1067,96 @@ DEFAULT_CHAT_ID={chat_id}
                 <div class="modal-footer">
                     <button type="button" class="btn" onclick="closeWorkerModal()">取消</button>
                     <button type="submit" class="btn btn-primary">保存配置</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Bot 编辑模态框 -->
+    <div id="bot-modal" class="modal-overlay">
+        <div class="modal" style="max-width: 600px;">
+            <div class="modal-header">
+                <div class="modal-title" id="bot-modal-title">编辑 Bot</div>
+                <button class="modal-close" onclick="closeBotModal()">&times;</button>
+            </div>
+            <form id="bot-form">
+                <div class="form-group">
+                    <label>Bot Key *</label>
+                    <input type="text" id="bot-key" required placeholder="唯一标识符，如: test_bot" pattern="[a-z0-9_]+" title="只能包含小写字母、数字和下划线">
+                    <small style="color: var(--text-secondary);">只能包含小写字母、数字和下划线</small>
+                </div>
+                <div class="form-group">
+                    <label>Bot 名称 *</label>
+                    <input type="text" id="bot-name" required placeholder="如: 测试 Bot">
+                </div>
+                <div class="form-group">
+                    <label>描述</label>
+                    <input type="text" id="bot-description" placeholder="Bot 用途说明">
+                </div>
+                <div class="form-group">
+                    <label>状态</label>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="bot-enabled" checked style="cursor: pointer;">
+                        <span>启用此 Bot</span>
+                    </label>
+                </div>
+
+                <div style="border-top: 1px solid var(--border-color); padding: 16px 0; margin: 16px 0;">
+                    <h4 style="margin-bottom: 12px; font-size: 14px;">转发配置</h4>
+
+                    <div class="form-group">
+                        <label>URL 模板 *</label>
+                        <input type="text" id="bot-url-template" required placeholder="https://api.example.com/agent/{agent_id}/message">
+                        <small style="color: var(--text-secondary);">支持 {agent_id} 占位符</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Agent ID</label>
+                        <input type="text" id="bot-agent-id" placeholder="用于替换 URL 中的 {agent_id}">
+                    </div>
+                    <div class="form-group">
+                        <label>API Key</label>
+                        <input type="password" id="bot-api-key" placeholder="Bearer Token 认证密钥">
+                    </div>
+                    <div class="form-group">
+                        <label>超时时间 (秒)</label>
+                        <input type="number" id="bot-timeout" value="60" min="10" max="300">
+                    </div>
+                </div>
+
+                <div style="border-top: 1px solid var(--border-color); padding: 16px 0; margin: 16px 0;">
+                    <h4 style="margin-bottom: 12px; font-size: 14px;">访问控制</h4>
+
+                    <div class="form-group">
+                        <label>访问模式</label>
+                        <select id="bot-access-mode" style="width: 100%; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); font-size: 14px;" onchange="updateAccessModeUI()">
+                            <option value="allow_all">允许所有 (allow_all)</option>
+                            <option value="whitelist">白名单 (whitelist)</option>
+                            <option value="blacklist">黑名单 (blacklist)</option>
+                        </select>
+                    </div>
+
+                    <div id="whitelist-section" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <label style="margin: 0;">白名单 Chat IDs</label>
+                            <button type="button" class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="addWhitelistItem()">+ 添加</button>
+                        </div>
+                        <div id="whitelist-items"></div>
+                        <small style="color: var(--text-secondary);">只有白名单中的 Chat ID 可以访问此 Bot</small>
+                    </div>
+
+                    <div id="blacklist-section" style="display: none;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <label style="margin: 0;">黑名单 Chat IDs</label>
+                            <button type="button" class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="addBlacklistItem()">+ 添加</button>
+                        </div>
+                        <div id="blacklist-items"></div>
+                        <small style="color: var(--text-secondary);">黑名单中的 Chat ID 无法访问此 Bot</small>
+                    </div>
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn" onclick="closeBotModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">保存</button>
                 </div>
             </form>
         </div>
@@ -1728,17 +1784,196 @@ DEFAULT_CHAT_ID={chat_id}
         });
 
         // ============== Bot 配置相关 ==============
+        let forwardMode = null;
+        let supportsBotAPI = false;
+        let editingBotKey = null;
+        let whitelistItems = [];
+        let blacklistItems = [];
+
+        // 检测 Forward Service 模式
+        async function checkForwardMode() {
+            try {
+                const data = await fetchData('/admin/api/forward/proxy/admin/mode');
+                forwardMode = data.mode;
+                supportsBotAPI = data.supports_bot_api;
+                console.log('Forward Service 模式:', forwardMode, '支持 Bot API:', supportsBotAPI);
+            } catch (error) {
+                console.error('无法检测 Forward Service 模式:', error);
+                forwardMode = 'json';
+                supportsBotAPI = false;
+            }
+        }
+
+        // 加载 Bot 配置面板（根据模式选择 UI）
         async function loadBotConfig() {
+            const container = document.getElementById('bot-config-panel');
+            container.innerHTML = '<div class="loading">检测模式中...</div>';
+
+            try {
+                // 检测模式
+                await checkForwardMode();
+
+                if (supportsBotAPI) {
+                    // 数据库模式：显示列表视图
+                    renderBotListPanel(container);
+                } else {
+                    // JSON 模式：显示 JSON 编辑器
+                    renderBotJSONPanel(container);
+                }
+            } catch (error) {
+                container.innerHTML = `<div class="empty-state" style="color: var(--accent-red);">加载失败: ${error.message}</div>`;
+            }
+        }
+
+        // 渲染 Bot 列表面板（数据库模式）
+        function renderBotListPanel(container) {
+            container.innerHTML = `
+                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary); font-size: 13px;">
+                        🗄️ 数据库模式 - 管理所有 Bot 配置
+                    </span>
+                    <button class="btn btn-primary" onclick="showAddBotModal()">+ 添加 Bot</button>
+                </div>
+                <div id="bots-list-container">
+                    <div class="loading">加载中...</div>
+                </div>
+            `;
+            loadBotsList();
+        }
+
+        // 渲染 Bot JSON 编辑器面板（JSON 模式）
+        function renderBotJSONPanel(container) {
+            container.innerHTML = `
+                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+                    <span style="color: var(--text-secondary); font-size: 13px;">
+                        📄 JSON 文件模式 - 编辑配置文件
+                    </span>
+                    <div>
+                        <button class="btn" onclick="saveBotConfig()" style="margin-right: 8px;">💾 保存配置</button>
+                        <button class="btn" onclick="reloadBotConfig()">🔄 重新加载</button>
+                    </div>
+                </div>
+
+                <div style="padding: 20px;">
+                    <div style="margin-bottom: 12px; color: var(--text-secondary); font-size: 13px;">
+                        编辑 <code style="background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px;">data/forward_bots.json</code> 配置文件
+                    </div>
+
+                    <textarea id="bot-config-editor" style="
+                        width: 100%;
+                        min-height: 600px;
+                        background: var(--bg-primary);
+                        border: 1px solid var(--border-color);
+                        border-radius: 8px;
+                        padding: 16px;
+                        color: var(--text-primary);
+                        font-family: 'JetBrains Mono', monospace;
+                        font-size: 13px;
+                        line-height: 1.6;
+                        resize: vertical;
+                    " placeholder="加载中..."></textarea>
+
+                    <div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border-radius: 6px; font-size: 12px; color: var(--text-secondary); line-height: 1.8;">
+                        <strong style="color: var(--accent-blue);">配置说明：</strong><br>
+                        • <strong>default_bot_key</strong>: 默认 Bot Key（兜底机器人）<br>
+                        • <strong>bots</strong>: Bot 配置对象，key 为 bot_key<br>
+                        • <strong>access_control.mode</strong>: allow_all（允许所有）/ whitelist（白名单）/ blacklist（黑名单）<br>
+                        • <strong>forward_config.url_template</strong>: 支持 {agent_id} 占位符<br>
+                        • <strong>enabled</strong>: 是否启用该 Bot
+                    </div>
+                </div>
+            `;
+            loadBotJSONConfig();
+        }
+
+        // 加载 Bot 列表（数据库模式）
+        async function loadBotsList() {
+            const container = document.getElementById('bots-list-container');
+            if (!container) return;
+
+            try {
+                const response = await fetch(`${API_BASE}/admin/api/forward/proxy/admin/bots`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                const data = await response.json();
+
+                if (!data.success) {
+                    throw new Error(data.error);
+                }
+
+                const bots = data.bots || [];
+
+                if (bots.length === 0) {
+                    container.innerHTML = `<div class="empty-state">暂无 Bot 配置</div>`;
+                    return;
+                }
+
+                let html = `
+                    <table class="rules-table">
+                        <thead>
+                            <tr>
+                                <th>Bot 名称</th>
+                                <th>Bot Key</th>
+                                <th>转发 URL</th>
+                                <th>访问模式</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                for (const bot of bots) {
+                    const statusTag = bot.enabled ?
+                        '<span class="status-tag replied">启用</span>' :
+                        '<span class="status-tag timeout">禁用</span>';
+
+                    const accessModeText = {
+                        'allow_all': '允许所有',
+                        'whitelist': `白名单 (${bot.whitelist_count || 0})`,
+                        'blacklist': `黑名单 (${bot.blacklist_count || 0})`
+                    }[bot.access_mode] || bot.access_mode;
+
+                    html += `
+                        <tr>
+                            <td style="font-weight: 600;">${bot.name || '未命名'}</td>
+                            <td style="font-size: 11px; color: var(--text-secondary); font-family: 'JetBrains Mono';">
+                                ${bot.bot_key.slice(0, 16)}...
+                            </td>
+                            <td style="color: var(--accent-blue); font-size: 12px;" title="${bot.url_template}">
+                                ${bot.url_template?.slice(0, 40)}...
+                            </td>
+                            <td><span class="tag">${accessModeText}</span></td>
+                            <td>${statusTag}</td>
+                            <td>
+                                <button class="btn" style="padding: 4px 10px; font-size: 11px;" onclick="editBot('${bot.bot_key}')">编辑</button>
+                                <button class="btn btn-danger" style="padding: 4px 10px; font-size: 11px; margin-left: 8px;" onclick="deleteBot('${bot.bot_key}')">删除</button>
+                            </td>
+                        </tr>
+                    `;
+                }
+
+                html += '</tbody></table>';
+                container.innerHTML = html;
+
+            } catch (error) {
+                container.innerHTML = `<div class="empty-state" style="color: var(--accent-red);">加载失败: ${error.message}</div>`;
+            }
+        }
+
+        // 加载 Bot JSON 配置（JSON 模式）
+        async function loadBotJSONConfig() {
             const editor = document.getElementById('bot-config-editor');
-            
+            if (!editor) return;
+
             try {
                 const data = await fetchData('/admin/api/forward/config');
-                
+
                 if (data.error) {
                     editor.value = `错误: ${data.error}`;
                     return;
                 }
-                
+
                 // 格式化 JSON（美化显示）
                 editor.value = JSON.stringify(data, null, 2);
             } catch (error) {
@@ -1746,42 +1981,45 @@ DEFAULT_CHAT_ID={chat_id}
             }
         }
 
+        // Bot CRUD 操作
         async function saveBotConfig() {
             const editor = document.getElementById('bot-config-editor');
+            if (!editor) return;
+
             const content = editor.value;
-            
+
             try {
                 // 验证 JSON 格式
                 const configData = JSON.parse(content);
-                
+
                 // 验证必要字段
                 if (!configData.default_bot_key) {
                     alert('❌ 配置错误：缺少 default_bot_key 字段');
                     return;
                 }
-                
+
                 if (!configData.bots || typeof configData.bots !== 'object') {
                     alert('❌ 配置错误：缺少 bots 字段或格式不正确');
                     return;
                 }
-                
+
                 if (Object.keys(configData.bots).length === 0) {
                     alert('❌ 配置错误：至少需要配置一个 Bot');
                     return;
                 }
-                
+
                 // 确认保存
                 if (!confirm('确定要保存配置吗？服务会自动重新加载配置。')) {
                     return;
                 }
-                
+
                 // 发送到服务器
                 const result = await putData('/admin/api/forward/config', configData);
-                
+
                 if (result.success) {
                     alert('✅ 配置已保存并生效');
-                    await loadBotConfig();
-                    await loadOverview();  // 刷新概览
+                    await loadBotJSONConfig();
+                    await loadOverview();
                 } else {
                     alert('❌ 保存失败: ' + (result.error || '未知错误'));
                 }
@@ -1798,13 +2036,13 @@ DEFAULT_CHAT_ID={chat_id}
             if (!confirm('确定要重新加载配置吗？将从文件读取最新配置。')) {
                 return;
             }
-            
+
             try {
                 const result = await postData('/admin/api/forward/config/reload', {});
-                
+
                 if (result.success) {
                     alert('✅ 配置已重新加载');
-                    await loadBotConfig();
+                    await loadBotJSONConfig();
                     await loadOverview();
                 } else {
                     alert('❌ 重新加载失败: ' + (result.error || '未知错误'));
@@ -1813,6 +2051,221 @@ DEFAULT_CHAT_ID={chat_id}
                 alert('❌ 重新加载失败: ' + e.message);
             }
         }
+
+        // Bot 编辑模态框相关
+        function showAddBotModal() {
+            editingBotKey = null;
+            whitelistItems = [];
+            blacklistItems = [];
+
+            document.getElementById('bot-modal-title').textContent = '添加 Bot';
+            document.getElementById('bot-form').reset();
+            document.getElementById('bot-key').disabled = false;
+            document.getElementById('bot-enabled').checked = true;
+            document.getElementById('bot-timeout').value = 60;
+
+            // 清空列表
+            document.getElementById('whitelist-items').innerHTML = '';
+            document.getElementById('blacklist-items').innerHTML = '';
+
+            updateAccessModeUI();
+
+            document.getElementById('bot-modal').classList.add('active');
+        }
+
+        async function editBot(botKey) {
+            editingBotKey = botKey;
+
+            try {
+                const response = await fetch(`${API_BASE}/admin/api/forward/proxy/admin/bots/${encodeURIComponent(botKey)}`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                const data = await response.json();
+
+                if (!data.success) {
+                    alert('获取 Bot 失败: ' + (data.error || '未知错误'));
+                    return;
+                }
+
+                const bot = data.bot;
+
+                document.getElementById('bot-modal-title').textContent = '编辑 Bot';
+                document.getElementById('bot-key').value = bot.bot_key;
+                document.getElementById('bot-key').disabled = true;
+                document.getElementById('bot-name').value = bot.name;
+                document.getElementById('bot-description').value = bot.description || '';
+                document.getElementById('bot-enabled').checked = bot.enabled;
+
+                document.getElementById('bot-url-template').value = bot.url_template;
+                document.getElementById('bot-agent-id').value = bot.agent_id || '';
+                document.getElementById('bot-api-key').value = bot.api_key || '';
+                document.getElementById('bot-timeout').value = bot.timeout;
+
+                document.getElementById('bot-access-mode').value = bot.access_mode;
+
+                // 加载访问规则
+                whitelistItems = (bot.whitelist || []).map(r => r.chat_id);
+                blacklistItems = (bot.blacklist || []).map(r => r.chat_id);
+
+                renderWhitelistItems();
+                renderBlacklistItems();
+
+                updateAccessModeUI();
+
+                document.getElementById('bot-modal').classList.add('active');
+
+            } catch (error) {
+                alert('获取 Bot 失败: ' + error.message);
+            }
+        }
+
+        function closeBotModal() {
+            document.getElementById('bot-modal').classList.remove('active');
+            editingBotKey = null;
+            whitelistItems = [];
+            blacklistItems = [];
+        }
+
+        function updateAccessModeUI() {
+            const mode = document.getElementById('bot-access-mode').value;
+            const whitelistSection = document.getElementById('whitelist-section');
+            const blacklistSection = document.getElementById('blacklist-section');
+
+            whitelistSection.style.display = mode === 'whitelist' ? 'block' : 'none';
+            blacklistSection.style.display = mode === 'blacklist' ? 'block' : 'none';
+        }
+
+        function addWhitelistItem() {
+            const chatId = prompt('请输入 Chat ID:');
+            if (chatId && chatId.trim()) {
+                whitelistItems.push(chatId.trim());
+                renderWhitelistItems();
+            }
+        }
+
+        function removeWhitelistItem(index) {
+            whitelistItems.splice(index, 1);
+            renderWhitelistItems();
+        }
+
+        function renderWhitelistItems() {
+            const container = document.getElementById('whitelist-items');
+            if (whitelistItems.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px;">暂无白名单</div>';
+                return;
+            }
+
+            container.innerHTML = whitelistItems.map((chatId, index) => `
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <input type="text" value="${chatId}" readonly
+                        style="flex: 1; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px;">
+                    <button type="button" class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="removeWhitelistItem(${index})">删除</button>
+                </div>
+            `).join('');
+        }
+
+        function addBlacklistItem() {
+            const chatId = prompt('请输入 Chat ID:');
+            if (chatId && chatId.trim()) {
+                blacklistItems.push(chatId.trim());
+                renderBlacklistItems();
+            }
+        }
+
+        function removeBlacklistItem(index) {
+            blacklistItems.splice(index, 1);
+            renderBlacklistItems();
+        }
+
+        function renderBlacklistItems() {
+            const container = document.getElementById('blacklist-items');
+            if (blacklistItems.length === 0) {
+                container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px;">暂无黑名单</div>';
+                return;
+            }
+
+            container.innerHTML = blacklistItems.map((chatId, index) => `
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                    <input type="text" value="${chatId}" readonly
+                        style="flex: 1; padding: 8px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px;">
+                    <button type="button" class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" onclick="removeBlacklistItem(${index})">删除</button>
+                </div>
+            `).join('');
+        }
+
+        async function deleteBot(botKey) {
+            if (!confirm(`确定要删除 Bot "${botKey}" 吗？此操作不可恢复。`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE}/admin/api/forward/proxy/admin/bots/${encodeURIComponent(botKey)}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                const result = await response.json();
+
+                if (result.success) {
+                    alert('✅ Bot 已删除');
+                    await loadBotsList();
+                    await loadOverview();
+                } else {
+                    alert('❌ 删除失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('❌ 删除失败: ' + error.message);
+            }
+        }
+
+        // Bot 表单提交
+        document.getElementById('bot-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const botKey = document.getElementById('bot-key').value.trim();
+            const botData = {
+                bot_key: botKey,
+                name: document.getElementById('bot-name').value.trim(),
+                description: document.getElementById('bot-description').value.trim(),
+                enabled: document.getElementById('bot-enabled').checked,
+                url_template: document.getElementById('bot-url-template').value.trim(),
+                agent_id: document.getElementById('bot-agent-id').value.trim(),
+                api_key: document.getElementById('bot-api-key').value.trim(),
+                timeout: parseInt(document.getElementById('bot-timeout').value) || 60,
+                access_mode: document.getElementById('bot-access-mode').value,
+                whitelist: whitelistItems,
+                blacklist: blacklistItems
+            };
+
+            try {
+                const method = editingBotKey ? 'PUT' : 'POST';
+                const endpoint = editingBotKey
+                    ? `/admin/api/forward/proxy/admin/bots/${encodeURIComponent(editingBotKey)}`
+                    : '/admin/api/forward/proxy/admin/bots';
+
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken}`
+                    },
+                    body: JSON.stringify(botData)
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    alert(editingBotKey ? '✅ Bot 已更新' : '✅ Bot 已创建');
+                    closeBotModal();
+                    await loadBotsList();
+                    await loadOverview();
+                } else {
+                    alert('❌ 保存失败: ' + (result.error || '未知错误'));
+                }
+            } catch (error) {
+                alert('❌ 保存失败: ' + error.message);
+            }
+        });
+
 
         // ============== 空闲提示配置相关 ==============
         let editingIdleHintChatId = null;

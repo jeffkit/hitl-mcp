@@ -405,6 +405,274 @@ class ConfigDB:
 
         return errors
 
+    # ============== Bot CRUD 操作 (用于 API) ==============
+
+    async def list_bots(self) -> list[dict]:
+        """
+        获取所有 Bot 列表
+
+        Returns:
+            Bot 列表，每个 Bot 包含统计信息
+        """
+        db = get_db_manager()
+
+        async with db.get_session() as session:
+            bot_repo = get_chatbot_repository(session)
+            rule_repo = get_access_rule_repository(session)
+
+            bots = await bot_repo.get_all(enabled_only=False)
+
+            result = []
+            for bot in bots:
+                # 统计访问规则数量
+                whitelist = await rule_repo.get_whitelist(bot.id)
+                blacklist = await rule_repo.get_blacklist(bot.id)
+
+                result.append({
+                    "id": bot.id,
+                    "bot_key": bot.bot_key,
+                    "name": bot.name,
+                    "description": bot.description or "",
+                    "url_template": bot.url_template,
+                    "agent_id": bot.agent_id or "",
+                    "api_key": bot.api_key or "",
+                    "timeout": bot.timeout,
+                    "access_mode": bot.access_mode,
+                    "enabled": bot.enabled,
+                    "whitelist_count": len(whitelist),
+                    "blacklist_count": len(blacklist),
+                    "created_at": bot.created_at.isoformat() if bot.created_at else None,
+                    "updated_at": bot.updated_at.isoformat() if bot.updated_at else None
+                })
+
+            return result
+
+    async def get_bot(self, bot_key: str) -> dict | None:
+        """
+        获取单个 Bot 详情
+
+        Args:
+            bot_key: Bot Key
+
+        Returns:
+            Bot 详情字典，包含访问规则列表，如果不存在返回 None
+        """
+        db = get_db_manager()
+
+        async with db.get_session() as session:
+            bot_repo = get_chatbot_repository(session)
+            rule_repo = get_access_rule_repository(session)
+
+            bot = await bot_repo.get_by_bot_key(bot_key)
+            if not bot:
+                return None
+
+            # 获取访问规则
+            whitelist_rules = await rule_repo.get_by_chatbot(bot.id, "whitelist")
+            blacklist_rules = await rule_repo.get_by_chatbot(bot.id, "blacklist")
+
+            return {
+                "id": bot.id,
+                "bot_key": bot.bot_key,
+                "name": bot.name,
+                "description": bot.description or "",
+                "url_template": bot.url_template,
+                "agent_id": bot.agent_id or "",
+                "api_key": bot.api_key or "",
+                "timeout": bot.timeout,
+                "access_mode": bot.access_mode,
+                "enabled": bot.enabled,
+                "created_at": bot.created_at.isoformat() if bot.created_at else None,
+                "updated_at": bot.updated_at.isoformat() if bot.updated_at else None,
+                "whitelist": [
+                    {
+                        "id": rule.id,
+                        "chat_id": rule.chat_id,
+                        "remark": rule.remark or ""
+                    }
+                    for rule in whitelist_rules
+                ],
+                "blacklist": [
+                    {
+                        "id": rule.id,
+                        "chat_id": rule.chat_id,
+                        "remark": rule.remark or ""
+                    }
+                    for rule in blacklist_rules
+                ]
+            }
+
+    async def create_bot(self, data: dict) -> dict:
+        """
+        创建新 Bot
+
+        Args:
+            data: Bot 配置字典
+
+        Returns:
+            {"success": bool, "bot": dict, "error": str}
+        """
+        try:
+            # 验证必填字段
+            required_fields = ["bot_key", "name", "url_template"]
+            missing = [f for f in required_fields if not data.get(f)]
+            if missing:
+                return {"success": False, "error": f"缺少必填字段: {', '.join(missing)}"}
+
+            db = get_db_manager()
+
+            async with db.get_session() as session:
+                bot_repo = get_chatbot_repository(session)
+                rule_repo = get_access_rule_repository(session)
+
+                # 检查 bot_key 是否已存在
+                existing = await bot_repo.get_by_bot_key(data["bot_key"])
+                if existing:
+                    return {"success": False, "error": f"Bot Key '{data['bot_key']}' 已存在"}
+
+                # 创建 Bot
+                bot = await bot_repo.create(
+                    bot_key=data["bot_key"],
+                    name=data["name"],
+                    url_template=data["url_template"],
+                    agent_id=data.get("agent_id", ""),
+                    api_key=data.get("api_key", ""),
+                    timeout=data.get("timeout", 60),
+                    access_mode=data.get("access_mode", "allow_all"),
+                    description=data.get("description", ""),
+                    enabled=data.get("enabled", True)
+                )
+
+                # 创建访问规则
+                whitelist = data.get("whitelist", [])
+                blacklist = data.get("blacklist", [])
+
+                for chat_id in whitelist:
+                    await rule_repo.create(bot.id, chat_id, "whitelist",
+                                          remark=data.get("whitelist_remark", ""))
+
+                for chat_id in blacklist:
+                    await rule_repo.create(bot.id, chat_id, "blacklist",
+                                          remark=data.get("blacklist_remark", ""))
+
+                await session.commit()
+
+                logger.info(f"创建 Bot 成功: {data['bot_key']}")
+
+                # 返回创建的 Bot 详情
+                created_bot = await self.get_bot(data["bot_key"])
+                return {"success": True, "bot": created_bot}
+
+        except Exception as e:
+            logger.error(f"创建 Bot 失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def update_bot(self, bot_key: str, data: dict) -> dict:
+        """
+        更新 Bot 配置
+
+        Args:
+            bot_key: Bot Key
+            data: 更新数据字典
+
+        Returns:
+            {"success": bool, "bot": dict, "error": str}
+        """
+        try:
+            db = get_db_manager()
+
+            async with db.get_session() as session:
+                bot_repo = get_chatbot_repository(session)
+                rule_repo = get_access_rule_repository(session)
+
+                # 检查 Bot 是否存在
+                bot = await bot_repo.get_by_bot_key(bot_key)
+                if not bot:
+                    return {"success": False, "error": f"Bot '{bot_key}' 不存在"}
+
+                # 更新 Bot 基本信息
+                await bot_repo.update(
+                    bot_id=bot.id,
+                    name=data.get("name"),
+                    description=data.get("description"),
+                    url_template=data.get("url_template"),
+                    agent_id=data.get("agent_id"),
+                    api_key=data.get("api_key"),
+                    timeout=data.get("timeout"),
+                    access_mode=data.get("access_mode"),
+                    enabled=data.get("enabled")
+                )
+
+                # 更新访问规则 (如果提供)
+                if "whitelist" in data or "blacklist" in data:
+                    # 清除现有规则
+                    await rule_repo.delete_by_chatbot(bot.id)
+
+                    # 创建新规则
+                    whitelist = data.get("whitelist", [])
+                    blacklist = data.get("blacklist", [])
+
+                    for chat_id in whitelist:
+                        await rule_repo.create(bot.id, chat_id, "whitelist")
+
+                    for chat_id in blacklist:
+                        await rule_repo.create(bot.id, chat_id, "blacklist")
+
+                await session.commit()
+
+                logger.info(f"更新 Bot 成功: {bot_key}")
+
+                # 重新加载配置到内存
+                await self.reload_config()
+
+                # 返回更新后的 Bot 详情
+                updated_bot = await self.get_bot(bot_key)
+                return {"success": True, "bot": updated_bot}
+
+        except Exception as e:
+            logger.error(f"更新 Bot 失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def delete_bot(self, bot_key: str) -> dict:
+        """
+        删除 Bot
+
+        Args:
+            bot_key: Bot Key
+
+        Returns:
+            {"success": bool, "error": str}
+        """
+        try:
+            db = get_db_manager()
+
+            async with db.get_session() as session:
+                bot_repo = get_chatbot_repository(session)
+
+                # 检查 Bot 是否存在
+                bot = await bot_repo.get_by_bot_key(bot_key)
+                if not bot:
+                    return {"success": False, "error": f"Bot '{bot_key}' 不存在"}
+
+                # 删除 Bot (会级联删除 access_rules)
+                success = await bot_repo.delete(bot.id)
+
+                if not success:
+                    return {"success": False, "error": "删除失败"}
+
+                await session.commit()
+
+                logger.info(f"删除 Bot 成功: {bot_key}")
+
+                # 重新加载配置到内存
+                await self.reload_config()
+
+                return {"success": True}
+
+        except Exception as e:
+            logger.error(f"删除 Bot 失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
 
 # ============== 全局配置实例 ==============
 

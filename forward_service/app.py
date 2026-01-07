@@ -468,8 +468,145 @@ async def admin_logs(limit: int = 20):
     }
 
 
-# ============== Bot 管理 API（V2） ==============
-# 注意：旧的规则管理 API 已移除，统一使用 /admin/config 管理所有 Bot
+# ============== Bot 管理 API（V2 - 数据库模式专用）=============
+
+@app.get("/admin/mode")
+async def get_mode():
+    """
+    获取当前配置模式（管理台用）
+
+    返回:
+        mode: "database" | "json"
+        supports_bot_api: 是否支持新的 Bot 管理 API
+    """
+    return {
+        "mode": "database" if USE_DATABASE else "json",
+        "supports_bot_api": USE_DATABASE,
+        "version": "2.0.0" if USE_DATABASE else "1.1.0"
+    }
+
+
+@app.get("/admin/bots")
+async def list_bots():
+    """
+    获取所有 Bot 列表
+
+    仅数据库模式支持此 API
+    """
+    if not USE_DATABASE:
+        return {
+            "success": False,
+            "error": "JSON 模式不支持 Bot 管理 API，请使用 /admin/config 管理配置"
+        }
+
+    bots = await config.list_bots()
+    return {
+        "success": True,
+        "bots": bots,
+        "total": len(bots)
+    }
+
+
+@app.get("/admin/bots/{bot_key}")
+async def get_bot_by_key(bot_key: str):
+    """
+    获取单个 Bot 详情
+
+    仅数据库模式支持此 API
+    """
+    if not USE_DATABASE:
+        return {
+            "success": False,
+            "error": "JSON 模式不支持此操作"
+        }
+
+    bot = await config.get_bot(bot_key)
+    if not bot:
+        return {
+            "success": False,
+            "error": f"Bot '{bot_key}' 不存在"
+        }
+
+    return {
+        "success": True,
+        "bot": bot
+    }
+
+
+@app.post("/admin/bots")
+async def create_bot(request: Request):
+    """
+    创建新 Bot
+
+    仅数据库模式支持此 API
+
+    Body:
+        bot_key: str (必填)
+        name: str (必填)
+        url_template: str (必填)
+        description: str
+        agent_id: str
+        api_key: str
+        timeout: int
+        access_mode: str
+        enabled: bool
+        whitelist: list[str]
+        blacklist: list[str]
+    """
+    if not USE_DATABASE:
+        return {
+            "success": False,
+            "error": "JSON 模式不支持此操作，请使用 /admin/config 管理配置"
+        }
+
+    try:
+        data = await request.json()
+        result = await config.create_bot(data)
+        return result
+    except Exception as e:
+        logger.error(f"创建 Bot 失败: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.put("/admin/bots/{bot_key}")
+async def update_bot_by_key(bot_key: str, request: Request):
+    """
+    更新 Bot 配置
+
+    仅数据库模式支持此 API
+
+    Body: 同 create_bot，所有字段都是可选的
+    """
+    if not USE_DATABASE:
+        return {
+            "success": False,
+            "error": "JSON 模式不支持此操作，请使用 /admin/config 管理配置"
+        }
+
+    try:
+        data = await request.json()
+        result = await config.update_bot(bot_key, data)
+        return result
+    except Exception as e:
+        logger.error(f"更新 Bot 失败: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+
+
+@app.delete("/admin/bots/{bot_key}")
+async def delete_bot_by_key(bot_key: str):
+    """
+    删除 Bot
+
+    仅数据库模式支持此 API
+    """
+    if not USE_DATABASE:
+        return {
+            "success": False,
+            "error": "JSON 模式不支持此操作，请使用 /admin/config 管理配置"
+        }
+
+    result = await config.delete_bot(bot_key)
+    return result
 
 
 # ============== 回调处理 ==============
