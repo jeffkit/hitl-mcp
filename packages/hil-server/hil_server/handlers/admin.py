@@ -245,6 +245,58 @@ async def reload_forward_config(user: str = Depends(get_current_user)):
     """重新加载 Forward Service 配置（需要登录）"""
     return await _reload_forward_service_config()
 
+
+# ============== Forward Service 代理 API ==============
+
+@router.api_route(
+    "/api/forward/proxy/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE"],
+)
+async def forward_proxy(
+    request: Request,
+    path: str,
+    user: str = Depends(get_current_user)
+):
+    """
+    代理请求到 Forward Service
+    
+    将 /admin/api/forward/proxy/* 的请求转发到 FORWARD_SERVICE_URL/*
+    """
+    if not config.forward_service_url:
+        raise HTTPException(status_code=503, detail="FORWARD_SERVICE_URL not configured")
+    
+    # 构建目标 URL
+    target_url = f"{config.forward_service_url}/{path}"
+    
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            # 获取请求体（如果有）
+            body = None
+            if request.method in ["POST", "PUT"]:
+                body = await request.body()
+            
+            # 构建请求头
+            headers = {}
+            if "content-type" in request.headers:
+                headers["content-type"] = request.headers["content-type"]
+            
+            # 发送请求
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                content=body,
+                headers=headers,
+                params=request.query_params,
+            )
+            
+            return response.json()
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Forward Service 请求超时")
+    except Exception as e:
+        logger.error(f"代理请求失败: {e}")
+        raise HTTPException(status_code=502, detail=f"Forward Service 请求失败: {str(e)}")
+
+
 # ============== 转发规则管理 API ==============
 
 @router.post("/api/forward/rules")
