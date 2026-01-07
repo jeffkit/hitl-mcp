@@ -10,7 +10,11 @@ Forward Service 数据库模型
 - 生产: MySQL
 """
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Optional
+try:
+    from typing import Literal
+except ImportError:
+    from typing_extensions import Literal
 from sqlalchemy import (
     String, Boolean, Integer, Text, DateTime, ForeignKey,
     Index, UniqueConstraint
