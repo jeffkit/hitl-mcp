@@ -17,3 +17,9 @@ PyJWT>=2.8.0
 
 # Common
 python-dotenv>=1.0.0
+
+# Database
+sqlalchemy>=2.0.0
+aiosqlite>=0.19.0  # SQLite async support (for dev/test)
+pymysql>=1.1.0     # MySQL driver (for production)
+cryptography>=41.0.0  # Required by PyMySQL

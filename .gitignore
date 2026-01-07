@@ -38,6 +38,7 @@ ENV/
 data/
 *.log
 check_quote.py
+.a2a/
 
 # OS
 .DS_Store

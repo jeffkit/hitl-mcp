@@ -8,7 +8,12 @@ Forward Service 主应用
     python -m forward_service.app
     # 或
     uvicorn forward_service.app:app --host 0.0.0.0 --port 8083
+
+配置方式:
+    - JSON 文件 (默认): USE_DATABASE=false 或不设置
+    - 数据库: USE_DATABASE=true
 """
+import os
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -24,18 +29,28 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from .config import config as config_v1  # 旧配置（兼容）
-from .config_v2 import config_v2  # 新配置（多 Bot）
+from .config_v2 import config_v2  # 新配置（JSON 文件）
+from .config_db import config_db  # 数据库配置
 from .sender import send_reply
 
-# 使用新配置系统
-config = config_v2
+# 根据环境变量选择配置方式
+USE_DATABASE = os.getenv("USE_DATABASE", "").lower() in ("1", "true", "yes")
+
+if USE_DATABASE:
+    from .database import database_lifespan
+    config = config_db
+    logger = logging.getLogger(__name__)
+    logger.info("✅ 使用数据库配置 (USE_DATABASE=true)")
+else:
+    config = config_v2  # JSON 文件配置
+    logger = logging.getLogger(__name__)
+    logger.info("📄 使用 JSON 文件配置 (USE_DATABASE=false)")
 
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
-logger = logging.getLogger(__name__)
 
 
 # ============== 数据模型 ==============
@@ -251,31 +266,56 @@ async def forward_to_agent_with_bot(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 启动时验证配置
-    errors = config.validate()
-    if errors:
-        for error in errors:
-            logger.warning(f"配置警告: {error}")
-    
-    logger.info(f"Forward Service 启动（多 Bot 支持 v2.0）")
-    logger.info(f"  端口: {config.port}")
-    logger.info(f"  默认 Bot Key: {config.default_bot_key[:10]}..." if config.default_bot_key else "  默认 Bot Key: 未配置")
-    logger.info(f"  Bot 数量: {len(config.bots)}")
-    
-    # 列出所有 Bot
-    for bot_key, bot in config.bots.items():
-        logger.info(f"  - {bot.name} (key={bot_key[:10]}..., enabled={bot.enabled})")
-    
-    yield
-    
-    logger.info("Forward Service 关闭")
+    # 数据库配置需要初始化数据库
+    if USE_DATABASE:
+        async with database_lifespan():
+            # 初始化配置
+            await config.initialize()
+
+            # 验证配置
+            errors = config.validate()
+            if errors:
+                for error in errors:
+                    logger.warning(f"配置警告: {error}")
+
+            logger.info(f"Forward Service 启动（数据库模式 v3.0）")
+            logger.info(f"  端口: {config.port}")
+            logger.info(f"  默认 Bot Key: {config.default_bot_key[:10]}..." if config.default_bot_key else "  默认 Bot Key: 未配置")
+            logger.info(f"  Bot 数量: {len(config.bots)}")
+
+            # 列出所有 Bot
+            for bot_key, bot in config.bots.items():
+                logger.info(f"  - {bot.name} (key={bot_key[:10]}..., enabled={bot.enabled})")
+
+            yield
+
+            logger.info("Forward Service 关闭")
+    else:
+        # JSON 配置模式
+        errors = config.validate()
+        if errors:
+            for error in errors:
+                logger.warning(f"配置警告: {error}")
+
+        logger.info(f"Forward Service 启动（JSON 配置模式 v2.0）")
+        logger.info(f"  端口: {config.port}")
+        logger.info(f"  默认 Bot Key: {config.default_bot_key[:10]}..." if config.default_bot_key else "  默认 Bot Key: 未配置")
+        logger.info(f"  Bot 数量: {len(config.bots)}")
+
+        # 列出所有 Bot
+        for bot_key, bot in config.bots.items():
+            logger.info(f"  - {bot.name} (key={bot_key[:10]}..., enabled={bot.enabled})")
+
+        yield
+
+        logger.info("Forward Service 关闭")
 
 
 # 创建 FastAPI 应用
 app = FastAPI(
     title="Forward Service",
     description="消息转发服务 - 接收企微回调，转发到 Agent",
-    version="1.1.0",
+    version="2.0.0" if USE_DATABASE else "1.1.0",
     lifespan=lifespan
 )
 
@@ -358,7 +398,13 @@ async def update_config(request: Request):
     """更新完整配置（管理台用）"""
     try:
         data = await request.json()
-        result = config.update_from_dict(data)
+
+        # 数据库配置需要异步更新
+        if USE_DATABASE:
+            result = await config.update_from_dict(data)
+        else:
+            result = config.update_from_dict(data)
+
         return result
     except Exception as e:
         logger.error(f"更新配置失败: {e}")
@@ -368,7 +414,11 @@ async def update_config(request: Request):
 @app.post("/admin/config/reload")
 async def reload_config():
     """重新加载配置"""
-    return config.reload_config()
+    # 数据库配置需要异步重载
+    if USE_DATABASE:
+        return await config.reload_config()
+    else:
+        return config.reload_config()
 
 
 # ============== 兼容性 API（旧版规则管理） ==============

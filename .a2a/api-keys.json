@@ -15,7 +15,8 @@
       "keyHash": "$2a$10$odAY8SUVGxoYs4KiaurCaeYg2AMoXyJ85C6v3jzWPGeM4Bmzkh11G",
       "encryptedKey": "4a0b60b4aedfc236bfeda7b3:f114af814ff9df901f899e9431cc3ef3:a71961d0edf9220a8919c7dac7ba1459b4a7b0e03d166184a426a4d3a9cdf24b8fa68128ac3a097c54c100fba8258150c9af",
       "description": "用于从 jarvis 调用",
-      "createdAt": "2026-01-07T03:52:15.797Z"
+      "createdAt": "2026-01-07T03:52:15.797Z",
+      "lastUsedAt": "2026-01-07T05:13:35.122Z"
     }
   ]
 }
