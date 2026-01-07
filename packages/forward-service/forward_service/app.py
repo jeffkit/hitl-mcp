@@ -37,7 +37,8 @@ from .sender import send_reply
 USE_DATABASE = os.getenv("USE_DATABASE", "").lower() in ("1", "true", "yes")
 
 if USE_DATABASE:
-    from .database import database_lifespan
+    from .database import database_lifespan, get_db_manager
+    from .session_manager import SessionManager, init_session_manager, get_session_manager
     config = config_db
     logger = logging.getLogger(__name__)
     logger.info("✅ 使用数据库配置 (USE_DATABASE=true)")
@@ -155,11 +156,20 @@ def extract_content(data: dict) -> tuple[str | None, str | None]:
     return None, None
 
 
+@dataclass
+class AgentResult:
+    """Agent 响应结果（包含 session_id）"""
+    reply: str
+    msg_type: str = "text"
+    session_id: str | None = None
+
+
 async def forward_to_agent_with_bot(
     bot_key: str | None,
     content: str,
-    timeout: int
-) -> ForwardResponse | None:
+    timeout: int,
+    session_id: str | None = None
+) -> AgentResult | None:
     """
     使用指定 Bot 转发消息到 Agent
     
@@ -167,9 +177,10 @@ async def forward_to_agent_with_bot(
         bot_key: Bot Key
         content: 消息内容
         timeout: 超时时间（秒）
+        session_id: 会话 ID（可选，用于会话持续性）
     
     Returns:
-        ForwardResponse 或 None
+        AgentResult 或 None
     """
     # 获取 Bot 配置
     bot = config.get_bot_or_default(bot_key)
@@ -189,7 +200,7 @@ async def forward_to_agent_with_bot(
     # 使用 Bot 自己的 timeout（如果配置了）
     bot_timeout = bot.forward_config.timeout or timeout
     
-    logger.info(f"转发消息到 Agent: url={target_url}")
+    logger.info(f"转发消息到 Agent: url={target_url}, session_id={session_id[:8] if session_id else 'None'}...")
     
     # 构建请求头
     headers = {"Content-Type": "application/json"}
@@ -198,6 +209,8 @@ async def forward_to_agent_with_bot(
     
     # 构建请求体（AgentStudio 格式）
     request_body = {"message": content}
+    if session_id:
+        request_body["session_id"] = session_id
     
     start_time = datetime.now()
     
@@ -213,7 +226,7 @@ async def forward_to_agent_with_bot(
             
             if response.status_code != 200:
                 logger.error(f"Agent 返回错误: status={response.status_code}, body={response.text[:200]}")
-                return ForwardResponse(
+                return AgentResult(
                     reply=f"⚠️ Agent 返回错误\n状态码: {response.status_code}\n响应: {response.text[:200]}",
                     msg_type="text"
                 )
@@ -221,41 +234,51 @@ async def forward_to_agent_with_bot(
             result = response.json()
             logger.info(f"Agent 响应: {str(result)[:200]}")
             
+            # 提取 session_id（Agent 可能返回新的 session_id）
+            response_session_id = result.get("session_id") or result.get("sessionId") or session_id
+            
             # 适配 AgentStudio 响应格式: {"response": "..."}
             if "response" in result:
-                return ForwardResponse(
+                return AgentResult(
                     reply=result["response"],
-                    msg_type="text"
+                    msg_type="text",
+                    session_id=response_session_id
                 )
             
             # 兼容标准格式: {"reply": "...", "msg_type": "..."}
             if "reply" in result:
-                return ForwardResponse(**result)
+                return AgentResult(
+                    reply=result.get("reply", ""),
+                    msg_type=result.get("msg_type", "text"),
+                    session_id=response_session_id
+                )
             
             # 兼容其他格式
             if "data" in result or "json" in result:
                 raw_data = result.get("json") or result.get("data", {})
-                return ForwardResponse(
+                return AgentResult(
                     reply=f"✅ 消息已处理\n\n响应数据:\n```\n{raw_data}\n```",
-                    msg_type="text"
+                    msg_type="text",
+                    session_id=response_session_id
                 )
             
             # 默认返回原始响应
             import json as json_module
-            return ForwardResponse(
+            return AgentResult(
                 reply=f"✅ Agent 响应:\n```\n{json_module.dumps(result, ensure_ascii=False, indent=2)[:500]}\n```",
-                msg_type="text"
+                msg_type="text",
+                session_id=response_session_id
             )
             
     except httpx.TimeoutException:
         logger.error(f"转发请求超时: {target_url}")
-        return ForwardResponse(
+        return AgentResult(
             reply="⚠️ 请求超时，Agent 响应时间过长",
             msg_type="text"
         )
     except Exception as e:
         logger.error(f"转发请求失败: {e}", exc_info=True)
-        return ForwardResponse(
+        return AgentResult(
             reply=f"⚠️ 请求失败: {str(e)}",
             msg_type="text"
         )
@@ -271,6 +294,10 @@ async def lifespan(app: FastAPI):
         async with database_lifespan():
             # 初始化配置
             await config.initialize()
+
+            # 初始化会话管理器
+            init_session_manager(get_db_manager())
+            logger.info("  会话管理器已初始化")
 
             # 验证配置
             errors = config.validate()
@@ -717,6 +744,74 @@ async def handle_callback(
             logger.warning("消息内容为空，跳过处理")
             return {"errcode": 0, "errmsg": "empty content"}
         
+        # === 会话管理：处理 Slash 命令 ===
+        if USE_DATABASE and content:
+            session_mgr = get_session_manager()
+            slash_cmd = session_mgr.parse_slash_command(content)
+            
+            if slash_cmd:
+                cmd_type, cmd_arg = slash_cmd
+                logger.info(f"处理 Slash 命令: {cmd_type}, arg={cmd_arg}")
+                
+                if cmd_type == "list":
+                    # /sess - 列出会话
+                    sessions = await session_mgr.list_sessions(from_user_id, chat_id)
+                    reply_msg = session_mgr.format_session_list(sessions)
+                    await send_reply(
+                        chat_id=chat_id,
+                        message=reply_msg,
+                        msg_type="text",
+                        bot_key=bot.bot_key
+                    )
+                    return {"errcode": 0, "errmsg": "slash command handled"}
+                
+                elif cmd_type == "reset":
+                    # /reset - 重置会话
+                    success = await session_mgr.reset_session(from_user_id, chat_id, bot.bot_key)
+                    if success:
+                        await send_reply(
+                            chat_id=chat_id,
+                            message="✅ 会话已重置，下次发送消息将开始新对话",
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                    else:
+                        await send_reply(
+                            chat_id=chat_id,
+                            message="ℹ️ 当前没有活跃会话",
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                    return {"errcode": 0, "errmsg": "slash command handled"}
+                
+                elif cmd_type == "change":
+                    # /change <short_id> - 切换会话
+                    target_session = await session_mgr.change_session(from_user_id, chat_id, cmd_arg)
+                    if target_session:
+                        await send_reply(
+                            chat_id=chat_id,
+                            message=f"✅ 已切换到会话 `{target_session.short_id}`\n最后消息: {target_session.last_message or '(无)'}",
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                    else:
+                        await send_reply(
+                            chat_id=chat_id,
+                            message=f"❌ 未找到会话 `{cmd_arg}`\n使用 `/s` 查看可用会话",
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                    return {"errcode": 0, "errmsg": "slash command handled"}
+        
+        # === 会话管理：获取现有 session_id ===
+        current_session_id = None
+        if USE_DATABASE:
+            session_mgr = get_session_manager()
+            active_session = await session_mgr.get_active_session(from_user_id, chat_id, bot.bot_key)
+            if active_session:
+                current_session_id = active_session.session_id
+                logger.info(f"找到活跃会话: {active_session.short_id}")
+        
         # 获取目标 URL（用于日志）
         target_url = bot.forward_config.get_url()
         
@@ -730,11 +825,12 @@ async def handle_callback(
             status="pending"
         )
         
-        # 转发到 Agent（使用 Bot 配置）
+        # 转发到 Agent（使用 Bot 配置，带上 session_id）
         result = await forward_to_agent_with_bot(
             bot_key=bot.bot_key,
             content=content or "",
-            timeout=config.timeout
+            timeout=config.timeout,
+            session_id=current_session_id
         )
         
         duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
@@ -753,6 +849,18 @@ async def handle_callback(
                 bot_key=bot.bot_key
             )
             return {"errcode": 0, "errmsg": "forward failed"}
+        
+        # === 会话管理：记录 Agent 返回的 session_id ===
+        if USE_DATABASE and result.session_id:
+            session_mgr = get_session_manager()
+            await session_mgr.record_session(
+                user_id=from_user_id,
+                chat_id=chat_id,
+                bot_key=bot.bot_key,
+                session_id=result.session_id,
+                last_message=content or "(image)"
+            )
+            logger.info(f"会话已记录: session={result.session_id[:8]}...")
         
         # 发送结果给用户（使用正确的 bot_key）
         send_result = await send_reply(

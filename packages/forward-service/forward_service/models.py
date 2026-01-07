@@ -255,6 +255,122 @@ class Chatbot(Base):
         return data
 
 
+class UserSession(Base):
+    """
+    用户会话表
+    
+    记录用户与 Agent 的会话信息，用于：
+    - 会话持续性：下次用户上行时带上 session_id
+    - 会话管理：支持 /sess, /reset, /change 命令
+    """
+    __tablename__ = "user_sessions"
+    
+    # 主键
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    
+    # 用户标识
+    user_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="用户 ID"
+    )
+    
+    # 会话上下文
+    chat_id: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        index=True,
+        comment="Chat ID (群ID或私聊ID)"
+    )
+    
+    bot_key: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="关联的 Bot Key"
+    )
+    
+    # Agent 会话 ID
+    session_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Agent 返回的 Session ID"
+    )
+    
+    short_id: Mapped[str] = mapped_column(
+        String(8),
+        nullable=False,
+        index=True,
+        comment="Session ID 短标识 (前8位)"
+    )
+    
+    # 会话信息
+    last_message: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="用户最后一条消息 (用于展示)"
+    )
+    
+    message_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        comment="消息计数"
+    )
+    
+    # 状态
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        comment="是否为当前活跃会话"
+    )
+    
+    # 时间戳
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        comment="创建时间"
+    )
+    
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        comment="更新时间"
+    )
+    
+    # 索引
+    __table_args__ = (
+        Index("idx_user_session_active", "user_id", "chat_id", "bot_key", "is_active"),
+        Index("idx_user_session_short_id", "user_id", "chat_id", "short_id"),
+    )
+    
+    def __repr__(self) -> str:
+        return f"<UserSession(id={self.id}, user={self.user_id[:10]}, session={self.short_id})>"
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "chat_id": self.chat_id,
+            "bot_key": self.bot_key,
+            "session_id": self.session_id,
+            "short_id": self.short_id,
+            "last_message": self.last_message,
+            "message_count": self.message_count,
+            "is_active": self.is_active,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class ChatAccessRule(Base):
     """
     Chat 访问规则表 (黑白名单)
