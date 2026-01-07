@@ -395,19 +395,19 @@
                     <span class="card-title">默认配置</span>
                 </div>
                 <div class="config-item">
-                    <span class="config-key">默认 URL</span>
+                    <span class="config-key">默认 Bot Key</span>
                     <span id="default-url" class="config-value" style="word-break: break-all;">-</span>
                 </div>
                 <div class="config-item">
-                    <span class="config-key">规则数量</span>
+                    <span class="config-key">Bot 数量</span>
                     <span id="rules-count" class="config-value">-</span>
                 </div>
             </div>
         </div>
 
         <div class="section">
-            <h2 class="section-title">📋 转发规则</h2>
-            <div id="rules-container">
+            <h2 class="section-title">🤖 Bot 配置列表</h2>
+            <div id="bots-container">
                 <div class="loading">加载中...</div>
             </div>
         </div>
@@ -465,8 +465,8 @@
                 document.getElementById('stats-error').textContent = data.stats?.recent_error || '0';
                 
                 // 更新默认配置
-                document.getElementById('default-url').textContent = data.config?.forward_url || '未配置';
-                document.getElementById('rules-count').textContent = data.config?.rules_count || '0';
+                document.getElementById('default-url').textContent = data.config?.default_bot_key?.slice(0, 16) + '...' || '未配置';
+                document.getElementById('rules-count').textContent = data.config?.bots_count || '0';
                 
                 hideError();
             } catch (error) {
@@ -477,18 +477,19 @@
             }
         }
 
-        async function loadRules() {
-            const container = document.getElementById('rules-container');
+        async function loadBots() {
+            const container = document.getElementById('bots-container');
             
             try {
-                const data = await fetchData('/admin/rules');
-                const rules = data.rules || {};
+                const data = await fetchData('/admin/config');
+                const bots = data.bots || {};
+                const defaultBotKey = data.default_bot_key;
                 
-                if (Object.keys(rules).length === 0) {
+                if (Object.keys(bots).length === 0) {
                     container.innerHTML = `
                         <div class="empty-state">
-                            暂无配置的转发规则<br>
-                            <small style="color: var(--text-secondary);">将使用默认 URL 处理所有请求</small>
+                            暂无配置的 Bot<br>
+                            <small style="color: var(--text-secondary);">请添加至少一个 Bot 配置</small>
                         </div>
                     `;
                     return;
@@ -498,24 +499,40 @@
                     <table class="rules-table">
                         <thead>
                             <tr>
-                                <th>Chat ID</th>
-                                <th>URL 模板</th>
-                                <th>Agent ID</th>
-                                <th>API Key</th>
-                                <th>类型</th>
+                                <th>Bot 名称</th>
+                                <th>Bot Key</th>
+                                <th>转发 URL</th>
+                                <th>访问模式</th>
+                                <th>状态</th>
                             </tr>
                         </thead>
                         <tbody>
                 `;
                 
-                for (const [chatId, rule] of Object.entries(rules)) {
+                for (const [botKey, bot] of Object.entries(bots)) {
+                    const isDefault = botKey === defaultBotKey;
+                    const defaultTag = isDefault ? '<span class="tag" style="color: var(--accent-green);">默认</span> ' : '';
+                    const statusTag = bot.enabled ? 
+                        '<span class="tag" style="color: var(--accent-green);">启用</span>' : 
+                        '<span class="tag" style="color: var(--text-secondary);">禁用</span>';
+                    
+                    const accessMode = bot.access_control?.mode || 'allow_all';
+                    const accessText = {
+                        'allow_all': '允许所有',
+                        'whitelist': `白名单 (${bot.access_control?.whitelist?.length || 0})`,
+                        'blacklist': `黑名单 (${bot.access_control?.blacklist?.length || 0})`
+                    }[accessMode] || accessMode;
+                    
+                    const url = bot.forward_config?.url_template || '-';
+                    const displayUrl = url.length > 50 ? url.slice(0, 47) + '...' : url;
+                    
                     html += `
                         <tr>
-                            <td>${chatId}</td>
-                            <td style="color: var(--accent-blue); max-width: 300px; overflow: hidden; text-overflow: ellipsis;">${rule.url_template || '-'}</td>
-                            <td>${rule.agent_id || '-'}</td>
-                            <td>${rule.api_key ? '****' + rule.api_key.slice(-4) : '-'}</td>
-                            <td><span class="tag">${rule.type || 'simple'}</span></td>
+                            <td style="font-weight: 600;">${defaultTag}${bot.name || '未命名'}</td>
+                            <td style="font-size: 11px; color: var(--text-secondary);">${botKey.slice(0, 16)}...</td>
+                            <td style="color: var(--accent-blue);" title="${url}">${displayUrl}</td>
+                            <td><span class="tag">${accessText}</span></td>
+                            <td>${statusTag}</td>
                         </tr>
                     `;
                 }
@@ -526,7 +543,7 @@
             } catch (error) {
                 container.innerHTML = `
                     <div class="empty-state" style="color: var(--accent-red);">
-                        加载规则失败
+                        加载 Bot 配置失败
                     </div>
                 `;
             }
@@ -587,7 +604,7 @@
         async function refreshAll() {
             await Promise.all([
                 loadStatus(),
-                loadRules(),
+                loadBots(),
                 loadLogs()
             ]);
         }

@@ -375,10 +375,36 @@ async def reload_config():
 
 @app.get("/admin/rules")
 async def admin_rules():
-    """获取所有 Bot 配置（兼容旧 API）"""
+    """
+    获取所有 Bot 配置（兼容旧 API）
+    
+    为了与旧版管理台兼容，将 bots 格式转换为类似 rules 的格式
+    以 bot_key 作为 key，bot 配置作为 value
+    """
+    # 新格式：返回 bots 数据，但保持向后兼容
+    bots_dict = {}
+    
+    for bot_key, bot in config.bots.items():
+        # 将 bot 配置转换为类似旧 rule 的格式
+        bots_dict[bot_key] = {
+            "url_template": bot.forward_config.url_template,
+            "agent_id": bot.forward_config.agent_id,
+            "api_key": bot.forward_config.api_key,
+            "name": bot.name,
+            "timeout": bot.forward_config.timeout,
+            # 额外信息
+            "bot_name": bot.name,
+            "description": bot.description,
+            "access_mode": bot.access_control.mode,
+            "enabled": bot.enabled,
+            "is_default": bot_key == config.default_bot_key
+        }
+    
     return {
+        "default_url": config.default_bot_key,  # 返回默认 bot_key（兼容）
         "default_bot_key": config.default_bot_key,
-        "bots": config.get_all_bots()
+        "rules": bots_dict,  # 保持 rules 字段名（兼容）
+        "bots": bots_dict  # 同时提供 bots 字段（新）
     }
 
 
