@@ -79,8 +79,8 @@ async def handle_callback(
         
         logger.info(f"使用 Bot: {bot.name} (key={bot.bot_key[:10]}...)")
         
-        # === 访问控制检查 ===
-        allowed, reason = config.check_access(bot, from_user_id)
+        # === 访问控制检查 (同时检查 user_id 和 chat_id) ===
+        allowed, reason = config.check_access(bot, from_user_id, chat_id)
         if not allowed:
             logger.warning(f"用户 {from_user_name} ({from_user_id}) 被拒绝访问 Bot {bot.name}: {reason}")
             
@@ -89,7 +89,7 @@ async def handle_callback(
                 logger.info(f"尝试回退到默认 Bot: {config.default_bot_key}")
                 default_bot = config.get_bot(config.default_bot_key)
                 if default_bot:
-                    default_allowed, default_reason = config.check_access(default_bot, from_user_id)
+                    default_allowed, default_reason = config.check_access(default_bot, from_user_id, chat_id)
                     if default_allowed:
                         bot = default_bot
                         logger.info(f"使用默认 Bot: {bot.name}")
