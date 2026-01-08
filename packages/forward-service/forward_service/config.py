@@ -1,302 +1,679 @@
 """
-Forward Service 配置管理
+Forward Service 配置管理 - 数据库版本
 
-环境变量:
-    FORWARD_BOT_KEY: 企微机器人 Webhook Key（必填）
-    FORWARD_URL: 默认转发目标 URL（可选，兜底配置）
-    FORWARD_RULES: JSON 格式的 chat_id 配置（支持复杂配置）
-    FORWARD_PORT: 服务端口（默认 8083）
-    FORWARD_TIMEOUT: 转发请求超时时间（默认 60 秒）
+与 config_v2.py 接口完全兼容,但使用数据库存储而不是 JSON 文件。
 
-FORWARD_RULES 格式示例:
-{
-    "chat_id_1": {
-        "url_template": "https://server/a2a/{agent_id}/messages",
-        "agent_id": "agent-001",
-        "api_key": "key-001",
-        "name": "Agent 1"
-    },
-    "chat_id_2": "https://simple-url.com/api"  // 简单格式也支持
-}
+主要差异:
+- 配置存储在数据库中,而不是 JSON 文件
+- 支持动态更新,无需重启服务
+- 与 config_v2.py 接口兼容,可以无缝切换
+
+使用方式:
+    # 使用数据库配置
+    from forward_service.config_db import ConfigDB
+    config = ConfigDB()
 """
-import os
-import json
 import logging
-from dataclasses import dataclass, field
-from typing import TypedDict
+import re
+from typing import Optional
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from .database import get_db_manager
+from .models import Chatbot
+from .repository import get_chatbot_repository, get_access_rule_repository
 
 logger = logging.getLogger(__name__)
 
 
-# AgentConfig 使用 dict 类型，因为 TypedDict 在 Python 3.10 不支持 NotRequired
-# 格式: {"url_template": "...", "agent_id": "...", "api_key": "...", "name": "..."}
-# 其中只有 url_template 是必须的
-AgentConfig = dict
+# ============== 数据类定义 (与 config_v2 兼容) ==============
+
+class ForwardConfig:
+    """转发配置 (与 config_v2.ForwardConfig 兼容)"""
+    def __init__(
+        self,
+        url_template: str,
+        agent_id: str = "",
+        api_key: str = "",
+        timeout: int = 60
+    ):
+        self.url_template = url_template
+        self.agent_id = agent_id
+        self.api_key = api_key
+        self.timeout = timeout
+
+    def to_dict(self) -> dict:
+        return {
+            "url_template": self.url_template,
+            "agent_id": self.agent_id,
+            "api_key": self.api_key,
+            "timeout": self.timeout
+        }
+
+    @classmethod
+    def from_bot(cls, bot: Chatbot) -> "ForwardConfig":
+        """从 Chatbot 模型创建 ForwardConfig"""
+        return cls(
+            url_template=bot.url_template,
+            agent_id=bot.agent_id or "",
+            api_key=bot.api_key or "",
+            timeout=bot.timeout
+        )
+
+    def get_url(self) -> str:
+        """获取完整 URL（替换占位符）"""
+        return self.url_template.replace("{agent_id}", self.agent_id)
 
 
-@dataclass
-class Config:
-    """配置类"""
-    
-    # 企微机器人 Webhook Key
-    bot_key: str = ""
-    
-    # 默认转发目标 URL（兜底）
-    forward_url: str = ""
-    
-    # chat_id -> AgentConfig 映射
-    # 支持两种格式：
-    # 1. 简单格式: {"chat_id": "https://url"}
-    # 2. 完整格式: {"chat_id": {"url_template": "...", "agent_id": "...", "api_key": "..."}}
-    forward_rules: dict[str, str | AgentConfig] = field(default_factory=dict)
-    
-    # 服务端口
-    port: int = 8083
-    
-    # 转发请求超时时间（秒）
-    timeout: int = 60
-    
-    # 回调鉴权（可选）
-    callback_auth_key: str = ""
-    callback_auth_value: str = ""
-    
-    # 配置文件路径
-    config_file: str = ""
-    
-    def __post_init__(self):
-        """加载配置（优先级：JSON 配置文件 > 环境变量 > 默认值）"""
-        # 1. 先从 JSON 配置文件加载
-        self._load_config_file()
-        
-        # 2. 环境变量可覆盖配置文件的值
-        if os.getenv("FORWARD_BOT_KEY"):
-            self.bot_key = os.getenv("FORWARD_BOT_KEY")
-        if os.getenv("FORWARD_URL"):
-            self.forward_url = os.getenv("FORWARD_URL")
+class AccessControl:
+    """访问控制配置 (与 config_v2.AccessControl 兼容)"""
+    def __init__(
+        self,
+        mode: str = "allow_all",
+        whitelist: list[str] | None = None,
+        blacklist: list[str] | None = None
+    ):
+        self.mode = mode
+        self.whitelist = whitelist or []
+        self.blacklist = blacklist or []
+
+    def to_dict(self) -> dict:
+        return {
+            "mode": self.mode,
+            "whitelist": self.whitelist,
+            "blacklist": self.blacklist
+        }
+
+    @classmethod
+    def from_bot(cls, bot: Chatbot) -> "AccessControl":
+        """从 Chatbot 模型创建 AccessControl (需要预加载 access_rules)"""
+        whitelist = []
+        blacklist = []
+
+        for rule in bot.access_rules:
+            if rule.rule_type == "whitelist":
+                whitelist.append(rule.chat_id)
+            elif rule.rule_type == "blacklist":
+                blacklist.append(rule.chat_id)
+
+        return cls(
+            mode=bot.access_mode,
+            whitelist=whitelist,
+            blacklist=blacklist
+        )
+
+    def check_access(self, user_id: str) -> tuple[bool, str]:
+        """检查用户是否有权限访问"""
+        if self.mode == "allow_all":
+            return True, ""
+
+        elif self.mode == "whitelist":
+            if user_id in self.whitelist:
+                return True, ""
+            return False, "您不在白名单中，无权访问此 Bot"
+
+        elif self.mode == "blacklist":
+            if user_id in self.blacklist:
+                return False, "您已被加入黑名单，无法访问此 Bot"
+            return True, ""
+
+        return False, "未知的访问控制模式"
+
+
+class BotConfig:
+    """Bot 配置 (与 config_v2.BotConfig 兼容)"""
+    def __init__(
+        self,
+        bot_key: str,
+        name: str = "未命名 Bot",
+        description: str = "",
+        forward_config: ForwardConfig | None = None,
+        access_control: AccessControl | None = None,
+        enabled: bool = True,
+        _bot: Chatbot | None = None  # 内部使用,保留对数据库模型的引用
+    ):
+        self.bot_key = bot_key
+        self.name = name
+        self.description = description
+        self.forward_config = forward_config or ForwardConfig(url_template="")
+        self.access_control = access_control or AccessControl()
+        self.enabled = enabled
+        self._bot = _bot  # 保留数据库模型引用
+
+    def to_dict(self) -> dict:
+        return {
+            "bot_key": self.bot_key,
+            "name": self.name,
+            "description": self.description,
+            "forward_config": self.forward_config.to_dict(),
+            "access_control": self.access_control.to_dict(),
+            "enabled": self.enabled
+        }
+
+    @classmethod
+    def from_bot(cls, bot: Chatbot) -> "BotConfig":
+        """从 Chatbot 数据库模型创建 BotConfig"""
+        return cls(
+            bot_key=bot.bot_key,
+            name=bot.name,
+            description=bot.description or "",
+            forward_config=ForwardConfig.from_bot(bot),
+            access_control=AccessControl.from_bot(bot),
+            enabled=bot.enabled,
+            _bot=bot  # 保留数据库模型引用
+        )
+
+
+# ============== 数据库配置类 ==============
+
+class ConfigDB:
+    """
+    数据库配置类 (与 ConfigV2 接口兼容)
+
+    从数据库加载配置,而不是 JSON 文件。
+
+    环境变量:
+        DATABASE_URL: 数据库连接 URL
+        DEFAULT_BOT_KEY: 默认 Bot Key
+    """
+
+    def __init__(self):
+        """初始化配置"""
+        self.default_bot_key: str = ""
+        self.bots: dict[str, BotConfig] = {}
+        self.port: int = 8083
+        self.timeout: int = 60
+        self.callback_auth_key: str = ""
+        self.callback_auth_value: str = ""
+
+    async def initialize(self):
+        """初始化配置 - 从数据库加载"""
+        import os
+
+        # 从环境变量加载基本配置
         if os.getenv("FORWARD_PORT"):
             self.port = int(os.getenv("FORWARD_PORT"))
         if os.getenv("FORWARD_TIMEOUT"):
             self.timeout = int(os.getenv("FORWARD_TIMEOUT"))
-        
-        # 回调鉴权
-        self.callback_auth_key = os.getenv("CALLBACK_AUTH_KEY", self.callback_auth_key)
-        self.callback_auth_value = os.getenv("CALLBACK_AUTH_VALUE", self.callback_auth_value)
-        
-        # 解析环境变量中的转发规则（会与配置文件规则合并）
-        rules_str = os.getenv("FORWARD_RULES", "")
-        if rules_str:
-            try:
-                env_rules = json.loads(rules_str)
-                self.forward_rules.update(env_rules)
-                logger.info(f"从环境变量加载了 {len(env_rules)} 条转发规则")
-            except json.JSONDecodeError as e:
-                logger.warning(f"解析 FORWARD_RULES 失败: {e}")
-        
-        # 从 data/forward_rules.json 加载规则（补充）
-        self._load_rules()
-    
-    def _get_config_file_path(self) -> str:
-        """获取主配置文件路径"""
-        # 支持通过环境变量指定配置文件
-        if os.getenv("FORWARD_CONFIG_FILE"):
-            return os.getenv("FORWARD_CONFIG_FILE")
-        # 默认在项目根目录
-        return os.path.join(os.path.dirname(__file__), "..", "forward_config.json")
-    
-    def _load_config_file(self):
-        """从 JSON 配置文件加载"""
-        config_file = self._get_config_file_path()
-        
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                
-                self.bot_key = data.get("bot_key", self.bot_key)
-                self.forward_url = data.get("default_url", self.forward_url)
-                self.port = data.get("port", self.port)
-                self.timeout = data.get("timeout", self.timeout)
-                self.forward_rules = data.get("rules", self.forward_rules)
-                self.config_file = config_file
-                
-                logger.info(f"从 {config_file} 加载配置: bot_key={self.bot_key[:8]}..., rules={len(self.forward_rules)}")
-            except Exception as e:
-                logger.error(f"加载配置文件失败: {e}")
-        else:
-            logger.info(f"配置文件不存在: {config_file}，使用环境变量配置")
-    
-    def save_config(self):
-        """保存配置到 JSON 文件"""
-        config_file = self._get_config_file_path()
-        
-        try:
-            data = {
-                "bot_key": self.bot_key,
-                "port": self.port,
-                "timeout": self.timeout,
-                "default_url": self.forward_url,
-                "rules": self.forward_rules,
-                "description": "Forward Service - 反向消息流"
-            }
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            logger.info(f"配置已保存到 {config_file}")
-            return {"success": True, "message": "配置已保存"}
-        except Exception as e:
-            logger.error(f"保存配置失败: {e}")
-            return {"success": False, "error": str(e)}
-    
-    def reload_config(self):
-        """重新加载配置"""
-        self._load_config_file()
-        self._load_rules()
-        return {"success": True, "message": "配置已重新加载"}
-    
-    def get_agent_config(self, chat_id: str) -> AgentConfig | None:
-        """
-        根据 chat_id 获取 Agent 配置
-        
-        Args:
-            chat_id: 群/私聊 ID
-        
-        Returns:
-            AgentConfig 或 None
-        """
-        rule = self.forward_rules.get(chat_id)
-        
-        if rule is None:
-            # 没有精确匹配，使用默认 URL
-            if self.forward_url:
-                return {"url_template": self.forward_url}
-            return None
-        
-        # 简单格式：直接是 URL 字符串
-        if isinstance(rule, str):
-            return {"url_template": rule}
-        
-        # 完整格式：字典
-        return rule
-    
-    def get_target_url(self, chat_id: str) -> str | None:
-        """
-        根据 chat_id 获取目标 URL（构建完整 URL）
-        
-        Args:
-            chat_id: 群/私聊 ID
-        
-        Returns:
-            构建后的 URL 或 None
-        """
-        agent_config = self.get_agent_config(chat_id)
-        if not agent_config:
-            return None
-        
-        url_template = agent_config.get("url_template", "")
-        agent_id = agent_config.get("agent_id", "")
-        
-        # 替换 URL 模板中的占位符
-        url = url_template.replace("{agent_id}", agent_id)
-        
-        return url
-    
-    def get_api_key(self, chat_id: str) -> str | None:
-        """获取指定 chat_id 的 API Key"""
-        agent_config = self.get_agent_config(chat_id)
-        if agent_config:
-            return agent_config.get("api_key")
+        self.callback_auth_key = os.getenv("CALLBACK_AUTH_KEY", "")
+        self.callback_auth_value = os.getenv("CALLBACK_AUTH_VALUE", "")
+
+        # 设置默认 bot_key
+        self.default_bot_key = os.getenv("DEFAULT_BOT_KEY", "")
+
+        # 从数据库加载所有 Bot 配置
+        await self._load_bots_from_db()
+
+        logger.info(f"从数据库加载了 {len(self.bots)} 个 Bot 配置")
+        logger.info(f"默认 Bot Key: {self.default_bot_key}")
+
+    async def _load_bots_from_db(self):
+        """从数据库加载所有 Bot 配置"""
+        db = get_db_manager()
+
+        async with db.get_session() as session:
+            bot_repo = get_chatbot_repository(session)
+
+            # 获取所有 Bot (包括已禁用的)
+            bots = await bot_repo.get_all(enabled_only=False)
+
+            # 转换为 BotConfig 对象
+            for bot in bots:
+                # 预加载 access_rules
+                await session.refresh(bot, attribute_names=["access_rules"])
+
+                bot_config = BotConfig.from_bot(bot)
+                self.bots[bot.bot_key] = bot_config
+
+                # 设置默认 bot_key (如果还没设置)
+                if not self.default_bot_key and bot.enabled:
+                    self.default_bot_key = bot.bot_key
+
+    def extract_bot_key_from_webhook_url(self, webhook_url: str) -> Optional[str]:
+        """从 webhook_url 提取 bot_key"""
+        match = re.search(r'[?&]key=([^&]+)', webhook_url)
+        if match:
+            return match.group(1)
         return None
-    
-    def get_all_rules(self) -> dict:
-        """获取所有转发规则（用于管理台展示）"""
-        result = {}
-        for chat_id, rule in self.forward_rules.items():
-            if isinstance(rule, str):
-                result[chat_id] = {
-                    "url_template": rule,
-                    "type": "simple"
-                }
-            else:
-                result[chat_id] = {
-                    **rule,
-                    "type": "full"
-                }
-        return result
-    
-    # ============== 规则管理方法（支持持久化） ==============
-    
-    def _get_rules_file_path(self) -> str:
-        """获取规则文件路径"""
-        return os.path.join(os.path.dirname(__file__), "..", "data", "forward_rules.json")
-    
-    def _save_rules(self):
-        """保存规则到文件"""
-        rules_file = self._get_rules_file_path()
-        os.makedirs(os.path.dirname(rules_file), exist_ok=True)
-        
+
+    def get_bot(self, bot_key: str) -> Optional[BotConfig]:
+        """根据 bot_key 获取 Bot 配置"""
+        return self.bots.get(bot_key)
+
+    def get_bot_or_default(self, bot_key: str | None) -> Optional[BotConfig]:
+        """获取 Bot 配置，如果找不到则返回默认 Bot"""
+        if bot_key and bot_key in self.bots:
+            return self.bots[bot_key]
+
+        # 回退到默认 Bot
+        if self.default_bot_key and self.default_bot_key in self.bots:
+            logger.info(f"Bot {bot_key} 不存在，使用默认 Bot: {self.default_bot_key}")
+            return self.bots[self.default_bot_key]
+
+        return None
+
+    def check_access(self, bot: BotConfig, user_id: str) -> tuple[bool, str]:
+        """检查用户是否有权限访问 Bot"""
+        if not bot.enabled:
+            return False, "Bot 已禁用"
+
+        return bot.access_control.check_access(user_id)
+
+    async def reload_config(self) -> dict:
+        """重新加载配置 (从数据库)"""
         try:
-            with open(rules_file, "w", encoding="utf-8") as f:
-                json.dump(self.forward_rules, f, ensure_ascii=False, indent=2)
-            logger.info(f"规则已保存到 {rules_file}")
+            self.bots.clear()
+            await self._load_bots_from_db()
+            return {"success": True, "message": "配置已重新加载"}
         except Exception as e:
-            logger.error(f"保存规则失败: {e}")
-    
-    def _load_rules(self):
-        """从文件加载规则"""
-        rules_file = self._get_rules_file_path()
-        
-        if os.path.exists(rules_file):
-            try:
-                with open(rules_file, "r", encoding="utf-8") as f:
-                    file_rules = json.load(f)
-                    # 合并文件规则（文件规则优先级低于环境变量）
-                    for chat_id, rule in file_rules.items():
-                        if chat_id not in self.forward_rules:
-                            self.forward_rules[chat_id] = rule
-                    logger.info(f"从 {rules_file} 加载了 {len(file_rules)} 条规则")
-            except Exception as e:
-                logger.error(f"加载规则文件失败: {e}")
-    
-    def add_rule(self, chat_id: str, rule: dict) -> dict:
-        """添加或更新转发规则"""
-        self.forward_rules[chat_id] = rule
-        self._save_rules()
-        return {"success": True, "message": f"规则已添加: {chat_id}"}
-    
-    def update_rule(self, chat_id: str, rule: dict) -> dict:
-        """更新转发规则"""
-        if chat_id not in self.forward_rules:
-            return {"success": False, "error": f"规则不存在: {chat_id}"}
-        
-        self.forward_rules[chat_id] = rule
-        self._save_rules()
-        return {"success": True, "message": f"规则已更新: {chat_id}"}
-    
-    def delete_rule(self, chat_id: str) -> dict:
-        """删除转发规则"""
-        if chat_id not in self.forward_rules:
-            return {"success": False, "error": f"规则不存在: {chat_id}"}
-        
-        del self.forward_rules[chat_id]
-        self._save_rules()
-        return {"success": True, "message": f"规则已删除: {chat_id}"}
-    
+            logger.error(f"重新加载配置失败: {e}")
+            return {"success": False, "error": str(e)}
+
+    def get_all_bots(self) -> dict[str, dict]:
+        """获取所有 Bot 配置（用于管理台）"""
+        return {
+            bot_key: bot.to_dict()
+            for bot_key, bot in self.bots.items()
+        }
+
+    def get_config_dict(self) -> dict:
+        """获取完整配置（JSON 格式）"""
+        return {
+            "default_bot_key": self.default_bot_key,
+            "bots": self.get_all_bots()
+        }
+
+    async def update_from_dict(self, data: dict) -> dict:
+        """
+        从字典更新配置 (写入数据库)
+
+        注意: 这是全量更新,会覆盖现有配置
+        """
+        try:
+            # 验证格式
+            if "default_bot_key" not in data or "bots" not in data:
+                return {"success": False, "error": "配置格式错误：缺少 default_bot_key 或 bots"}
+
+            db = get_db_manager()
+
+            async with db.get_session() as session:
+                bot_repo = get_chatbot_repository(session)
+                rule_repo = get_access_rule_repository(session)
+
+                # 更新默认 bot_key
+                self.default_bot_key = data["default_bot_key"]
+
+                # 获取数据库中现有的所有 Bot
+                existing_bots = await bot_repo.get_all(enabled_only=False)
+                existing_bot_keys = {bot.bot_key for bot in existing_bots}
+                new_bot_keys = set(data["bots"].keys())
+
+                # 删除不再存在的 Bot
+                bot_keys_to_delete = existing_bot_keys - new_bot_keys
+                for bot_key in bot_keys_to_delete:
+                    bot = await bot_repo.get_by_bot_key(bot_key)
+                    if bot:
+                        await bot_repo.delete(bot.id)
+                        logger.info(f"删除 Bot: {bot_key}")
+
+                # 更新或创建 Bot
+                for bot_key, bot_dict in data["bots"].items():
+                    forward_config = bot_dict.get("forward_config", {})
+                    access_control = bot_dict.get("access_control", {})
+
+                    # 检查是否已存在
+                    existing_bot = await bot_repo.get_by_bot_key(bot_key)
+
+                    if existing_bot:
+                        # 更新现有 Bot
+                        await bot_repo.update(
+                            bot_id=existing_bot.id,
+                            name=bot_dict.get("name"),
+                            description=bot_dict.get("description"),
+                            url_template=forward_config.get("url_template"),
+                            agent_id=forward_config.get("agent_id"),
+                            api_key=forward_config.get("api_key"),
+                            timeout=forward_config.get("timeout"),
+                            access_mode=access_control.get("mode", "allow_all"),
+                            enabled=bot_dict.get("enabled", True)
+                        )
+
+                        # 更新访问规则
+                        whitelist = access_control.get("whitelist", [])
+                        blacklist = access_control.get("blacklist", [])
+
+                        if whitelist or blacklist:
+                            # 清除旧规则并设置新规则
+                            await rule_repo.delete_by_chatbot(existing_bot.id)
+
+                            for chat_id in whitelist:
+                                await rule_repo.create(existing_bot.id, chat_id, "whitelist")
+
+                            for chat_id in blacklist:
+                                await rule_repo.create(existing_bot.id, chat_id, "blacklist")
+
+                        logger.info(f"更新 Bot: {bot_key}")
+                    else:
+                        # 创建新 Bot
+                        bot = await bot_repo.create(
+                            bot_key=bot_key,
+                            name=bot_dict.get("name"),
+                            description=bot_dict.get("description"),
+                            url_template=forward_config.get("url_template"),
+                            agent_id=forward_config.get("agent_id"),
+                            api_key=forward_config.get("api_key"),
+                            timeout=forward_config.get("timeout", 60),
+                            access_mode=access_control.get("mode", "allow_all"),
+                            enabled=bot_dict.get("enabled", True)
+                        )
+
+                        # 添加访问规则
+                        whitelist = access_control.get("whitelist", [])
+                        blacklist = access_control.get("blacklist", [])
+
+                        for chat_id in whitelist:
+                            await rule_repo.create(bot.id, chat_id, "whitelist")
+
+                        for chat_id in blacklist:
+                            await rule_repo.create(bot.id, chat_id, "blacklist")
+
+                        logger.info(f"创建 Bot: {bot_key}")
+
+            # 重新加载配置到内存
+            await self.reload_config()
+
+            return {"success": True, "message": "配置已更新"}
+
+        except Exception as e:
+            logger.error(f"更新配置失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
     def validate(self) -> list[str]:
-        """
-        验证配置
-        
-        Returns:
-            错误列表，空列表表示配置有效
-        """
+        """验证配置"""
         errors = []
-        
-        if not self.bot_key:
-            errors.append("FORWARD_BOT_KEY 未配置")
-        
-        if not self.forward_url and not self.forward_rules:
-            errors.append("FORWARD_URL 或 FORWARD_RULES 至少需要配置一个")
-        
+
+        if not self.bots:
+            errors.append("至少需要配置一个 Bot")
+
+        if self.default_bot_key and self.default_bot_key not in self.bots:
+            errors.append(f"默认 Bot Key '{self.default_bot_key}' 不存在于 bots 配置中")
+
+        for bot_key, bot in self.bots.items():
+            if not bot.forward_config.url_template:
+                errors.append(f"Bot '{bot_key}' 的 forward_config.url_template 未配置")
+
         return errors
 
+    # ============== Bot CRUD 操作 (用于 API) ==============
 
-# 全局配置实例
-config = Config()
+    async def list_bots(self) -> list[dict]:
+        """
+        获取所有 Bot 列表
+
+        Returns:
+            Bot 列表，每个 Bot 包含统计信息
+        """
+        db = get_db_manager()
+
+        async with db.get_session() as session:
+            bot_repo = get_chatbot_repository(session)
+            rule_repo = get_access_rule_repository(session)
+
+            bots = await bot_repo.get_all(enabled_only=False)
+
+            result = []
+            for bot in bots:
+                # 统计访问规则数量
+                whitelist = await rule_repo.get_whitelist(bot.id)
+                blacklist = await rule_repo.get_blacklist(bot.id)
+
+                result.append({
+                    "id": bot.id,
+                    "bot_key": bot.bot_key,
+                    "name": bot.name,
+                    "description": bot.description or "",
+                    "url_template": bot.url_template,
+                    "agent_id": bot.agent_id or "",
+                    "api_key": bot.api_key or "",
+                    "timeout": bot.timeout,
+                    "access_mode": bot.access_mode,
+                    "enabled": bot.enabled,
+                    "whitelist_count": len(whitelist),
+                    "blacklist_count": len(blacklist),
+                    "created_at": bot.created_at.isoformat() if bot.created_at else None,
+                    "updated_at": bot.updated_at.isoformat() if bot.updated_at else None
+                })
+
+            return result
+
+    async def get_bot(self, bot_key: str) -> dict | None:
+        """
+        获取单个 Bot 详情
+
+        Args:
+            bot_key: Bot Key
+
+        Returns:
+            Bot 详情字典，包含访问规则列表，如果不存在返回 None
+        """
+        db = get_db_manager()
+
+        async with db.get_session() as session:
+            bot_repo = get_chatbot_repository(session)
+            rule_repo = get_access_rule_repository(session)
+
+            bot = await bot_repo.get_by_bot_key(bot_key)
+            if not bot:
+                return None
+
+            # 获取访问规则
+            whitelist_rules = await rule_repo.get_by_chatbot(bot.id, "whitelist")
+            blacklist_rules = await rule_repo.get_by_chatbot(bot.id, "blacklist")
+
+            return {
+                "id": bot.id,
+                "bot_key": bot.bot_key,
+                "name": bot.name,
+                "description": bot.description or "",
+                "url_template": bot.url_template,
+                "agent_id": bot.agent_id or "",
+                "api_key": bot.api_key or "",
+                "timeout": bot.timeout,
+                "access_mode": bot.access_mode,
+                "enabled": bot.enabled,
+                "created_at": bot.created_at.isoformat() if bot.created_at else None,
+                "updated_at": bot.updated_at.isoformat() if bot.updated_at else None,
+                "whitelist": [
+                    {
+                        "id": rule.id,
+                        "chat_id": rule.chat_id,
+                        "remark": rule.remark or ""
+                    }
+                    for rule in whitelist_rules
+                ],
+                "blacklist": [
+                    {
+                        "id": rule.id,
+                        "chat_id": rule.chat_id,
+                        "remark": rule.remark or ""
+                    }
+                    for rule in blacklist_rules
+                ]
+            }
+
+    async def create_bot(self, data: dict) -> dict:
+        """
+        创建新 Bot
+
+        Args:
+            data: Bot 配置字典
+
+        Returns:
+            {"success": bool, "bot": dict, "error": str}
+        """
+        try:
+            # 验证必填字段
+            required_fields = ["bot_key", "name", "url_template"]
+            missing = [f for f in required_fields if not data.get(f)]
+            if missing:
+                return {"success": False, "error": f"缺少必填字段: {', '.join(missing)}"}
+
+            db = get_db_manager()
+
+            async with db.get_session() as session:
+                bot_repo = get_chatbot_repository(session)
+                rule_repo = get_access_rule_repository(session)
+
+                # 检查 bot_key 是否已存在
+                existing = await bot_repo.get_by_bot_key(data["bot_key"])
+                if existing:
+                    return {"success": False, "error": f"Bot Key '{data['bot_key']}' 已存在"}
+
+                # 创建 Bot
+                bot = await bot_repo.create(
+                    bot_key=data["bot_key"],
+                    name=data["name"],
+                    url_template=data["url_template"],
+                    agent_id=data.get("agent_id", ""),
+                    api_key=data.get("api_key", ""),
+                    timeout=data.get("timeout", 60),
+                    access_mode=data.get("access_mode", "allow_all"),
+                    description=data.get("description", ""),
+                    enabled=data.get("enabled", True)
+                )
+
+                # 创建访问规则
+                whitelist = data.get("whitelist", [])
+                blacklist = data.get("blacklist", [])
+
+                for chat_id in whitelist:
+                    await rule_repo.create(bot.id, chat_id, "whitelist",
+                                          remark=data.get("whitelist_remark", ""))
+
+                for chat_id in blacklist:
+                    await rule_repo.create(bot.id, chat_id, "blacklist",
+                                          remark=data.get("blacklist_remark", ""))
+
+                await session.commit()
+
+                logger.info(f"创建 Bot 成功: {data['bot_key']}")
+
+                # 返回创建的 Bot 详情
+                created_bot = await self.get_bot(data["bot_key"])
+                return {"success": True, "bot": created_bot}
+
+        except Exception as e:
+            logger.error(f"创建 Bot 失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def update_bot(self, bot_key: str, data: dict) -> dict:
+        """
+        更新 Bot 配置
+
+        Args:
+            bot_key: Bot Key
+            data: 更新数据字典
+
+        Returns:
+            {"success": bool, "bot": dict, "error": str}
+        """
+        try:
+            db = get_db_manager()
+
+            async with db.get_session() as session:
+                bot_repo = get_chatbot_repository(session)
+                rule_repo = get_access_rule_repository(session)
+
+                # 检查 Bot 是否存在
+                bot = await bot_repo.get_by_bot_key(bot_key)
+                if not bot:
+                    return {"success": False, "error": f"Bot '{bot_key}' 不存在"}
+
+                # 更新 Bot 基本信息
+                await bot_repo.update(
+                    bot_id=bot.id,
+                    name=data.get("name"),
+                    description=data.get("description"),
+                    url_template=data.get("url_template"),
+                    agent_id=data.get("agent_id"),
+                    api_key=data.get("api_key"),
+                    timeout=data.get("timeout"),
+                    access_mode=data.get("access_mode"),
+                    enabled=data.get("enabled")
+                )
+
+                # 更新访问规则 (如果提供)
+                if "whitelist" in data or "blacklist" in data:
+                    # 清除现有规则
+                    await rule_repo.delete_by_chatbot(bot.id)
+
+                    # 创建新规则
+                    whitelist = data.get("whitelist", [])
+                    blacklist = data.get("blacklist", [])
+
+                    for chat_id in whitelist:
+                        await rule_repo.create(bot.id, chat_id, "whitelist")
+
+                    for chat_id in blacklist:
+                        await rule_repo.create(bot.id, chat_id, "blacklist")
+
+                await session.commit()
+
+                logger.info(f"更新 Bot 成功: {bot_key}")
+
+                # 重新加载配置到内存
+                await self.reload_config()
+
+                # 返回更新后的 Bot 详情
+                updated_bot = await self.get_bot(bot_key)
+                return {"success": True, "bot": updated_bot}
+
+        except Exception as e:
+            logger.error(f"更新 Bot 失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    async def delete_bot(self, bot_key: str) -> dict:
+        """
+        删除 Bot
+
+        Args:
+            bot_key: Bot Key
+
+        Returns:
+            {"success": bool, "error": str}
+        """
+        try:
+            db = get_db_manager()
+
+            async with db.get_session() as session:
+                bot_repo = get_chatbot_repository(session)
+
+                # 检查 Bot 是否存在
+                bot = await bot_repo.get_by_bot_key(bot_key)
+                if not bot:
+                    return {"success": False, "error": f"Bot '{bot_key}' 不存在"}
+
+                # 删除 Bot (会级联删除 access_rules)
+                success = await bot_repo.delete(bot.id)
+
+                if not success:
+                    return {"success": False, "error": "删除失败"}
+
+                await session.commit()
+
+                logger.info(f"删除 Bot 成功: {bot_key}")
+
+                # 重新加载配置到内存
+                await self.reload_config()
+
+                return {"success": True}
+
+        except Exception as e:
+            logger.error(f"删除 Bot 失败: {e}", exc_info=True)
+            return {"success": False, "error": str(e)}
+
+
+# ============== 全局配置实例 ==============
+
+config = ConfigDB()

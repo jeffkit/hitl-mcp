@@ -2,11 +2,7 @@
 pytest 配置文件
 """
 import sys
-import os
 from pathlib import Path
-
-# 在导入任何模块之前设置环境变量
-os.environ["USE_DATABASE"] = "true"
 
 import pytest
 import pytest_asyncio

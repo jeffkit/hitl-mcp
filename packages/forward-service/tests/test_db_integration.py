@@ -9,7 +9,7 @@
 import pytest
 import pytest_asyncio
 
-from forward_service.config_db import ConfigDB, BotConfig, ForwardConfig, AccessControl
+from forward_service.config import ConfigDB, BotConfig, ForwardConfig, AccessControl
 
 
 @pytest.mark.asyncio

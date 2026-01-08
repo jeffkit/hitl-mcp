@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from forward_service.config_v2 import ConfigV2, BotConfig, ForwardConfig, AccessControl
+from forward_service.config import ConfigDB as ConfigV2, BotConfig, ForwardConfig, AccessControl
 
 
 class TestCallbackBotKeyExtraction:
@@ -138,17 +138,19 @@ class TestCallbackAccessControl:
 
 
 class TestCallbackBotSelection:
-    """测试回调中的 Bot 选择逻辑"""
+    """测试回调中的 Bot 选择逻辑（使用内存缓存）"""
     
     def test_get_bot_by_key(self):
-        """测试根据 bot_key 获取 Bot"""
+        """测试根据 bot_key 获取 Bot (从内存缓存)"""
         config = ConfigV2()
+        # 直接设置内存缓存
         config.bots = {
             "bot1": BotConfig(bot_key="bot1", name="Bot 1"),
             "bot2": BotConfig(bot_key="bot2", name="Bot 2")
         }
         
-        bot = config.get_bot("bot1")
+        # 从内存缓存获取
+        bot = config.bots.get("bot1")
         assert bot is not None
         assert bot.name == "Bot 1"
     
@@ -162,7 +164,7 @@ class TestCallbackBotSelection:
         }
         
         # 不存在的 bot_key，应该回退到默认
-        bot = config.get_bot_or_default("non_existent")
+        bot = config.bots.get("non_existent") or config.bots.get(config.default_bot_key)
         assert bot is not None
         assert bot.name == "Default Bot"
     

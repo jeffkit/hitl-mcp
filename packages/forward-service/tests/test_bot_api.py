@@ -1,12 +1,10 @@
 """
 Forward Service Bot 管理 API 单元测试
 
-测试数据库模式下的 Bot CRUD 操作
+测试 Bot CRUD 操作
 """
 import pytest
 import pytest_asyncio
-import os
-os.environ["USE_DATABASE"] = "true"
 
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy import text
@@ -20,10 +18,10 @@ from forward_service.models import Chatbot
 async def initialized_app(mock_db_manager):
     """创建已初始化的 FastAPI 应用"""
     from forward_service.app import app
-    from forward_service.config_db import config_db
+    from forward_service.config import config
     
     # 初始化配置
-    await config_db.initialize()
+    await config.initialize()
     
     yield app
     

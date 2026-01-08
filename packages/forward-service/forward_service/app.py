@@ -9,11 +9,10 @@ Forward Service 主应用
     # 或
     uvicorn forward_service.app:app --host 0.0.0.0 --port 8083
 
-配置方式:
-    - JSON 文件 (默认): USE_DATABASE=false 或不设置
-    - 数据库: USE_DATABASE=true
+配置存储:
+    - 默认使用 SQLite 数据库 (data/forward_service.db)
+    - 支持 MySQL (通过 DATABASE_URL 环境变量配置)
 """
-import os
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -28,24 +27,13 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from .config import config as config_v1  # 旧配置（兼容）
-from .config_v2 import config_v2  # 新配置（JSON 文件）
-from .config_db import config_db  # 数据库配置
+from .config import config
+from .database import database_lifespan, get_db_manager
+from .session_manager import SessionManager, init_session_manager, get_session_manager
 from .sender import send_reply
 
-# 根据环境变量选择配置方式
-USE_DATABASE = os.getenv("USE_DATABASE", "").lower() in ("1", "true", "yes")
-
-if USE_DATABASE:
-    from .database import database_lifespan, get_db_manager
-    from .session_manager import SessionManager, init_session_manager, get_session_manager
-    config = config_db
-    logger = logging.getLogger(__name__)
-    logger.info("✅ 使用数据库配置 (USE_DATABASE=true)")
-else:
-    config = config_v2  # JSON 文件配置
-    logger = logging.getLogger(__name__)
-    logger.info("📄 使用 JSON 文件配置 (USE_DATABASE=false)")
+# 配置日志
+logger = logging.getLogger(__name__)
 
 # 配置日志
 logging.basicConfig(
@@ -290,42 +278,21 @@ async def forward_to_agent_with_bot(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    # 数据库配置需要初始化数据库
-    if USE_DATABASE:
-        async with database_lifespan():
-            # 初始化配置
-            await config.initialize()
+    async with database_lifespan():
+        # 初始化配置
+        await config.initialize()
 
-            # 初始化会话管理器
-            init_session_manager(get_db_manager())
-            logger.info("  会话管理器已初始化")
+        # 初始化会话管理器
+        init_session_manager(get_db_manager())
+        logger.info("  会话管理器已初始化")
 
-            # 验证配置
-            errors = config.validate()
-            if errors:
-                for error in errors:
-                    logger.warning(f"配置警告: {error}")
-
-            logger.info(f"Forward Service 启动（数据库模式 v3.0）")
-            logger.info(f"  端口: {config.port}")
-            logger.info(f"  默认 Bot Key: {config.default_bot_key[:10]}..." if config.default_bot_key else "  默认 Bot Key: 未配置")
-            logger.info(f"  Bot 数量: {len(config.bots)}")
-
-            # 列出所有 Bot
-            for bot_key, bot in config.bots.items():
-                logger.info(f"  - {bot.name} (key={bot_key[:10]}..., enabled={bot.enabled})")
-
-            yield
-
-            logger.info("Forward Service 关闭")
-    else:
-        # JSON 配置模式
+        # 验证配置
         errors = config.validate()
         if errors:
             for error in errors:
                 logger.warning(f"配置警告: {error}")
 
-        logger.info(f"Forward Service 启动（JSON 配置模式 v2.0）")
+        logger.info(f"Forward Service 启动 v3.0")
         logger.info(f"  端口: {config.port}")
         logger.info(f"  默认 Bot Key: {config.default_bot_key[:10]}..." if config.default_bot_key else "  默认 Bot Key: 未配置")
         logger.info(f"  Bot 数量: {len(config.bots)}")
@@ -343,7 +310,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Forward Service",
     description="消息转发服务 - 接收企微回调，转发到 Agent",
-    version="2.0.0" if USE_DATABASE else "1.1.0",
+    version="3.0.0",
     lifespan=lifespan
 )
 
@@ -427,12 +394,7 @@ async def update_config(request: Request):
     try:
         data = await request.json()
 
-        # 数据库配置需要异步更新
-        if USE_DATABASE:
-            result = await config.update_from_dict(data)
-        else:
-            result = config.update_from_dict(data)
-
+        result = await config.update_from_dict(data)
         return result
     except Exception as e:
         logger.error(f"更新配置失败: {e}")
@@ -442,11 +404,7 @@ async def update_config(request: Request):
 @app.post("/admin/config/reload")
 async def reload_config():
     """重新加载配置"""
-    # 数据库配置需要异步重载
-    if USE_DATABASE:
-        return await config.reload_config()
-    else:
-        return config.reload_config()
+    return await config.reload_config()
 
 
 # ============== 兼容性 API（旧版规则管理） ==============
@@ -508,9 +466,9 @@ async def get_mode():
         supports_bot_api: 是否支持新的 Bot 管理 API
     """
     return {
-        "mode": "database" if USE_DATABASE else "json",
-        "supports_bot_api": USE_DATABASE,
-        "version": "2.0.0" if USE_DATABASE else "1.1.0"
+        "mode": "database",
+        "supports_bot_api": True,
+        "version": "3.0.0"
     }
 
 
@@ -519,14 +477,7 @@ async def list_bots():
     """
     获取所有 Bot 列表
 
-    仅数据库模式支持此 API
     """
-    if not USE_DATABASE:
-        return {
-            "success": False,
-            "error": "JSON 模式不支持 Bot 管理 API，请使用 /admin/config 管理配置"
-        }
-
     bots = await config.list_bots()
     return {
         "success": True,
@@ -540,14 +491,7 @@ async def get_bot_by_key(bot_key: str):
     """
     获取单个 Bot 详情
 
-    仅数据库模式支持此 API
     """
-    if not USE_DATABASE:
-        return {
-            "success": False,
-            "error": "JSON 模式不支持此操作"
-        }
-
     bot = await config.get_bot(bot_key)
     if not bot:
         return {
@@ -581,12 +525,6 @@ async def create_bot(request: Request):
         whitelist: list[str]
         blacklist: list[str]
     """
-    if not USE_DATABASE:
-        return {
-            "success": False,
-            "error": "JSON 模式不支持此操作，请使用 /admin/config 管理配置"
-        }
-
     try:
         data = await request.json()
         result = await config.create_bot(data)
@@ -605,12 +543,6 @@ async def update_bot_by_key(bot_key: str, request: Request):
 
     Body: 同 create_bot，所有字段都是可选的
     """
-    if not USE_DATABASE:
-        return {
-            "success": False,
-            "error": "JSON 模式不支持此操作，请使用 /admin/config 管理配置"
-        }
-
     try:
         data = await request.json()
         result = await config.update_bot(bot_key, data)
@@ -625,14 +557,7 @@ async def delete_bot_by_key(bot_key: str):
     """
     删除 Bot
 
-    仅数据库模式支持此 API
     """
-    if not USE_DATABASE:
-        return {
-            "success": False,
-            "error": "JSON 模式不支持此操作，请使用 /admin/config 管理配置"
-        }
-
     result = await config.delete_bot(bot_key)
     return result
 
@@ -746,7 +671,7 @@ async def handle_callback(
             return {"errcode": 0, "errmsg": "empty content"}
         
         # === 会话管理：处理 Slash 命令 ===
-        if USE_DATABASE and content:
+        if content:
             session_mgr = get_session_manager()
             slash_cmd = session_mgr.parse_slash_command(content)
             
@@ -814,12 +739,11 @@ async def handle_callback(
         
         # === 会话管理：获取现有 session_id ===
         current_session_id = None
-        if USE_DATABASE:
-            session_mgr = get_session_manager()
-            active_session = await session_mgr.get_active_session(from_user_id, chat_id, bot.bot_key)
-            if active_session:
-                current_session_id = active_session.session_id
-                logger.info(f"找到活跃会话: {active_session.short_id}")
+        session_mgr = get_session_manager()
+        active_session = await session_mgr.get_active_session(from_user_id, chat_id, bot.bot_key)
+        if active_session:
+            current_session_id = active_session.session_id
+            logger.info(f"找到活跃会话: {active_session.short_id}")
         
         # 获取目标 URL（用于日志）
         target_url = bot.forward_config.get_url()
@@ -860,7 +784,7 @@ async def handle_callback(
             return {"errcode": 0, "errmsg": "forward failed"}
         
         # === 会话管理：记录 Agent 返回的 session_id ===
-        if USE_DATABASE and result.session_id:
+        if result.session_id:
             session_mgr = get_session_manager()
             await session_mgr.record_session(
                 user_id=from_user_id,
