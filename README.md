@@ -2,6 +2,25 @@
 
 让 AI Agent 能够发送消息到企业微信并等待用户回复的 MCP 服务。
 
+## 项目结构
+
+```
+hil-mcp/
+├── packages/               # 核心服务（Monorepo）
+│   ├── forward-service/    # 消息转发服务
+│   ├── hil-server/         # HIL 服务器
+│   ├── mcp-server-py/      # MCP Server (Python)
+│   ├── mcp-server-ts/      # MCP Server (TypeScript)
+│   └── devcloud-worker/    # DevCloud Worker
+├── website/                # 静态网站（首页/文档）
+├── docs/                   # 项目文档
+├── scripts/                # 部署和工具脚本
+│   ├── deploy/             # 部署脚本
+│   ├── migrations/         # 数据迁移脚本
+│   └── tools/              # 工具脚本
+└── tests/                  # 集成测试
+```
+
 ## 功能特性
 
 - 🚀 **发送消息到企微群聊/私聊**
