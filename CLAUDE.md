@@ -274,18 +274,46 @@ python migrate_to_database.py --force
 
 ## Deployment Architecture
 
-### Production Environment (dev server)
+### Production Servers
 
-**Public Server**:
-- HIL Server (port 8081)
-- Forward Service (port 8083)
-- Nginx (reverse proxy + SSL)
+#### **dev 服务器** (旧目录结构)
 
-**Intranet**:
-- DevCloud Worker (connects to HIL Server)
+| 服务 | 代码位置 | WorkingDirectory |
+|------|----------|------------------|
+| forward-service | `/root/projects/hil-mcp/forward_service/` | `/root/projects/hil-mcp` |
+| hil-server | `/root/projects/hil-mcp-direct/hil_server/` | `/root/projects/hil-mcp-direct` |
 
-**WeChat Work**:
-- Two bots: HIL Bot + Forward Bot
+**⚠️ 重要**: dev 服务器使用旧目录结构，代码需同步到正确位置：
+```bash
+# forward-service: 同步 forward_service/ 子目录内容（不含 tests）
+rsync -avz packages/forward-service/forward_service/ dev:/root/projects/hil-mcp/forward_service/
+
+# hil-server: 同步 hil_server/ 子目录内容
+rsync -avz packages/hil-server/hil_server/ dev:/root/projects/hil-mcp-direct/hil_server/
+```
+
+#### **devg 服务器** (monorepo 结构)
+
+| 服务 | 代码位置 | WorkingDirectory |
+|------|----------|------------------|
+| forward-service | `/data/projects/hil-mcp/packages/forward-service/` | 同左 |
+| hil-server | `/data/projects/hil-mcp/packages/hil-server/` | 同左 |
+
+**部署命令**:
+```bash
+# forward-service
+rsync -avz packages/forward-service/ devg:/data/projects/hil-mcp/packages/forward-service/
+
+# hil-server
+rsync -avz packages/hil-server/ devg:/data/projects/hil-mcp/packages/hil-server/
+```
+
+#### 端口配置
+
+| 服务 | 端口 | 域名 (devg) |
+|------|------|-------------|
+| hil-server | 8081 | test-hitl.woa.com |
+| forward-service | 8083 | test-hitl.woa.com/forward/ |
 
 ### Systemd Services
 
