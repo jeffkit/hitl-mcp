@@ -205,13 +205,13 @@ class Chatbot(Base):
             for rule in self.access_rules:
                 if rule.rule_type == "whitelist" and rule.chat_id == user_id:
                     return True, ""
-            return False, "您不在白名单中，无权访问此 Bot"
+            return False, "抱歉，您还没有权限访问此 Bot，如有意向，请联系作者。"
 
         elif self.access_mode == "blacklist":
             # 检查黑名单
             for rule in self.access_rules:
                 if rule.rule_type == "blacklist" and rule.chat_id == user_id:
-                    return False, "您已被加入黑名单，无法访问此 Bot"
+                    return False, "抱歉，您还没有权限访问此 Bot，如有意向，请联系作者。"
             return True, ""
 
         return False, "未知的访问控制模式"

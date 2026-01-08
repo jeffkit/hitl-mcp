@@ -86,7 +86,7 @@ class TestCallbackAccessControl:
         allowed, reason = config.check_access(bot, "user3")
         
         assert allowed is False
-        assert "不在白名单中" in reason
+        assert "没有权限" in reason
     
     def test_blacklist_access_allowed(self):
         """测试黑名单 - 允许访问"""
@@ -119,7 +119,7 @@ class TestCallbackAccessControl:
         allowed, reason = config.check_access(bot, "bad_user")
         
         assert allowed is False
-        assert "黑名单" in reason
+        assert "没有权限" in reason
     
     def test_disabled_bot_access(self):
         """测试禁用的 Bot"""

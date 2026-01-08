@@ -74,7 +74,7 @@ async def test_database_config_initialization(mock_db_manager):
     allowed, reason = config.check_access(bot2, "user4")
     # bot2 是 whitelist 模式, user4 不在白名单中
     assert allowed is False
-    assert "白名单" in reason
+    assert "没有权限" in reason
 
     print("✅ 数据库配置初始化测试通过")
 

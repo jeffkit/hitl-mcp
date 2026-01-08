@@ -125,16 +125,17 @@ class AccessControl:
                 return True, ""
             if alias and alias in self.whitelist:
                 return True, ""
-            return False, "您不在白名单中，无权访问此 Bot"
+            return False, "抱歉，您还没有权限访问此 Bot，如有意向，请联系作者。"
 
         elif self.mode == "blacklist":
             # 检查 user_id、chat_id 或 alias 是否在黑名单中
+            deny_msg = "抱歉，您还没有权限访问此 Bot，如有意向，请联系作者。"
             if user_id in self.blacklist:
-                return False, "您已被加入黑名单，无法访问此 Bot"
+                return False, deny_msg
             if chat_id and chat_id in self.blacklist:
-                return False, "此群聊/会话已被加入黑名单"
+                return False, deny_msg
             if alias and alias in self.blacklist:
-                return False, "您已被加入黑名单，无法访问此 Bot"
+                return False, deny_msg
             return True, ""
 
         return False, "未知的访问控制模式"

@@ -186,7 +186,7 @@ class TestChatbotModel:
         # 不在白名单中的用户应该被拒绝
         allowed, reason = bot.check_access("user3")
         assert allowed is False
-        assert "不在白名单中" in reason
+        assert "没有权限" in reason
 
     @pytest.mark.asyncio
     async def test_check_access_blacklist(self, test_session: AsyncSession):
@@ -221,7 +221,7 @@ class TestChatbotModel:
         # 在黑名单中的用户应该被拒绝
         allowed, reason = bot.check_access("bad_user")
         assert allowed is False
-        assert "黑名单" in reason
+        assert "没有权限" in reason
 
     @pytest.mark.asyncio
     async def test_check_access_disabled_bot(self, test_session: AsyncSession):
