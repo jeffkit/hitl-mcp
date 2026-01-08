@@ -53,6 +53,7 @@ async def handle_callback(
         from_user = data.get("from", {})
         from_user_name = from_user.get("name", "unknown")
         from_user_id = from_user.get("userid", "unknown")
+        from_user_alias = from_user.get("alias", "")  # 用户别名
         webhook_url = data.get("webhook_url", "")
         
         logger.info(f"收到企微回调: chat_id={chat_id}, msg_type={msg_type}, from={from_user_name}")
@@ -79,8 +80,8 @@ async def handle_callback(
         
         logger.info(f"使用 Bot: {bot.name} (key={bot.bot_key[:10]}...)")
         
-        # === 访问控制检查 (同时检查 user_id 和 chat_id) ===
-        allowed, reason = config.check_access(bot, from_user_id, chat_id)
+        # === 访问控制检查 (同时检查 user_id, chat_id 和 alias) ===
+        allowed, reason = config.check_access(bot, from_user_id, chat_id, from_user_alias)
         if not allowed:
             logger.warning(f"用户 {from_user_name} ({from_user_id}) 被拒绝访问 Bot {bot.name}: {reason}")
             
@@ -89,7 +90,7 @@ async def handle_callback(
                 logger.info(f"尝试回退到默认 Bot: {config.default_bot_key}")
                 default_bot = config.get_bot(config.default_bot_key)
                 if default_bot:
-                    default_allowed, default_reason = config.check_access(default_bot, from_user_id, chat_id)
+                    default_allowed, default_reason = config.check_access(default_bot, from_user_id, chat_id, from_user_alias)
                     if default_allowed:
                         bot = default_bot
                         logger.info(f"使用默认 Bot: {bot.name}")

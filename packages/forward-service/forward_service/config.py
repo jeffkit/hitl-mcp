@@ -103,33 +103,38 @@ class AccessControl:
             blacklist=blacklist
         )
 
-    def check_access(self, user_id: str, chat_id: str | None = None) -> tuple[bool, str]:
+    def check_access(self, user_id: str, chat_id: str | None = None, alias: str | None = None) -> tuple[bool, str]:
         """
         检查用户是否有权限访问
         
-        黑白名单支持两种格式：
-        - user_id: 匹配特定用户
-        - chat_id: 匹配特定群聊/会话
+        黑白名单支持三种格式：
+        - user_id: 匹配特定用户 ID (如 T15500028A)
+        - chat_id: 匹配特定群聊/会话 ID
+        - alias: 匹配用户别名 (如 kongjie)
         
-        只要 user_id 或 chat_id 匹配其一即可
+        只要 user_id、chat_id 或 alias 匹配其一即可
         """
         if self.mode == "allow_all":
             return True, ""
 
         elif self.mode == "whitelist":
-            # 检查 user_id 或 chat_id 是否在白名单中
+            # 检查 user_id、chat_id 或 alias 是否在白名单中
             if user_id in self.whitelist:
                 return True, ""
             if chat_id and chat_id in self.whitelist:
                 return True, ""
+            if alias and alias in self.whitelist:
+                return True, ""
             return False, "您不在白名单中，无权访问此 Bot"
 
         elif self.mode == "blacklist":
-            # 检查 user_id 或 chat_id 是否在黑名单中
+            # 检查 user_id、chat_id 或 alias 是否在黑名单中
             if user_id in self.blacklist:
                 return False, "您已被加入黑名单，无法访问此 Bot"
             if chat_id and chat_id in self.blacklist:
                 return False, "此群聊/会话已被加入黑名单"
+            if alias and alias in self.blacklist:
+                return False, "您已被加入黑名单，无法访问此 Bot"
             return True, ""
 
         return False, "未知的访问控制模式"
@@ -267,7 +272,7 @@ class ConfigDB:
 
         return None
 
-    def check_access(self, bot: BotConfig, user_id: str, chat_id: str | None = None) -> tuple[bool, str]:
+    def check_access(self, bot: BotConfig, user_id: str, chat_id: str | None = None, alias: str | None = None) -> tuple[bool, str]:
         """
         检查用户是否有权限访问 Bot
         
@@ -275,6 +280,7 @@ class ConfigDB:
             bot: Bot 配置
             user_id: 用户 ID
             chat_id: 群聊/会话 ID (可选)
+            alias: 用户别名 (可选)
         
         Returns:
             (是否允许, 拒绝原因)
@@ -282,7 +288,7 @@ class ConfigDB:
         if not bot.enabled:
             return False, "Bot 已禁用"
 
-        return bot.access_control.check_access(user_id, chat_id)
+        return bot.access_control.check_access(user_id, chat_id, alias)
 
     async def reload_config(self) -> dict:
         """重新加载配置 (从数据库)"""
