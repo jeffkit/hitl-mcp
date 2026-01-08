@@ -187,7 +187,7 @@ class TestCallbackMessageExtraction:
     def test_extract_text_message(self):
         """测试提取文本消息"""
         # 这个测试确保现有的 extract_content 函数继续工作
-        from forward_service.app import extract_content
+        from forward_service.utils import extract_content
         
         data = {
             "msgtype": "text",
@@ -200,7 +200,7 @@ class TestCallbackMessageExtraction:
     
     def test_extract_image_message(self):
         """测试提取图片消息"""
-        from forward_service.app import extract_content
+        from forward_service.utils import extract_content
         
         data = {
             "msgtype": "image",
@@ -213,7 +213,7 @@ class TestCallbackMessageExtraction:
     
     def test_extract_mixed_message(self):
         """测试提取混合消息（文本+图片）"""
-        from forward_service.app import extract_content
+        from forward_service.utils import extract_content
         
         data = {
             "msgtype": "mixed",
