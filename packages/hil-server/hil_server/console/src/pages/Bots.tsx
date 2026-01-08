@@ -75,6 +75,13 @@ export function BotsPage() {
       const detail = await botApi.get(bot.bot_key)
       if (detail.success && detail.bot) {
         setEditingBot(bot)
+        // 后端返回的黑白名单是对象数组 {id, chat_id, remark}，需要提取 chat_id
+        const whitelist = (detail.bot.whitelist || []).map((item: string | { chat_id: string }) => 
+          typeof item === 'string' ? item : item.chat_id
+        )
+        const blacklist = (detail.bot.blacklist || []).map((item: string | { chat_id: string }) => 
+          typeof item === 'string' ? item : item.chat_id
+        )
         setFormData({
           name: detail.bot.name,
           description: detail.bot.description || '',
@@ -85,8 +92,8 @@ export function BotsPage() {
           timeout: detail.bot.timeout,
           access_mode: detail.bot.access_mode,
           enabled: detail.bot.enabled,
-          whitelist: detail.bot.whitelist || [],
-          blacklist: detail.bot.blacklist || [],
+          whitelist,
+          blacklist,
         })
         setNewListItem('')
         setDialogOpen(true)
