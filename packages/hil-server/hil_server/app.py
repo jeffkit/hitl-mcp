@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from .config import config
 from .ws_manager import ws_manager
 from .storage import storage
-from .handlers import api_router, ws_router, admin_router
+from .handlers import api_router, ws_router, admin_router, auth_router, forward_proxy_router
 
 # 配置日志
 logging.basicConfig(
@@ -99,6 +99,8 @@ app = FastAPI(
 app.include_router(api_router)
 app.include_router(ws_router)
 app.include_router(admin_router)
+app.include_router(auth_router)
+app.include_router(forward_proxy_router)
 
 # 仓库根目录（packages/hil-server/hil_server/app.py -> 根目录）
 REPO_ROOT = Path(__file__).parent.parent.parent.parent
