@@ -19,8 +19,9 @@ set -e
 DEV_HOST="dev"
 
 # dev 服务器使用旧目录结构
+# 注意：forward 和 hil 在不同的目录下！
 DEV_FORWARD_PATH="/root/projects/hil-mcp/forward_service"
-DEV_HIL_PATH="/root/projects/hil-mcp/hil_server"
+DEV_HIL_PATH="/root/projects/hil-mcp-direct/hil_server"
 
 # 本地 monorepo 路径
 LOCAL_FORWARD_PATH="$(dirname "$0")/../../packages/forward-service/forward_service"
