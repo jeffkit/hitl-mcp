@@ -49,10 +49,10 @@ class LoginResponse(BaseModel):
 
 
 class ForwardRule(BaseModel):
+    """转发规则配置（简化版）"""
     chat_id: str
-    url_template: str
-    agent_id: str
-    api_key: str
+    target_url: str  # 完整的目标 URL
+    api_key: str = ""
     timeout: int = 60
 
 
