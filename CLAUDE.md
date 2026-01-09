@@ -327,6 +327,24 @@ sudo systemctl start|stop|restart|status <service-name>
 sudo journalctl -u <service-name> -f  # View logs
 ```
 
+### 部署脚本
+
+项目提供了两个同步脚本，避免手动部署时搞错路径：
+
+```bash
+# 同步代码到 dev 服务器
+./scripts/deploy/sync_to_dev.sh          # 同步所有服务
+./scripts/deploy/sync_to_dev.sh forward  # 只同步 forward-service
+./scripts/deploy/sync_to_dev.sh hil      # 只同步 hil-server
+
+# 同步代码到 devg 服务器
+./scripts/deploy/sync_to_devg.sh         # 同步所有服务
+./scripts/deploy/sync_to_devg.sh forward # 只同步 forward-service
+./scripts/deploy/sync_to_devg.sh hil     # 只同步 hil-server
+```
+
+**⚠️ 重要**: 始终使用这些脚本进行部署，它们会自动处理不同服务器的目录结构差异。
+
 ---
 
 ## Common Workflows
