@@ -601,3 +601,72 @@ class ForwardLog(Base):
             "error": self.error,
             "duration_ms": self.duration_ms,
         }
+
+
+# ============== 系统配置模型 ==============
+
+class SystemConfig(Base):
+    """
+    系统配置表
+    
+    存储全局配置项，如管理员用户列表
+    使用 key-value 形式存储
+    """
+    __tablename__ = "system_config"
+    
+    # 主键
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    
+    # 配置键（唯一）
+    key: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="配置键"
+    )
+    
+    # 配置值（JSON 格式）
+    value: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+        comment="配置值 (JSON 格式)"
+    )
+    
+    # 描述
+    description: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="配置描述"
+    )
+    
+    # 时间戳
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        comment="创建时间"
+    )
+    
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        comment="更新时间"
+    )
+    
+    def __repr__(self) -> str:
+        return f"<SystemConfig(key={self.key})>"
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "key": self.key,
+            "value": self.value,
+            "description": self.description,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }

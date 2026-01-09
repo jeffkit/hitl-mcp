@@ -3,6 +3,7 @@
 
 处理企微机器人回调
 """
+import json
 import logging
 from datetime import datetime
 
@@ -11,11 +12,111 @@ from fastapi import APIRouter, Request, Header
 from ..config import config
 from ..sender import send_reply
 from ..session_manager import get_session_manager
+from ..database import get_db_manager
+from ..repository import get_system_config_repository, get_forward_log_repository
 from ..utils import extract_content
 from ..services import forward_to_agent_with_bot
 from .admin import add_request_log, update_request_log, RequestLogData
 
 logger = logging.getLogger(__name__)
+
+
+# ============== 管理员权限检查 ==============
+
+async def check_is_admin(user_id: str, alias: str = None) -> bool:
+    """
+    检查用户是否是管理员
+    
+    管理员列表存储在 system_config 表的 admin_users 键中
+    格式: JSON 数组 ["user_id_1", "alias_1", ...]
+    """
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_system_config_repository(session)
+            admin_users_json = await repo.get_value("admin_users", "[]")
+            admin_users = json.loads(admin_users_json)
+            
+            # 检查 user_id 或 alias 是否在管理员列表中
+            if user_id in admin_users:
+                return True
+            if alias and alias in admin_users:
+                return True
+            
+            return False
+    except Exception as e:
+        logger.error(f"检查管理员权限失败: {e}")
+        return False
+
+
+async def get_system_status() -> str:
+    """获取系统状态信息"""
+    import sys
+    from datetime import timedelta
+    
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            log_repo = get_forward_log_repository(session)
+            
+            # 获取统计数据
+            total_count = await log_repo.count()
+            
+            # 获取今日统计
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            from sqlalchemy import select, func
+            from ..models import ForwardLog
+            
+            today_stmt = (
+                select(func.count(ForwardLog.id))
+                .where(ForwardLog.timestamp >= today_start)
+            )
+            today_result = await session.execute(today_stmt)
+            today_count = today_result.scalar() or 0
+            
+            # 今日成功数
+            success_stmt = (
+                select(func.count(ForwardLog.id))
+                .where(ForwardLog.timestamp >= today_start)
+                .where(ForwardLog.status == "success")
+            )
+            success_result = await session.execute(success_stmt)
+            success_count = success_result.scalar() or 0
+            
+            # 平均响应时间
+            avg_stmt = (
+                select(func.avg(ForwardLog.duration_ms))
+                .where(ForwardLog.timestamp >= today_start)
+                .where(ForwardLog.status == "success")
+            )
+            avg_result = await session.execute(avg_stmt)
+            avg_duration = avg_result.scalar() or 0
+        
+        # 计算成功率
+        success_rate = (success_count / today_count * 100) if today_count > 0 else 100
+        
+        # 格式化响应时间
+        if avg_duration > 1000:
+            avg_duration_str = f"{avg_duration/1000:.1f}s"
+        else:
+            avg_duration_str = f"{int(avg_duration)}ms"
+        
+        return f"""🟢 **Forward Service 状态**
+
+📊 版本: 3.0.0
+🤖 Bot 数量: {len(config.bots)} 个
+
+📈 **今日统计**
+• 消息数: {today_count} 条
+• 成功率: {success_rate:.1f}%
+• 平均响应: {avg_duration_str}
+
+📚 历史总消息: {total_count} 条"""
+    
+    except Exception as e:
+        logger.error(f"获取系统状态失败: {e}")
+        return f"⚠️ 获取系统状态失败: {e}"
+
 
 router = APIRouter(tags=["callback"])
 
@@ -190,6 +291,38 @@ async def handle_callback(
                             bot_key=bot.bot_key
                         )
                         return {"errcode": 0, "errmsg": "slash command handled"}
+                
+                elif cmd_type in ("ping", "status"):
+                    # /ping 或 /status - 系统状态（需要管理员权限）
+                    is_admin = await check_is_admin(from_user_id, from_user_alias)
+                    if not is_admin:
+                        await send_reply(
+                            chat_id=chat_id,
+                            message="⚠️ 此命令仅限管理员使用",
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                        return {"errcode": 0, "errmsg": "permission denied"}
+                    
+                    if cmd_type == "ping":
+                        # 简单的 ping 响应
+                        duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+                        await send_reply(
+                            chat_id=chat_id,
+                            message=f"🟢 pong! (延迟: {duration_ms}ms)",
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                    else:
+                        # 详细状态信息
+                        status_msg = await get_system_status()
+                        await send_reply(
+                            chat_id=chat_id,
+                            message=status_msg,
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                    return {"errcode": 0, "errmsg": "slash command handled"}
         
         # === 会话管理：获取现有 session_id ===
         current_session_id = None

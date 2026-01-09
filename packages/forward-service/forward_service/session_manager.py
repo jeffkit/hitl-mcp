@@ -24,6 +24,9 @@ SLASH_COMMANDS = {
     "reset": re.compile(r'^/(reset|r)\s*$', re.IGNORECASE),
     # 允许会话 ID 后面有空格和消息内容
     "change": re.compile(r'^/(change|c)\s+([a-f0-9]{6,8})(?:\s+(.+))?$', re.IGNORECASE | re.DOTALL),
+    # 系统状态命令（需要管理员权限）
+    "ping": re.compile(r'^/(ping|p)\s*$', re.IGNORECASE),
+    "status": re.compile(r'^/(status|st)\s*$', re.IGNORECASE),
 }
 
 

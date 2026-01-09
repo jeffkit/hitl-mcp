@@ -9,7 +9,7 @@ from typing import Optional, List
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Chatbot, ChatAccessRule, ForwardLog
+from .models import Chatbot, ChatAccessRule, ForwardLog, SystemConfig
 from .database import get_db_manager
 
 logger = logging.getLogger(__name__)
@@ -606,6 +606,64 @@ class ForwardLogRepository:
         return deleted
 
 
+# ============== System Config Repository ==============
+
+class SystemConfigRepository:
+    """
+    系统配置数据访问层
+    
+    提供对 system_config 表的所有数据库操作
+    """
+    
+    def __init__(self, session: AsyncSession):
+        self.session = session
+    
+    async def get(self, key: str) -> SystemConfig | None:
+        """获取配置项"""
+        stmt = select(SystemConfig).where(SystemConfig.key == key)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+    
+    async def get_value(self, key: str, default: str = "") -> str:
+        """获取配置值"""
+        config = await self.get(key)
+        return config.value if config else default
+    
+    async def set(self, key: str, value: str, description: str = None) -> SystemConfig:
+        """设置配置项"""
+        config = await self.get(key)
+        
+        if config:
+            config.value = value
+            if description is not None:
+                config.description = description
+            await self.session.flush()
+        else:
+            config = SystemConfig(
+                key=key,
+                value=value,
+                description=description
+            )
+            self.session.add(config)
+            await self.session.flush()
+            await self.session.refresh(config)
+        
+        return config
+    
+    async def delete(self, key: str) -> bool:
+        """删除配置项"""
+        stmt = delete(SystemConfig).where(SystemConfig.key == key)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount > 0
+    
+    async def get_all(self) -> List[SystemConfig]:
+        """获取所有配置项"""
+        stmt = select(SystemConfig).order_by(SystemConfig.key)
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+
 # ============== 辅助函数 ==============
 
 def get_chatbot_repository(session: AsyncSession) -> ChatbotRepository:
@@ -621,3 +679,8 @@ def get_access_rule_repository(session: AsyncSession) -> ChatAccessRuleRepositor
 def get_forward_log_repository(session: AsyncSession) -> ForwardLogRepository:
     """获取 ForwardLogRepository 实例"""
     return ForwardLogRepository(session)
+
+
+def get_system_config_repository(session: AsyncSession) -> SystemConfigRepository:
+    """获取 SystemConfigRepository 实例"""
+    return SystemConfigRepository(session)

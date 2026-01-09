@@ -7,6 +7,7 @@ import { BotsPage } from '@/pages/Bots'
 import { SessionsPage } from '@/pages/Sessions'
 import { LogsPage } from '@/pages/Logs'
 import { StatsPage } from '@/pages/Stats'
+import SettingsPage from '@/pages/Settings'
 import { getAuthToken, verifyToken } from '@/api/client'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -91,6 +92,14 @@ function App() {
           element={
             <ProtectedRoute>
               <StatsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <SettingsPage />
             </ProtectedRoute>
           }
         />

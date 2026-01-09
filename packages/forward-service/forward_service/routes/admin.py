@@ -353,3 +353,77 @@ async def get_stats(days: int = 7):
             "success": False,
             "error": str(e)
         }
+
+
+# ============== 系统配置 API ==============
+
+@router.get("/system/admin-users")
+async def get_admin_users():
+    """获取管理员用户列表"""
+    import json
+    from ..repository import get_system_config_repository
+    
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_system_config_repository(session)
+            admin_users_json = await repo.get_value("admin_users", "[]")
+            admin_users = json.loads(admin_users_json)
+            
+            return {
+                "success": True,
+                "admin_users": admin_users
+            }
+    except Exception as e:
+        logger.error(f"获取管理员列表失败: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "admin_users": []
+        }
+
+
+@router.put("/system/admin-users")
+async def update_admin_users(request: Request):
+    """
+    更新管理员用户列表
+    
+    请求体格式:
+    {
+        "admin_users": ["user_id_1", "alias_1", ...]
+    }
+    """
+    import json
+    from ..repository import get_system_config_repository
+    
+    try:
+        data = await request.json()
+        admin_users = data.get("admin_users", [])
+        
+        # 验证格式
+        if not isinstance(admin_users, list):
+            return {"success": False, "error": "admin_users 必须是数组"}
+        
+        # 过滤空值
+        admin_users = [u.strip() for u in admin_users if u and u.strip()]
+        
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_system_config_repository(session)
+            await repo.set(
+                key="admin_users",
+                value=json.dumps(admin_users),
+                description="管理员用户列表（支持 user_id 或 alias）"
+            )
+            
+            return {
+                "success": True,
+                "admin_users": admin_users,
+                "message": f"已更新 {len(admin_users)} 个管理员"
+            }
+    except Exception as e:
+        logger.error(f"更新管理员列表失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
