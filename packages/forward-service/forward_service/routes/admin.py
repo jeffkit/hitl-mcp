@@ -252,16 +252,6 @@ async def get_stats(days: int = 7):
             total_count = await repo.count()
             
             # 按状态统计
-            stmt = (
-                session.query(
-                    ForwardLog.status,
-                    func.count(ForwardLog.id).label('count')
-                )
-                .filter(ForwardLog.timestamp >= start_date)
-                .group_by(ForwardLog.status)
-            )
-            
-            # 使用 select 语法
             from sqlalchemy import select
             status_stmt = (
                 select(
