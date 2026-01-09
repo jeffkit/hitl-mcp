@@ -166,6 +166,8 @@ async def get_admin_help() -> str:
 🤖 Bot 管理
 • /bots - 列出所有 Bot
 • /bot <name> - 查看 Bot 详情
+• /bot <name> url <新URL> - 修改 URL
+• /bot <name> key <新Key> - 修改 API Key
 
 📊 请求监控
 • /pending - 正在处理的请求
@@ -259,16 +261,75 @@ async def get_bot_detail(bot_name: str) -> str:
         avg_str = f"{avg_duration/1000:.1f}s" if avg_duration > 1000 else f"{int(avg_duration)}ms"
         error_info = last_error[0][:50] if last_error else "无"
         
-        return f"""🤖 {bot.name} 状态
+        # 脱敏 API Key
+        api_key = bot.forward_config.api_key
+        masked_key = f"{api_key[:4]}...{api_key[-4:]}" if api_key and len(api_key) > 8 else (api_key if api_key else "未设置")
+        
+        return f"""🤖 {bot.name} 详情
 
-• 今日请求: {today_count} 条
+📊 今日统计
+• 请求: {today_count} 条
 • 成功率: {success_rate:.1f}%
 • 平均响应: {avg_str}
 • 最近错误: {error_info}
-• 状态: {"启用" if bot.enabled else "禁用"}"""
+
+⚙️ 配置
+• URL: {bot.forward_config.get_url()}
+• API Key: {masked_key}
+• 状态: {"✅ 启用" if bot.enabled else "❌ 禁用"}
+
+💡 可用命令:
+• /bot {bot.name} url <新URL> - 修改 URL
+• /bot {bot.name} key <新Key> - 修改 API Key"""
     
     except Exception as e:
         return f"⚠️ 获取 Bot 详情失败: {e}"
+
+
+async def update_bot_config(bot_name: str, field: str, value: str) -> str:
+    """更新 Bot 配置"""
+    from ..repository import get_chatbot_repository
+    
+    # 查找 Bot
+    bot = None
+    bot_key = None
+    for key, b in config.bots.items():
+        if b.name.lower() == bot_name.lower():
+            bot = b
+            bot_key = key
+            break
+    
+    if not bot:
+        return f"❌ 未找到 Bot: {bot_name}"
+    
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_chatbot_repository(session)
+            
+            # 通过 bot_key 查找数据库记录
+            db_bot = await repo.get_by_bot_key(bot_key)
+            if not db_bot:
+                return f"❌ 数据库中未找到 Bot: {bot_name}"
+            
+            # 根据字段类型更新
+            if field.lower() == "url":
+                await repo.update(db_bot.id, url_template=value)
+                msg = f"✅ 已更新 {bot.name} 的 URL:\n{value}"
+            elif field.lower() == "key":
+                await repo.update(db_bot.id, api_key=value)
+                masked = f"{value[:4]}...{value[-4:]}" if len(value) > 8 else value
+                msg = f"✅ 已更新 {bot.name} 的 API Key:\n{masked}"
+            else:
+                return f"❌ 未知字段: {field}"
+        
+        # 重新加载配置
+        await config.reload()
+        
+        return msg + "\n\n⚠️ 配置已更新，立即生效"
+    
+    except Exception as e:
+        return f"⚠️ 更新失败: {e}"
 
 
 async def get_pending_list() -> str:
@@ -602,7 +663,13 @@ async def handle_callback(
                     elif cmd_type == "bots":
                         response_msg = await get_bots_list()
                     elif cmd_type == "bot":
-                        response_msg = await get_bot_detail(cmd_arg or "")
+                        # extra_msg 格式可能是 "field_type:value"
+                        if extra_msg and ":" in extra_msg:
+                            parts = extra_msg.split(":", 1)
+                            field_type, field_value = parts[0], parts[1]
+                            response_msg = await update_bot_config(cmd_arg or "", field_type, field_value)
+                        else:
+                            response_msg = await get_bot_detail(cmd_arg or "")
                     elif cmd_type == "pending":
                         response_msg = await get_pending_list()
                     elif cmd_type == "recent":

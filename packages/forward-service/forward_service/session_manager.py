@@ -33,7 +33,8 @@ SLASH_COMMANDS = {
     
     # Bot 相关（管理员）
     "bots": re.compile(r'^/(bots)\s*$', re.IGNORECASE),
-    "bot": re.compile(r'^/(bot)\s+(\S+)\s*$', re.IGNORECASE),
+    # /bot <name> [url <url>] [key <key>]
+    "bot": re.compile(r'^/(bot)\s+(\S+)(?:\s+(url|key)\s+(\S+))?\s*$', re.IGNORECASE),
     
     # 请求监控（管理员）
     "pending": re.compile(r'^/(pending)\s*$', re.IGNORECASE),
@@ -277,6 +278,16 @@ class SessionManager:
                     short_id = match.group(2)
                     extra_msg = match.group(3).strip() if match.lastindex >= 3 and match.group(3) else None
                     return (cmd_type, short_id, extra_msg)
+                elif cmd_type == "bot":
+                    # bot 命令：/bot <name> [url|key <value>]
+                    # group(2) 是 bot 名称, group(3) 是字段类型, group(4) 是值
+                    bot_name = match.group(2)
+                    field_type = match.group(3) if match.lastindex >= 3 else None
+                    field_value = match.group(4) if match.lastindex >= 4 else None
+                    # 如果有 field_type 和 field_value，格式化为 "bot_name:field_type:value"
+                    if field_type and field_value:
+                        return (cmd_type, bot_name, f"{field_type}:{field_value}")
+                    return (cmd_type, bot_name, None)
                 else:
                     arg = match.group(2) if match.lastindex and match.lastindex >= 2 else None
                     return (cmd_type, arg, None)
