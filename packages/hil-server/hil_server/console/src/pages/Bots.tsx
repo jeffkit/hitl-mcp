@@ -20,8 +20,7 @@ export function BotsPage() {
     name: '',
     description: '',
     bot_key: '',
-    url_template: '',
-    agent_id: '',
+    url_template: '',  // 继续使用 url_template，但 UI 显示为"目标 URL"
     api_key: '',
     timeout: 1200,
     access_mode: 'allow_all' as 'allow_all' | 'whitelist' | 'blacklist',
@@ -57,7 +56,6 @@ export function BotsPage() {
       description: '',
       bot_key: crypto.randomUUID(),
       url_template: '',
-      agent_id: '',
       api_key: '',
       timeout: 1200,
       access_mode: 'allow_all',
@@ -86,8 +84,7 @@ export function BotsPage() {
           name: detail.bot.name,
           description: detail.bot.description || '',
           bot_key: detail.bot.bot_key,
-          url_template: detail.bot.url_template,
-          agent_id: detail.bot.agent_id || '',
+          url_template: detail.bot.url_template?.replace('{agent_id}', detail.bot.agent_id || '') || '',
           api_key: detail.bot.api_key || '',
           timeout: detail.bot.timeout,
           access_mode: detail.bot.access_mode,
@@ -324,32 +321,22 @@ export function BotsPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">转发 URL 模板 *</label>
+              <label className="text-sm font-medium">目标 URL *</label>
               <Input
-                placeholder="https://example.com/a2a/{agent_id}/messages"
+                placeholder="https://example.com/a2a/your-agent-id/messages"
                 value={formData.url_template}
                 onChange={(e) => setFormData({ ...formData, url_template: e.target.value })}
               />
-              <p className="text-xs text-muted-foreground">支持 {'{agent_id}'} 占位符</p>
+              <p className="text-xs text-muted-foreground">Agent 的完整请求地址</p>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Agent ID</label>
-                <Input
-                  placeholder="Agent ID（可选）"
-                  value={formData.agent_id}
-                  onChange={(e) => setFormData({ ...formData, agent_id: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">API Key</label>
-                <Input
-                  type="password"
-                  placeholder="API Key（可选）"
-                  value={formData.api_key}
-                  onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                />
-              </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">API Key</label>
+              <Input
+                type="password"
+                placeholder="Agent API Key（可选）"
+                value={formData.api_key}
+                onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
+              />
             </div>
             <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
