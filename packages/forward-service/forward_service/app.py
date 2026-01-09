@@ -33,10 +33,16 @@ from .session_manager import init_session_manager
 from .routes import admin_router, bots_router, callback_router
 
 # 配置日志
+# 为了调试 httpx 请求问题，暂时启用 DEBUG 级别
+import os
+log_level = logging.DEBUG if os.getenv("FORWARD_DEBUG") else logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+
+# 设置 forwarder 模块的日志级别为 DEBUG（方便调试）
+logging.getLogger("forward_service.services.forwarder").setLevel(logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 

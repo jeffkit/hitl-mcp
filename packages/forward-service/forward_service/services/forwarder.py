@@ -58,7 +58,7 @@ async def forward_to_agent_with_bot(
     # 使用 Bot 自己的 timeout（如果配置了）
     bot_timeout = bot.forward_config.timeout or timeout
     
-    logger.info(f"转发消息到 Agent: url={target_url}, session_id={session_id[:8] if session_id else 'None'}...")
+    logger.info(f"转发消息到 Agent: url={target_url}, session_id={session_id[:8] if session_id else 'None'}, timeout={bot_timeout}s")
     
     # 构建请求头
     headers = {"Content-Type": "application/json"}
@@ -73,13 +73,45 @@ async def forward_to_agent_with_bot(
     
     start_time = datetime.now()
     
+    # 生成请求 ID 用于追踪
+    import uuid
+    request_id = str(uuid.uuid4())[:8]
+    
     try:
-        async with httpx.AsyncClient(timeout=bot_timeout) as client:
+        # 设置更合理的超时配置：
+        # - connect: 30秒（建立连接的超时）
+        # - read: bot_timeout（等待响应的超时，Agent 处理可能很慢）
+        # - write: 30秒（发送请求的超时）
+        # - pool: 30秒（从连接池获取连接的超时）
+        timeout_config = httpx.Timeout(
+            connect=30.0,
+            read=float(bot_timeout),
+            write=30.0,
+            pool=30.0
+        )
+        
+        logger.debug(f"[{request_id}] 准备创建 httpx.AsyncClient, read_timeout={bot_timeout}s")
+        
+        # 添加事件钩子来追踪请求状态
+        async def log_request(request):
+            logger.debug(f"[{request_id}] >> HTTP 请求开始: {request.method} {request.url}")
+            logger.debug(f"[{request_id}] >> Headers: {dict(request.headers)}")
+        
+        async def log_response(response):
+            logger.debug(f"[{request_id}] << HTTP 响应: {response.status_code}")
+        
+        async with httpx.AsyncClient(
+            timeout=timeout_config,
+            event_hooks={'request': [log_request], 'response': [log_response]}
+        ) as client:
+            logger.debug(f"[{request_id}] httpx.AsyncClient 已创建，开始 POST 请求到 {target_url}")
+            logger.debug(f"[{request_id}] 请求体: {request_body}")
             response = await client.post(
                 target_url,
                 json=request_body,
                 headers=headers
             )
+            logger.debug(f"[{request_id}] POST 请求完成，状态码: {response.status_code}")
             
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
             
@@ -129,14 +161,16 @@ async def forward_to_agent_with_bot(
                 session_id=response_session_id
             )
             
-    except httpx.TimeoutException:
-        logger.error(f"转发请求超时: {target_url}")
+    except httpx.TimeoutException as e:
+        duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        logger.error(f"[{request_id}] 转发请求超时: {target_url}, 耗时: {duration_ms}ms, 错误类型: {type(e).__name__}")
         return AgentResult(
             reply="⚠️ 请求超时，Agent 响应时间过长",
             msg_type="text"
         )
     except Exception as e:
-        logger.error(f"转发请求失败: {e}", exc_info=True)
+        duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        logger.error(f"[{request_id}] 转发请求失败: {e}, 耗时: {duration_ms}ms", exc_info=True)
         return AgentResult(
             reply=f"⚠️ 请求失败: {str(e)}",
             msg_type="text"
