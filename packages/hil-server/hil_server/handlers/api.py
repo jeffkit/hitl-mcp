@@ -235,6 +235,43 @@ async def handle_callback(
         data = await request.json()
         logger.info(f"收到飞鸽回调: chatid={data.get('chatid')}, msgtype={data.get('msgtype')}")
         
+        chat_id = data.get("chatid", "")
+        chat_type = data.get("chattype", "group")
+        from_user = data.get("from", {})
+        
+        # 检查是否是 slash 命令
+        if data.get("msgtype") == "text":
+            text_data = data.get("text", {})
+            content = text_data.get("content", "").strip()
+            
+            # 去除 @机器人 前缀
+            if content.startswith("@"):
+                parts = content.split(" ", 1)
+                if len(parts) > 1:
+                    content = parts[1].strip()
+            
+            # 处理 slash 命令
+            from .slash_commands import process_slash_command
+            slash_response = await process_slash_command(
+                command=content,
+                chat_id=chat_id,
+                user_id=from_user.get("userid", ""),
+                user_alias=from_user.get("alias", ""),
+                from_user=from_user
+            )
+            
+            if slash_response:
+                # 是 slash 命令，发送响应
+                await send_message_direct(
+                    short_id="",
+                    message=slash_response,
+                    chat_id=chat_id,
+                    project_name=None,
+                    images=None,
+                    wait_reply=False,
+                )
+                return {"errcode": 0, "errmsg": "slash command handled"}
+        
         # 使用 storage 的回调处理逻辑
         result = await storage.handle_callback(data)
         
@@ -242,9 +279,6 @@ async def handle_callback(
             logger.info(f"回调处理成功: session_id={result.get('session_id')}")
         else:
             error = result.get("error", "unknown")
-            chat_id = result.get("chat_id") or data.get("chatid", "")
-            chat_type = data.get("chattype", "group")
-            from_user = data.get("from", {})
             
             if error == "no_waiting_session":
                 logger.warning(f"未找到等待中的会话: chat_id={chat_id}")

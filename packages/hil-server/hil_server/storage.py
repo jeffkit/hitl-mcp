@@ -372,13 +372,21 @@ class RelayStorage:
             return session
         return None
     
-    async def get_session_by_short_id(self, short_id: str) -> Session | None:
-        """通过 short_id 获取等待中的会话"""
+    async def get_session_by_short_id(self, short_id: str, chat_id: str | None = None) -> Session | None:
+        """
+        通过 short_id 获取等待中的会话
+        
+        Args:
+            short_id: 会话短 ID
+            chat_id: 可选，限定在该 chat_id 中查找
+        """
         session_id = self._short_id_map.get(short_id)
         if session_id:
             session = await self.get_session(session_id)
             if session and session.status == "waiting":
-                return session
+                # 如果指定了 chat_id，检查是否匹配
+                if chat_id is None or session.chat_id == chat_id:
+                    return session
         return None
     
     async def get_waiting_sessions_by_chat_id(self, chat_id: str) -> list[Session]:
