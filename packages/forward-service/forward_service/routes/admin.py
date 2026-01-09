@@ -4,43 +4,98 @@
 /admin/* 相关接口
 """
 import logging
-from dataclasses import dataclass, field, asdict
-from collections import deque
+from dataclasses import dataclass, asdict
+from datetime import datetime
+from typing import Optional
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse
 from pathlib import Path
 
 from ..config import config
+from ..database import get_db_manager
+from ..repository import get_forward_log_repository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-# ============== 请求日志（用于管理台） ==============
+# ============== 请求日志（持久化到数据库） ==============
 
 @dataclass
-class RequestLog:
-    """请求日志"""
-    timestamp: str
+class RequestLogData:
+    """请求日志数据（用于创建日志）"""
     chat_id: str
-    from_user: str
+    from_user_id: str
+    from_user_name: str
     content: str
     target_url: str
-    status: str  # success / error
-    response: str | None = None
-    error: str | None = None
+    msg_type: str = "text"
+    bot_key: Optional[str] = None
+    bot_name: Optional[str] = None
+    session_id: Optional[str] = None
+    status: str = "pending"
+    response: Optional[str] = None
+    error: Optional[str] = None
     duration_ms: int = 0
 
 
-# 最近的请求日志（内存存储，保留最近 100 条）
-request_logs: deque[RequestLog] = deque(maxlen=100)
+async def add_request_log(log_data: RequestLogData) -> int | None:
+    """
+    添加请求日志到数据库
+    
+    Returns:
+        日志 ID，用于后续更新响应信息
+    """
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_forward_log_repository(session)
+            log = await repo.create(
+                chat_id=log_data.chat_id,
+                from_user_id=log_data.from_user_id,
+                from_user_name=log_data.from_user_name,
+                content=log_data.content,
+                target_url=log_data.target_url,
+                msg_type=log_data.msg_type,
+                bot_key=log_data.bot_key,
+                bot_name=log_data.bot_name,
+                session_id=log_data.session_id,
+                status=log_data.status,
+                response=log_data.response,
+                error=log_data.error,
+                duration_ms=log_data.duration_ms,
+            )
+            return log.id
+    except Exception as e:
+        logger.error(f"添加请求日志失败: {e}")
+        return None
 
 
-def add_request_log(log: RequestLog):
-    """添加请求日志"""
-    request_logs.appendleft(log)
+async def update_request_log(
+    log_id: int,
+    status: str,
+    response: str = None,
+    error: str = None,
+    session_id: str = None,
+    duration_ms: int = None,
+):
+    """更新请求日志的响应信息"""
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_forward_log_repository(session)
+            await repo.update_response(
+                log_id=log_id,
+                status=status,
+                response=response,
+                error=error,
+                session_id=session_id,
+                duration_ms=duration_ms,
+            )
+    except Exception as e:
+        logger.error(f"更新请求日志失败: {e}")
 
 
 # ============== 静态文件 ==============
@@ -138,13 +193,26 @@ async def admin_rules():
 
 
 @router.get("/logs")
-async def admin_logs(limit: int = 20):
+async def admin_logs(limit: int = 100):
     """获取最近的请求日志（管理台用）"""
-    logs = list(request_logs)[:limit]
-    return {
-        "total": len(request_logs),
-        "logs": [asdict(log) for log in logs]
-    }
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_forward_log_repository(session)
+            logs = await repo.get_recent(limit=limit)
+            total = await repo.count()
+            
+            return {
+                "total": total,
+                "logs": [log.to_dict() for log in logs]
+            }
+    except Exception as e:
+        logger.error(f"获取日志失败: {e}")
+        return {
+            "total": 0,
+            "logs": [],
+            "error": str(e)
+        }
 
 
 @router.get("/mode")

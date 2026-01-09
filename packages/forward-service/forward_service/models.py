@@ -454,3 +454,150 @@ class ChatAccessRule(Base):
             "remark": self.remark,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+# ============== Forward 日志模型 ==============
+
+class ForwardLog(Base):
+    """
+    Forward 请求日志表
+    
+    存储每次企微消息转发的请求和响应记录，用于：
+    - 调试和排查问题
+    - 统计和分析
+    - 审计追踪
+    """
+    __tablename__ = "forward_logs"
+    
+    # 主键
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    
+    # 请求时间
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+        comment="请求时间"
+    )
+    
+    # 来源信息
+    chat_id: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        index=True,
+        comment="群聊/会话 ID"
+    )
+    
+    from_user_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="发送者用户 ID"
+    )
+    
+    from_user_name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="发送者用户名"
+    )
+    
+    # 请求内容
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="用户发送的消息内容"
+    )
+    
+    msg_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="text",
+        comment="消息类型 (text/image/mixed)"
+    )
+    
+    # Bot 信息
+    bot_key: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="使用的 Bot Key"
+    )
+    
+    bot_name: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Bot 名称"
+    )
+    
+    # 转发目标
+    target_url: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="转发的目标 URL"
+    )
+    
+    # 会话 ID
+    session_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="Agent 会话 ID"
+    )
+    
+    # 响应信息
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        comment="状态: pending/success/error/timeout"
+    )
+    
+    response: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Agent 响应内容"
+    )
+    
+    error: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="错误信息"
+    )
+    
+    # 性能数据
+    duration_ms: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="请求耗时（毫秒）"
+    )
+    
+    # 索引
+    __table_args__ = (
+        Index("idx_forward_logs_timestamp", "timestamp"),
+        Index("idx_forward_logs_chat_id", "chat_id"),
+        Index("idx_forward_logs_bot_key", "bot_key"),
+        Index("idx_forward_logs_status", "status"),
+    )
+    
+    def __repr__(self) -> str:
+        return f"<ForwardLog(id={self.id}, chat_id={self.chat_id}, status={self.status})>"
+    
+    def to_dict(self) -> dict:
+        """转换为字典 (用于 API 返回)"""
+        return {
+            "id": self.id,
+            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
+            "chat_id": self.chat_id,
+            "from_user": self.from_user_name or self.from_user_id,
+            "content": self.content,
+            "msg_type": self.msg_type,
+            "bot_key": self.bot_key,
+            "bot_name": self.bot_name,
+            "target_url": self.target_url,
+            "session_id": self.session_id,
+            "status": self.status,
+            "response": self.response,
+            "error": self.error,
+            "duration_ms": self.duration_ms,
+        }

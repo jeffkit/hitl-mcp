@@ -4,11 +4,12 @@ Forward Service 数据库访问层 (Repository/DAO)
 提供对数据库的 CRUD 操作，封装所有数据库访问逻辑。
 """
 import logging
+from datetime import datetime
 from typing import Optional, List
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Chatbot, ChatAccessRule
+from .models import Chatbot, ChatAccessRule, ForwardLog
 from .database import get_db_manager
 
 logger = logging.getLogger(__name__)
@@ -475,6 +476,136 @@ class ChatAccessRuleRepository:
         await self.session.flush()
 
 
+# ============== Forward Log Repository ==============
+
+class ForwardLogRepository:
+    """
+    Forward 日志数据访问层
+    
+    提供对 forward_logs 表的所有数据库操作
+    """
+    
+    def __init__(self, session: AsyncSession):
+        self.session = session
+    
+    async def create(
+        self,
+        chat_id: str,
+        from_user_id: str,
+        content: str,
+        target_url: str,
+        from_user_name: str = None,
+        msg_type: str = "text",
+        bot_key: str = None,
+        bot_name: str = None,
+        session_id: str = None,
+        status: str = "pending",
+        response: str = None,
+        error: str = None,
+        duration_ms: int = 0,
+    ) -> ForwardLog:
+        """创建日志记录"""
+        log = ForwardLog(
+            chat_id=chat_id,
+            from_user_id=from_user_id,
+            from_user_name=from_user_name,
+            content=content[:5000] if content else "",  # 限制长度
+            msg_type=msg_type,
+            bot_key=bot_key,
+            bot_name=bot_name,
+            target_url=target_url[:1000] if target_url else "",  # 限制长度
+            session_id=session_id,
+            status=status,
+            response=response[:10000] if response else None,  # 限制长度
+            error=error[:2000] if error else None,  # 限制长度
+            duration_ms=duration_ms,
+        )
+        self.session.add(log)
+        await self.session.flush()
+        await self.session.refresh(log)
+        return log
+    
+    async def update_response(
+        self,
+        log_id: int,
+        status: str,
+        response: str = None,
+        error: str = None,
+        session_id: str = None,
+        duration_ms: int = None,
+    ) -> ForwardLog | None:
+        """更新日志的响应信息"""
+        stmt = select(ForwardLog).where(ForwardLog.id == log_id)
+        result = await self.session.execute(stmt)
+        log = result.scalar_one_or_none()
+        
+        if log:
+            log.status = status
+            if response is not None:
+                log.response = response[:10000] if response else None
+            if error is not None:
+                log.error = error[:2000] if error else None
+            if session_id is not None:
+                log.session_id = session_id
+            if duration_ms is not None:
+                log.duration_ms = duration_ms
+            await self.session.flush()
+        
+        return log
+    
+    async def get_recent(self, limit: int = 100) -> List[ForwardLog]:
+        """获取最近的日志"""
+        stmt = (
+            select(ForwardLog)
+            .order_by(ForwardLog.timestamp.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_by_chat_id(self, chat_id: str, limit: int = 50) -> List[ForwardLog]:
+        """获取指定会话的日志"""
+        stmt = (
+            select(ForwardLog)
+            .where(ForwardLog.chat_id == chat_id)
+            .order_by(ForwardLog.timestamp.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_by_bot_key(self, bot_key: str, limit: int = 50) -> List[ForwardLog]:
+        """获取指定 Bot 的日志"""
+        stmt = (
+            select(ForwardLog)
+            .where(ForwardLog.bot_key == bot_key)
+            .order_by(ForwardLog.timestamp.desc())
+            .limit(limit)
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def count(self) -> int:
+        """获取日志总数"""
+        stmt = select(func.count(ForwardLog.id))
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
+    
+    async def cleanup_old_logs(self, days: int = 30) -> int:
+        """清理指定天数之前的日志"""
+        from datetime import timedelta
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        
+        stmt = delete(ForwardLog).where(ForwardLog.timestamp < cutoff)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        
+        deleted = result.rowcount or 0
+        if deleted > 0:
+            logger.info(f"清理 {deleted} 条旧日志 (超过 {days} 天)")
+        return deleted
+
+
 # ============== 辅助函数 ==============
 
 def get_chatbot_repository(session: AsyncSession) -> ChatbotRepository:
@@ -485,3 +616,8 @@ def get_chatbot_repository(session: AsyncSession) -> ChatbotRepository:
 def get_access_rule_repository(session: AsyncSession) -> ChatAccessRuleRepository:
     """获取 ChatAccessRuleRepository 实例"""
     return ChatAccessRuleRepository(session)
+
+
+def get_forward_log_repository(session: AsyncSession) -> ForwardLogRepository:
+    """获取 ForwardLogRepository 实例"""
+    return ForwardLogRepository(session)

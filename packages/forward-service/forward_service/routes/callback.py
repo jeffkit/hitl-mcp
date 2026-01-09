@@ -13,7 +13,7 @@ from ..sender import send_reply
 from ..session_manager import get_session_manager
 from ..utils import extract_content
 from ..services import forward_to_agent_with_bot
-from .admin import add_request_log, RequestLog
+from .admin import add_request_log, update_request_log, RequestLogData
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ async def handle_callback(
             return {"errcode": 401, "errmsg": "Unauthorized"}
     
     start_time = datetime.now()
-    log_entry = None
+    log_id = None  # 日志 ID，用于更新响应信息
     
     try:
         data = await request.json()
@@ -202,15 +202,20 @@ async def handle_callback(
         # 获取目标 URL（用于日志）
         target_url = bot.forward_config.get_url()
         
-        # 初始化日志条目
-        log_entry = RequestLog(
-            timestamp=datetime.now().isoformat(),
+        # 创建日志记录（持久化到数据库）
+        log_data = RequestLogData(
             chat_id=chat_id,
-            from_user=from_user_name,
+            from_user_id=from_user_id,
+            from_user_name=from_user_name,
             content=content or "(image)",
             target_url=target_url,
+            msg_type=msg_type,
+            bot_key=bot.bot_key,
+            bot_name=bot.name,
+            session_id=current_session_id,
             status="pending"
         )
+        log_id = await add_request_log(log_data)
         
         # 转发到 Agent（使用 Bot 配置，带上 session_id）
         result = await forward_to_agent_with_bot(
@@ -223,10 +228,14 @@ async def handle_callback(
         duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
         
         if not result:
-            log_entry.status = "error"
-            log_entry.error = "转发失败或无配置"
-            log_entry.duration_ms = duration_ms
-            add_request_log(log_entry)
+            # 更新日志：转发失败
+            if log_id:
+                await update_request_log(
+                    log_id=log_id,
+                    status="error",
+                    error="转发失败或无配置",
+                    duration_ms=duration_ms
+                )
             
             await send_reply(
                 chat_id=chat_id,
@@ -256,13 +265,16 @@ async def handle_callback(
             bot_key=bot.bot_key
         )
         
-        # 更新日志
-        log_entry.status = "success" if send_result.get("success") else "error"
-        log_entry.response = result.reply[:200] if result.reply else None
-        log_entry.duration_ms = duration_ms
-        if not send_result.get("success"):
-            log_entry.error = send_result.get("error")
-        add_request_log(log_entry)
+        # 更新日志：成功或发送失败
+        if log_id:
+            await update_request_log(
+                log_id=log_id,
+                status="success" if send_result.get("success") else "error",
+                response=result.reply,
+                session_id=result.session_id,
+                error=send_result.get("error") if not send_result.get("success") else None,
+                duration_ms=duration_ms
+            )
         
         if send_result.get("success"):
             logger.info(f"回复已发送: chat_id={chat_id}")
@@ -274,10 +286,13 @@ async def handle_callback(
     except Exception as e:
         logger.error(f"处理回调失败: {e}", exc_info=True)
         
-        if log_entry:
-            log_entry.status = "error"
-            log_entry.error = str(e)
-            log_entry.duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-            add_request_log(log_entry)
+        # 尝试更新日志
+        if log_id:
+            await update_request_log(
+                log_id=log_id,
+                status="error",
+                error=str(e),
+                duration_ms=int((datetime.now() - start_time).total_seconds() * 1000)
+            )
         
         return {"errcode": -1, "errmsg": str(e)}
