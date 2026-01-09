@@ -6,6 +6,7 @@ import { DashboardPage } from '@/pages/Dashboard'
 import { BotsPage } from '@/pages/Bots'
 import { SessionsPage } from '@/pages/Sessions'
 import { LogsPage } from '@/pages/Logs'
+import { StatsPage } from '@/pages/Stats'
 import { getAuthToken, verifyToken } from '@/api/client'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -82,6 +83,14 @@ function App() {
           element={
             <ProtectedRoute>
               <LogsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/stats"
+          element={
+            <ProtectedRoute>
+              <StatsPage />
             </ProtectedRoute>
           }
         />

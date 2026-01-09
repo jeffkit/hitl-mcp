@@ -223,3 +223,143 @@ async def get_mode():
         "supports_bot_api": True,
         "version": "3.0.0"
     }
+
+
+# ============== 统计 API ==============
+
+@router.get("/stats")
+async def get_stats(days: int = 7):
+    """
+    获取日志统计数据
+    
+    Args:
+        days: 统计最近多少天的数据，默认 7 天
+    """
+    from datetime import timedelta
+    from sqlalchemy import func, case
+    from ..models import ForwardLog
+    
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_forward_log_repository(session)
+            
+            # 计算时间范围
+            now = datetime.utcnow()
+            start_date = now - timedelta(days=days)
+            
+            # 总数统计
+            total_count = await repo.count()
+            
+            # 按状态统计
+            stmt = (
+                session.query(
+                    ForwardLog.status,
+                    func.count(ForwardLog.id).label('count')
+                )
+                .filter(ForwardLog.timestamp >= start_date)
+                .group_by(ForwardLog.status)
+            )
+            
+            # 使用 select 语法
+            from sqlalchemy import select
+            status_stmt = (
+                select(
+                    ForwardLog.status,
+                    func.count(ForwardLog.id).label('count')
+                )
+                .where(ForwardLog.timestamp >= start_date)
+                .group_by(ForwardLog.status)
+            )
+            status_result = await session.execute(status_stmt)
+            status_counts = {row.status: row.count for row in status_result}
+            
+            # 按 Bot 统计
+            bot_stmt = (
+                select(
+                    ForwardLog.bot_name,
+                    ForwardLog.bot_key,
+                    func.count(ForwardLog.id).label('count')
+                )
+                .where(ForwardLog.timestamp >= start_date)
+                .group_by(ForwardLog.bot_name, ForwardLog.bot_key)
+            )
+            bot_result = await session.execute(bot_stmt)
+            bot_stats = [
+                {"bot_name": row.bot_name or "Unknown", "bot_key": row.bot_key, "count": row.count}
+                for row in bot_result
+            ]
+            
+            # 平均响应时间
+            avg_stmt = (
+                select(func.avg(ForwardLog.duration_ms))
+                .where(ForwardLog.timestamp >= start_date)
+                .where(ForwardLog.status == "success")
+            )
+            avg_result = await session.execute(avg_stmt)
+            avg_duration = avg_result.scalar() or 0
+            
+            # 每日统计（最近 N 天）
+            daily_stats = []
+            for i in range(days):
+                day_start = (now - timedelta(days=i)).replace(hour=0, minute=0, second=0, microsecond=0)
+                day_end = day_start + timedelta(days=1)
+                
+                day_stmt = (
+                    select(func.count(ForwardLog.id))
+                    .where(ForwardLog.timestamp >= day_start)
+                    .where(ForwardLog.timestamp < day_end)
+                )
+                day_result = await session.execute(day_stmt)
+                day_count = day_result.scalar() or 0
+                
+                daily_stats.append({
+                    "date": day_start.strftime("%Y-%m-%d"),
+                    "count": day_count
+                })
+            
+            # 反转顺序（从旧到新）
+            daily_stats.reverse()
+            
+            # 活跃用户 Top 10
+            user_stmt = (
+                select(
+                    ForwardLog.from_user_name,
+                    ForwardLog.from_user_id,
+                    func.count(ForwardLog.id).label('count')
+                )
+                .where(ForwardLog.timestamp >= start_date)
+                .group_by(ForwardLog.from_user_name, ForwardLog.from_user_id)
+                .order_by(func.count(ForwardLog.id).desc())
+                .limit(10)
+            )
+            user_result = await session.execute(user_stmt)
+            top_users = [
+                {"user_name": row.from_user_name or row.from_user_id, "count": row.count}
+                for row in user_result
+            ]
+            
+            # 计算成功率
+            success_count = status_counts.get("success", 0)
+            error_count = status_counts.get("error", 0) + status_counts.get("timeout", 0)
+            total_in_period = success_count + error_count
+            success_rate = (success_count / total_in_period * 100) if total_in_period > 0 else 100
+            
+            return {
+                "success": True,
+                "period_days": days,
+                "total_count": total_count,
+                "period_count": sum(status_counts.values()),
+                "status_counts": status_counts,
+                "success_rate": round(success_rate, 2),
+                "avg_duration_ms": round(avg_duration, 2),
+                "bot_stats": bot_stats,
+                "daily_stats": daily_stats,
+                "top_users": top_users,
+            }
+    except Exception as e:
+        logger.error(f"获取统计数据失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }

@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Bot, LayoutDashboard, MessageSquare, Send, LogOut } from 'lucide-react'
+import { Bot, LayoutDashboard, MessageSquare, Send, LogOut, BarChart3 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { logout } from '@/api/client'
 
@@ -8,6 +8,7 @@ const navItems = [
   { path: '/bots', label: 'Bot 管理', icon: Bot },
   { path: '/sessions', label: 'HIL 会话', icon: MessageSquare },
   { path: '/logs', label: 'Forward 日志', icon: Send },
+  { path: '/stats', label: '消息统计', icon: BarChart3 },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
