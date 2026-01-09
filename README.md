@@ -784,6 +784,12 @@ hil-mcp/
 
 ---
 
+## API 文档
+
+详细的 API 接口文档请参考：[docs/API.md](./docs/API.md)
+
+---
+
 ## 常见问题
 
 ### Q: 出现 502 Bad Gateway 错误
