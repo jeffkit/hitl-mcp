@@ -20,13 +20,28 @@ logger = logging.getLogger(__name__)
 
 # Slash 命令正则
 SLASH_COMMANDS = {
+    # 会话管理（所有用户可用）
     "list": re.compile(r'^/(sess|s)\s*$', re.IGNORECASE),
     "reset": re.compile(r'^/(reset|r)\s*$', re.IGNORECASE),
     # 允许会话 ID 后面有空格和消息内容
     "change": re.compile(r'^/(change|c)\s+([a-f0-9]{6,8})(?:\s+(.+))?$', re.IGNORECASE | re.DOTALL),
+    
     # 系统状态命令（需要管理员权限）
     "ping": re.compile(r'^/(ping|p)\s*$', re.IGNORECASE),
     "status": re.compile(r'^/(status|st)\s*$', re.IGNORECASE),
+    "help": re.compile(r'^/(help|h)\s*$', re.IGNORECASE),
+    
+    # Bot 相关（管理员）
+    "bots": re.compile(r'^/(bots)\s*$', re.IGNORECASE),
+    "bot": re.compile(r'^/(bot)\s+(\S+)\s*$', re.IGNORECASE),
+    
+    # 请求监控（管理员）
+    "pending": re.compile(r'^/(pending)\s*$', re.IGNORECASE),
+    "recent": re.compile(r'^/(recent)\s*$', re.IGNORECASE),
+    "errors": re.compile(r'^/(errors)\s*$', re.IGNORECASE),
+    
+    # 系统运维（管理员）
+    "health": re.compile(r'^/(health)\s*$', re.IGNORECASE),
 }
 
 

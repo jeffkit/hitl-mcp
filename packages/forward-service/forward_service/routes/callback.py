@@ -101,12 +101,12 @@ async def get_system_status() -> str:
         else:
             avg_duration_str = f"{int(avg_duration)}ms"
         
-        return f"""🟢 **Forward Service 状态**
+        return f"""🟢 Forward Service 状态
 
 📊 版本: 3.0.0
 🤖 Bot 数量: {len(config.bots)} 个
 
-📈 **今日统计**
+📈 今日统计
 • 消息数: {today_count} 条
 • 成功率: {success_rate:.1f}%
 • 平均响应: {avg_duration_str}
@@ -116,6 +116,266 @@ async def get_system_status() -> str:
     except Exception as e:
         logger.error(f"获取系统状态失败: {e}")
         return f"⚠️ 获取系统状态失败: {e}"
+
+
+# ============== 进行中请求追踪 ==============
+
+# 存储正在处理的请求 {request_id: {bot_name, user, message, start_time}}
+_pending_requests: dict[str, dict] = {}
+
+
+def add_pending_request(request_id: str, bot_name: str, user: str, message: str):
+    """添加进行中的请求"""
+    _pending_requests[request_id] = {
+        "bot_name": bot_name,
+        "user": user,
+        "message": message[:50],
+        "start_time": datetime.now()
+    }
+
+
+def remove_pending_request(request_id: str):
+    """移除已完成的请求"""
+    _pending_requests.pop(request_id, None)
+
+
+def get_pending_requests() -> list[dict]:
+    """获取所有进行中的请求"""
+    result = []
+    now = datetime.now()
+    for req_id, req in _pending_requests.items():
+        elapsed = (now - req["start_time"]).total_seconds()
+        result.append({
+            **req,
+            "elapsed_seconds": elapsed,
+            "elapsed_str": f"{int(elapsed // 60)}分{int(elapsed % 60)}秒"
+        })
+    return sorted(result, key=lambda x: x["elapsed_seconds"], reverse=True)
+
+
+# ============== 管理命令处理 ==============
+
+async def get_admin_help() -> str:
+    """生成管理员帮助信息"""
+    return """📖 管理员命令帮助
+
+🔧 系统状态
+• /ping - 健康检查
+• /status - 系统状态
+
+🤖 Bot 管理
+• /bots - 列出所有 Bot
+• /bot <name> - 查看 Bot 详情
+
+📊 请求监控
+• /pending - 正在处理的请求
+• /recent - 最近 10 条日志
+• /errors - 最近错误
+
+🏥 运维
+• /health - 检查 Agent 可达性
+
+💬 会话管理（所有用户可用）
+• /s - 列出会话
+• /r - 重置会话
+• /c <id> - 切换会话"""
+
+
+async def get_bots_list() -> str:
+    """获取所有 Bot 列表"""
+    bots = config.bots
+    if not bots:
+        return "📭 暂无配置的 Bot"
+    
+    lines = ["🤖 Bot 列表\n"]
+    for bot in bots:
+        status = "✅" if bot.enabled else "❌"
+        lines.append(f"{status} {bot.name}")
+    
+    return "\n".join(lines)
+
+
+async def get_bot_detail(bot_name: str) -> str:
+    """获取 Bot 详情"""
+    from sqlalchemy import select, func
+    from ..models import ForwardLog
+    
+    # 查找 Bot
+    bot = None
+    for b in config.bots:
+        if b.name.lower() == bot_name.lower():
+            bot = b
+            break
+    
+    if not bot:
+        return f"❌ 未找到 Bot: {bot_name}"
+    
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            
+            # 今日请求数
+            today_stmt = (
+                select(func.count(ForwardLog.id))
+                .where(ForwardLog.bot_key == bot.bot_key)
+                .where(ForwardLog.timestamp >= today_start)
+            )
+            today_result = await session.execute(today_stmt)
+            today_count = today_result.scalar() or 0
+            
+            # 成功数
+            success_stmt = (
+                select(func.count(ForwardLog.id))
+                .where(ForwardLog.bot_key == bot.bot_key)
+                .where(ForwardLog.timestamp >= today_start)
+                .where(ForwardLog.status == "success")
+            )
+            success_result = await session.execute(success_stmt)
+            success_count = success_result.scalar() or 0
+            
+            # 平均响应时间
+            avg_stmt = (
+                select(func.avg(ForwardLog.duration_ms))
+                .where(ForwardLog.bot_key == bot.bot_key)
+                .where(ForwardLog.timestamp >= today_start)
+                .where(ForwardLog.status == "success")
+            )
+            avg_result = await session.execute(avg_stmt)
+            avg_duration = avg_result.scalar() or 0
+            
+            # 最近错误
+            error_stmt = (
+                select(ForwardLog.error, ForwardLog.timestamp)
+                .where(ForwardLog.bot_key == bot.bot_key)
+                .where(ForwardLog.status != "success")
+                .order_by(ForwardLog.timestamp.desc())
+                .limit(1)
+            )
+            error_result = await session.execute(error_stmt)
+            last_error = error_result.first()
+        
+        success_rate = (success_count / today_count * 100) if today_count > 0 else 100
+        avg_str = f"{avg_duration/1000:.1f}s" if avg_duration > 1000 else f"{int(avg_duration)}ms"
+        error_info = last_error[0][:50] if last_error else "无"
+        
+        return f"""🤖 {bot.name} 状态
+
+• 今日请求: {today_count} 条
+• 成功率: {success_rate:.1f}%
+• 平均响应: {avg_str}
+• 最近错误: {error_info}
+• 状态: {"启用" if bot.enabled else "禁用"}"""
+    
+    except Exception as e:
+        return f"⚠️ 获取 Bot 详情失败: {e}"
+
+
+async def get_pending_list() -> str:
+    """获取正在处理的请求"""
+    pending = get_pending_requests()
+    
+    if not pending:
+        return "✅ 当前没有正在处理的请求"
+    
+    lines = [f"⏳ 正在处理的请求 ({len(pending)} 个)\n"]
+    for i, req in enumerate(pending, 1):
+        lines.append(f"{i}. {req['bot_name']}")
+        lines.append(f"   用户: {req['user']}")
+        lines.append(f"   消息: {req['message']}")
+        lines.append(f"   等待: {req['elapsed_str']}")
+        lines.append("")
+    
+    return "\n".join(lines)
+
+
+async def get_recent_logs(limit: int = 10) -> str:
+    """获取最近日志"""
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_forward_log_repository(session)
+            logs = await repo.get_recent(limit)
+        
+        if not logs:
+            return "📭 暂无日志记录"
+        
+        lines = [f"📋 最近 {len(logs)} 条日志\n"]
+        for log in logs:
+            status_icon = "✅" if log.status == "success" else "❌"
+            time_str = log.timestamp.strftime("%H:%M:%S") if log.timestamp else "?"
+            content = (log.content or "")[:20]
+            lines.append(f"{status_icon} [{time_str}] {log.bot_name}: {content}")
+        
+        return "\n".join(lines)
+    
+    except Exception as e:
+        return f"⚠️ 获取日志失败: {e}"
+
+
+async def get_error_logs(limit: int = 5) -> str:
+    """获取错误日志"""
+    from sqlalchemy import select
+    from ..models import ForwardLog
+    
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            stmt = (
+                select(ForwardLog)
+                .where(ForwardLog.status != "success")
+                .order_by(ForwardLog.timestamp.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            logs = result.scalars().all()
+        
+        if not logs:
+            return "✅ 暂无错误记录"
+        
+        lines = [f"❌ 最近 {len(logs)} 条错误\n"]
+        for log in logs:
+            time_str = log.timestamp.strftime("%m-%d %H:%M") if log.timestamp else "?"
+            error = (log.error or log.status or "未知错误")[:40]
+            lines.append(f"• [{time_str}] {log.bot_name}")
+            lines.append(f"  {error}")
+            lines.append("")
+        
+        return "\n".join(lines)
+    
+    except Exception as e:
+        return f"⚠️ 获取错误日志失败: {e}"
+
+
+async def check_agents_health() -> str:
+    """检查所有 Agent 的健康状态"""
+    import httpx
+    
+    bots = config.bots
+    if not bots:
+        return "📭 暂无配置的 Bot"
+    
+    lines = ["🏥 Agent 健康检查\n"]
+    
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        for bot in bots:
+            url = bot.forward_config.get_url()
+            # 只检查到域名/IP部分
+            try:
+                # 尝试 HEAD 请求到根路径
+                base_url = "/".join(url.split("/")[:3])  # http://host:port
+                response = await client.head(base_url, follow_redirects=True)
+                status = "✅ 可达" if response.status_code < 500 else f"⚠️ {response.status_code}"
+            except httpx.ConnectError:
+                status = "❌ 连接失败"
+            except httpx.TimeoutException:
+                status = "⏱️ 超时"
+            except Exception as e:
+                status = f"❌ {str(e)[:20]}"
+            
+            lines.append(f"• {bot.name}: {status}")
+    
+    return "\n".join(lines)
 
 
 router = APIRouter(tags=["callback"])
@@ -323,6 +583,44 @@ async def handle_callback(
                             bot_key=bot.bot_key
                         )
                     return {"errcode": 0, "errmsg": "slash command handled"}
+                
+                elif cmd_type in ("help", "bots", "bot", "pending", "recent", "errors", "health"):
+                    # 其他管理员命令
+                    is_admin = await check_is_admin(from_user_id, from_user_alias)
+                    if not is_admin:
+                        await send_reply(
+                            chat_id=chat_id,
+                            message="⚠️ 此命令仅限管理员使用",
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                        return {"errcode": 0, "errmsg": "permission denied"}
+                    
+                    # 根据命令类型获取响应
+                    if cmd_type == "help":
+                        response_msg = await get_admin_help()
+                    elif cmd_type == "bots":
+                        response_msg = await get_bots_list()
+                    elif cmd_type == "bot":
+                        response_msg = await get_bot_detail(cmd_arg or "")
+                    elif cmd_type == "pending":
+                        response_msg = await get_pending_list()
+                    elif cmd_type == "recent":
+                        response_msg = await get_recent_logs()
+                    elif cmd_type == "errors":
+                        response_msg = await get_error_logs()
+                    elif cmd_type == "health":
+                        response_msg = await check_agents_health()
+                    else:
+                        response_msg = f"❓ 未知命令: {cmd_type}"
+                    
+                    await send_reply(
+                        chat_id=chat_id,
+                        message=response_msg,
+                        msg_type="text",
+                        bot_key=bot.bot_key
+                    )
+                    return {"errcode": 0, "errmsg": "slash command handled"}
         
         # === 会话管理：获取现有 session_id ===
         current_session_id = None
@@ -350,13 +648,29 @@ async def handle_callback(
         )
         log_id = await add_request_log(log_data)
         
-        # 转发到 Agent（使用 Bot 配置，带上 session_id）
-        result = await forward_to_agent_with_bot(
-            bot_key=bot.bot_key,
-            content=content or "",
-            timeout=config.timeout,
-            session_id=current_session_id
+        # 生成请求 ID 用于追踪
+        import uuid
+        request_id = str(uuid.uuid4())[:8]
+        
+        # 添加到 pending 请求列表
+        add_pending_request(
+            request_id=request_id,
+            bot_name=bot.name,
+            user=from_user_name or from_user_id,
+            message=content or "(image)"
         )
+        
+        try:
+            # 转发到 Agent（使用 Bot 配置，带上 session_id）
+            result = await forward_to_agent_with_bot(
+                bot_key=bot.bot_key,
+                content=content or "",
+                timeout=config.timeout,
+                session_id=current_session_id
+            )
+        finally:
+            # 无论成功失败，都从 pending 列表移除
+            remove_pending_request(request_id)
         
         duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
         
