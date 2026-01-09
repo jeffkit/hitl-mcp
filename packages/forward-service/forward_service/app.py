@@ -96,7 +96,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # ============== 基础路由 ==============
 
 @app.get("/")
-async def root():
+async def root() -> dict:
     """根路径"""
     return {
         "service": "Forward Service",
@@ -106,7 +106,7 @@ async def root():
 
 
 @app.get("/health")
-async def health():
+async def health() -> dict:
     """健康检查"""
     errors = config.validate()
     return {

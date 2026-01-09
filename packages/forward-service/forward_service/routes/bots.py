@@ -15,7 +15,7 @@ router = APIRouter(prefix="/admin/bots", tags=["bots"])
 
 
 @router.get("")
-async def list_bots():
+async def list_bots() -> dict:
     """获取所有 Bot 列表"""
     bots = await config.list_bots()
     return {
@@ -26,7 +26,7 @@ async def list_bots():
 
 
 @router.get("/{bot_key}")
-async def get_bot_by_key(bot_key: str):
+async def get_bot_by_key(bot_key: str) -> dict:
     """获取单个 Bot 详情"""
     bot = await config.get_bot(bot_key)
     if not bot:
@@ -42,16 +42,15 @@ async def get_bot_by_key(bot_key: str):
 
 
 @router.post("")
-async def create_bot(request: Request):
+async def create_bot(request: Request) -> dict:
     """
     创建新 Bot
 
     Body:
         bot_key: str (必填)
         name: str (必填)
-        url_template: str (必填)
+        target_url: str (必填) - 完整的目标 URL
         description: str
-        agent_id: str
         api_key: str
         timeout: int
         access_mode: str
@@ -69,7 +68,7 @@ async def create_bot(request: Request):
 
 
 @router.put("/{bot_key}")
-async def update_bot_by_key(bot_key: str, request: Request):
+async def update_bot_by_key(bot_key: str, request: Request) -> dict:
     """更新 Bot 配置"""
     try:
         data = await request.json()
@@ -81,7 +80,7 @@ async def update_bot_by_key(bot_key: str, request: Request):
 
 
 @router.delete("/{bot_key}")
-async def delete_bot_by_key(bot_key: str):
+async def delete_bot_by_key(bot_key: str) -> dict:
     """删除 Bot"""
     result = await config.delete_bot(bot_key)
     return result
