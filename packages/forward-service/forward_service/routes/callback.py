@@ -165,7 +165,7 @@ async def handle_callback(
                     return {"errcode": 0, "errmsg": "slash command handled"}
                 
                 elif cmd_type == "reset":
-                    # /reset - 重置会话
+                    # /reset 或 /r - 新建会话（重置当前会话）
                     success = await session_mgr.reset_session(from_user_id, chat_id, bot.bot_key)
                     if success:
                         await send_reply(
@@ -175,9 +175,10 @@ async def handle_callback(
                             bot_key=bot.bot_key
                         )
                     else:
+                        # 没有活跃会话也算成功 - 下次发消息会自动创建新会话
                         await send_reply(
                             chat_id=chat_id,
-                            message="ℹ️ 当前没有活跃会话",
+                            message="✅ 已准备好开始新对话，请发送消息",
                             msg_type="text",
                             bot_key=bot.bot_key
                         )
