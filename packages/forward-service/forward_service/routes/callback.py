@@ -188,7 +188,7 @@ async def get_bots_list() -> str:
         return "📭 暂无配置的 Bot"
     
     lines = ["🤖 Bot 列表\n"]
-    for bot in bots:
+    for bot in bots.values():
         status = "✅" if bot.enabled else "❌"
         lines.append(f"{status} {bot.name}")
     
@@ -202,7 +202,7 @@ async def get_bot_detail(bot_name: str) -> str:
     
     # 查找 Bot
     bot = None
-    for b in config.bots:
+    for b in config.bots.values():
         if b.name.lower() == bot_name.lower():
             bot = b
             break
@@ -358,7 +358,7 @@ async def check_agents_health() -> str:
     lines = ["🏥 Agent 健康检查\n"]
     
     async with httpx.AsyncClient(timeout=5.0) as client:
-        for bot in bots:
+        for bot in bots.values():
             url = bot.forward_config.get_url()
             # 只检查到域名/IP部分
             try:
