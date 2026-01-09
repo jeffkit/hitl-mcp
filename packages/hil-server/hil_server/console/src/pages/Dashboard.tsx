@@ -64,7 +64,7 @@ export function DashboardPage() {
             <Bot className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{data?.forward_service?.config.bots_count || 0}</div>
+            <div className="text-2xl font-bold">{data?.forward_service?.config?.bots_count || 0}</div>
             <p className="text-xs text-muted-foreground">
               Forward Service 配置
             </p>
@@ -94,9 +94,9 @@ export function DashboardPage() {
             <Send className="w-4 h-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{data?.forward_service?.stats.total_requests || 0}</div>
+            <div className="text-2xl font-bold">{data?.forward_service?.stats?.total_requests || 0}</div>
             <p className="text-xs text-muted-foreground">
-              成功 {data?.forward_service?.stats.recent_success || 0} / 失败 {data?.forward_service?.stats.recent_error || 0}
+              成功 {data?.forward_service?.stats?.recent_success || 0} / 失败 {data?.forward_service?.stats?.recent_error || 0}
             </p>
           </CardContent>
         </Card>
@@ -144,19 +144,19 @@ export function DashboardPage() {
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">Bot 数量</span>
-                <span className="font-medium">{data?.forward_service?.config.bots_count || 0}</span>
+                <span className="font-medium">{data?.forward_service?.config?.bots_count || 0}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">总请求数</span>
-                <span className="font-medium">{data?.forward_service?.stats.total_requests || 0}</span>
+                <span className="font-medium">{data?.forward_service?.stats?.total_requests || 0}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">成功</span>
-                <span className="font-medium text-green-500">{data?.forward_service?.stats.recent_success || 0}</span>
+                <span className="font-medium text-green-500">{data?.forward_service?.stats?.recent_success || 0}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-muted-foreground">失败</span>
-                <span className="font-medium text-red-500">{data?.forward_service?.stats.recent_error || 0}</span>
+                <span className="font-medium text-red-500">{data?.forward_service?.stats?.recent_error || 0}</span>
               </div>
             </div>
           </CardContent>
