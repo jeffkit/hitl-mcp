@@ -85,14 +85,15 @@ async def lifespan(app: FastAPI):
     logger.info("HIL Server 关闭")
 
 
-# 创建 FastAPI 应用（将 Swagger UI 移到 /api-docs）
+# 创建 FastAPI 应用
+# 注意：docs_url 设为 None，因为 /docs 被自定义路由使用（返回网页文档）
 app = FastAPI(
     title="HIL Server",
     description="Human-in-the-Loop Server - 支持 Relay 和 Direct 两种模式",
     version="2.0.0",
     lifespan=lifespan,
-    docs_url="/api-docs",
-    redoc_url="/api-redoc"
+    docs_url=None,
+    redoc_url=None
 )
 
 # 注册路由
@@ -102,8 +103,20 @@ app.include_router(admin_router)
 app.include_router(auth_router)
 app.include_router(forward_proxy_router)
 
-# 仓库根目录（packages/hil-server/hil_server/app.py -> 根目录）
-REPO_ROOT = Path(__file__).parent.parent.parent.parent
+# 查找仓库根目录（兼容不同部署结构）
+# - monorepo: packages/hil-server/hil_server/app.py -> 需要 4 层 parent
+# - dev 服务器: hil_server/app.py -> 需要 2 层 parent
+def find_repo_root():
+    """查找包含 website 目录的根路径"""
+    current = Path(__file__).parent
+    for _ in range(5):  # 最多往上找 5 层
+        current = current.parent
+        if (current / "website").exists():
+            return current
+    # 回退到默认
+    return Path(__file__).parent.parent.parent.parent
+
+REPO_ROOT = find_repo_root()
 
 # 挂载静态文件（website 在仓库根目录）
 website_dir = REPO_ROOT / "website"

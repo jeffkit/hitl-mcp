@@ -37,20 +37,22 @@
 
 ## 二、DEV 服务器 (hitl.woa.com)
 
-### 目录结构（旧模式）
+### 目录结构（Monorepo，与 DEVG 一致）
 
 ```
-/root/projects/
-├── hil-mcp/                    # Forward Service
-│   ├── forward_service/
-│   ├── data/                   # SQLite 数据库
-│   └── .venv/
+/root/projects/hil-mcp/
+├── packages/
+│   ├── forward-service/        # Forward Service
+│   │   ├── forward_service/
+│   │   ├── data/               # SQLite 数据库
+│   │   └── .venv/
+│   │
+│   └── hil-server/             # HIL Server
+│       ├── hil_server/
+│       ├── data/               # SQLite 数据库
+│       └── .venv/
 │
-└── hil-mcp-direct/             # HIL Server
-    ├── hil_server/
-    ├── website/                # 首页静态文件
-    ├── data/                   # SQLite 数据库
-    └── .venv/
+└── website/                    # 首页静态文件
 ```
 
 ### Systemd 服务
@@ -59,24 +61,24 @@
 ```ini
 [Service]
 User=root
-WorkingDirectory=/root/projects/hil-mcp
+WorkingDirectory=/root/projects/hil-mcp/packages/forward-service
 Environment="USE_DATABASE=true"
 Environment="FORWARD_TIMEOUT=1800"
-ExecStart=/root/projects/hil-mcp/.venv/bin/python -m forward_service.app
+ExecStart=/root/projects/hil-mcp/packages/forward-service/.venv/bin/python -m forward_service.app
 ```
 
 #### hil-server-direct.service
 ```ini
 [Service]
 User=root
-WorkingDirectory=/root/projects/hil-mcp-direct
+WorkingDirectory=/root/projects/hil-mcp/packages/hil-server
 Environment="HIL_PORT=8081"
 Environment="MODE=direct"
 Environment="BOT_KEY=18c6cb5d-611c-4829-ad86-e5b9d46729c0"
 Environment="ADMIN_USERNAME=admin"
 Environment="ADMIN_PASSWORD=jarvis2026"
 Environment="FORWARD_SERVICE_URL=http://localhost:8083"
-ExecStart=/root/projects/hil-mcp-direct/.venv/bin/python -m hil_server.app
+ExecStart=/root/projects/hil-mcp/packages/hil-server/.venv/bin/python -m hil_server.app
 ```
 
 ---
@@ -162,24 +164,33 @@ ssh devg "sudo systemctl restart hil-forward hil-server-direct"
 ssh devg "sudo systemctl status hil-forward hil-server-direct"
 ```
 
-### 从本地同步代码到 DEV
+### 从本地同步代码到 DEV（推荐使用脚本）
+
+```bash
+# 推荐：使用统一脚本
+./scripts/deploy/sync_to_dev.sh          # 同步所有服务
+./scripts/deploy/sync_to_dev.sh forward  # 只同步 forward-service
+./scripts/deploy/sync_to_dev.sh hil      # 只同步 hil-server
+```
+
+或者手动执行：
 
 ```bash
 # 1. 同步 forward-service
 rsync -avz --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='data' \
   packages/forward-service/forward_service/ \
-  dev:/root/projects/hil-mcp/forward_service/
+  dev:/root/projects/hil-mcp/packages/forward-service/forward_service/
 
 # 2. 同步 hil-server
 rsync -avz --exclude='__pycache__' --exclude='*.pyc' --exclude='.venv' --exclude='data' \
   --exclude='node_modules' --exclude='console/node_modules' --exclude='console/dist' \
   packages/hil-server/hil_server/ \
-  dev:/root/projects/hil-mcp-direct/hil_server/
+  dev:/root/projects/hil-mcp/packages/hil-server/hil_server/
 
 # 3. 同步 website
 rsync -avz --exclude='__pycache__' \
   website/ \
-  dev:/root/projects/hil-mcp-direct/website/
+  dev:/root/projects/hil-mcp/website/
 
 # 4. 重启服务
 ssh dev "sudo systemctl restart hil-forward hil-server-direct"
