@@ -153,8 +153,8 @@ async def handle_callback(
                 logger.info(f"处理 Slash 命令: {cmd_type}, arg={cmd_arg}, extra={extra_msg[:20] if extra_msg else None}")
                 
                 if cmd_type == "list":
-                    # /sess - 列出会话
-                    sessions = await session_mgr.list_sessions(from_user_id, chat_id)
+                    # /sess - 列出会话（只列出当前 Bot 的会话）
+                    sessions = await session_mgr.list_sessions(from_user_id, chat_id, bot_key=bot.bot_key)
                     reply_msg = session_mgr.format_session_list(sessions)
                     await send_reply(
                         chat_id=chat_id,
@@ -185,7 +185,7 @@ async def handle_callback(
                 
                 elif cmd_type == "change":
                     # /change <short_id> [message] - 切换会话，可选附带消息
-                    target_session = await session_mgr.change_session(from_user_id, chat_id, cmd_arg)
+                    target_session = await session_mgr.change_session(from_user_id, chat_id, cmd_arg, bot_key=bot.bot_key)
                     if not target_session:
                         await send_reply(
                             chat_id=chat_id,

@@ -151,18 +151,32 @@ class SessionManager:
         self,
         user_id: str,
         chat_id: str,
+        bot_key: str | None = None,
         limit: int = 10
     ) -> list[UserSession]:
         """
         列出用户最近的会话
+        
+        Args:
+            user_id: 用户 ID
+            chat_id: 会话 ID
+            bot_key: Bot Key (可选，如果提供则只返回该 Bot 的会话)
+            limit: 返回数量限制
         """
         async with self._db_manager.get_session() as db:
+            # 构建查询条件
+            conditions = [
+                UserSession.user_id == user_id,
+                UserSession.chat_id == chat_id
+            ]
+            
+            # 如果提供了 bot_key，只返回该 Bot 的会话
+            if bot_key:
+                conditions.append(UserSession.bot_key == bot_key)
+            
             result = await db.execute(
                 select(UserSession)
-                .where(and_(
-                    UserSession.user_id == user_id,
-                    UserSession.chat_id == chat_id
-                ))
+                .where(and_(*conditions))
                 .order_by(desc(UserSession.updated_at))
                 .limit(limit)
             )
@@ -202,22 +216,36 @@ class SessionManager:
         self,
         user_id: str,
         chat_id: str,
-        short_id: str
+        short_id: str,
+        bot_key: str | None = None
     ) -> Optional[UserSession]:
         """
         切换到指定会话
+        
+        Args:
+            user_id: 用户 ID
+            chat_id: 会话 ID
+            short_id: 会话短 ID
+            bot_key: Bot Key (可选，如果提供则只在该 Bot 的会话中查找)
         
         Returns:
             切换到的 UserSession，如果没找到返回 None
         """
         async with self._db_manager.get_session() as db:
+            # 构建基础查询条件
+            base_conditions = [
+                UserSession.user_id == user_id,
+                UserSession.chat_id == chat_id
+            ]
+            if bot_key:
+                base_conditions.append(UserSession.bot_key == bot_key)
+            
             # 查找目标会话（使用 like 进行前缀匹配）
             # 先尝试精确匹配 short_id
             result = await db.execute(
                 select(UserSession)
                 .where(and_(
-                    UserSession.user_id == user_id,
-                    UserSession.chat_id == chat_id,
+                    *base_conditions,
                     UserSession.short_id == short_id
                 ))
             )
@@ -228,8 +256,7 @@ class SessionManager:
                 result = await db.execute(
                     select(UserSession)
                     .where(and_(
-                        UserSession.user_id == user_id,
-                        UserSession.chat_id == chat_id,
+                        *base_conditions,
                         UserSession.session_id.like(f"{short_id}%")
                     ))
                 )
@@ -238,15 +265,19 @@ class SessionManager:
             if not target:
                 return None
             
-            # 将其他会话设为非活跃
+            # 将其他会话设为非活跃（只在同一 Bot 的会话中）
+            deactivate_conditions = [
+                UserSession.user_id == user_id,
+                UserSession.chat_id == chat_id,
+                UserSession.is_active == True,
+                UserSession.id != target.id
+            ]
+            if bot_key:
+                deactivate_conditions.append(UserSession.bot_key == bot_key)
+            
             await db.execute(
                 update(UserSession)
-                .where(and_(
-                    UserSession.user_id == user_id,
-                    UserSession.chat_id == chat_id,
-                    UserSession.is_active == True,
-                    UserSession.id != target.id
-                ))
+                .where(and_(*deactivate_conditions))
                 .values(is_active=False)
             )
             
