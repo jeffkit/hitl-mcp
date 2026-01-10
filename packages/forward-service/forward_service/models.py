@@ -603,6 +603,81 @@ class ForwardLog(Base):
         }
 
 
+# ============== 会话处理状态模型 ==============
+
+class ProcessingSession(Base):
+    """
+    正在处理中的会话记录
+    
+    用于防止同一会话并发发送多个请求到 Agent Studio
+    当一个会话正在处理时，新的请求会被拒绝
+    
+    注意：这个表用于跨进程共享状态，所有 worker 进程都可以访问
+    """
+    __tablename__ = "processing_sessions"
+    
+    # 主键
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    
+    # 会话标识 (唯一)
+    session_key: Mapped[str] = mapped_column(
+        String(500),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="会话唯一标识: user_id:chat_id:bot_key"
+    )
+    
+    # 用户信息
+    user_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="用户 ID"
+    )
+    
+    chat_id: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        comment="Chat ID"
+    )
+    
+    bot_key: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Bot Key"
+    )
+    
+    # 正在处理的消息
+    message: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        comment="正在处理的消息内容 (截断)"
+    )
+    
+    # 开始时间
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        comment="处理开始时间"
+    )
+    
+    def __repr__(self) -> str:
+        return f"<ProcessingSession(session_key={self.session_key[:30]}...)>"
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "session_key": self.session_key,
+            "user_id": self.user_id,
+            "chat_id": self.chat_id,
+            "bot_key": self.bot_key,
+            "message": self.message,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+        }
+
+
 # ============== 系统配置模型 ==============
 
 class SystemConfig(Base):

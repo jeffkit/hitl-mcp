@@ -287,6 +287,92 @@ async def update_bot_config(bot_name: str, field: str, value: str) -> str:
 # 存储正在处理的请求 {request_id: {bot_name, user, message, start_time}}
 _pending_requests: dict = {}
 
+# ============== 会话处理状态管理（数据库持久化，跨进程共享）==============
+
+def get_session_key(user_id: str, chat_id: str, bot_key: str) -> str:
+    """生成会话的唯一标识"""
+    return f"{user_id}:{chat_id}:{bot_key}"
+
+
+async def is_session_processing(user_id: str, chat_id: str, bot_key: str) -> dict | None:
+    """
+    检查会话是否正在处理中（数据库查询，跨进程共享）
+    
+    Returns:
+        如果正在处理，返回会话信息 {message, start_time, elapsed_seconds}
+        否则返回 None
+    """
+    from ..database import get_session
+    from ..models import ProcessingSession
+    from sqlalchemy import select
+    
+    session_key = get_session_key(user_id, chat_id, bot_key)
+    
+    async for db in get_session():
+        result = await db.execute(
+            select(ProcessingSession).where(ProcessingSession.session_key == session_key)
+        )
+        session = result.scalar_one_or_none()
+        
+        if session:
+            elapsed = (datetime.now() - session.started_at).total_seconds()
+            return {
+                "message": session.message,
+                "start_time": session.started_at,
+                "elapsed_seconds": elapsed
+            }
+    return None
+
+
+async def add_processing_session(user_id: str, chat_id: str, bot_key: str, message: str) -> bool:
+    """
+    标记会话开始处理（数据库写入，跨进程共享）
+    
+    Returns:
+        True 如果成功添加，False 如果已经存在（并发冲突）
+    """
+    from ..database import get_session
+    from ..models import ProcessingSession
+    from sqlalchemy.exc import IntegrityError
+    
+    session_key = get_session_key(user_id, chat_id, bot_key)
+    truncated_message = message[:50] + "..." if len(message) > 50 else message
+    
+    async for db in get_session():
+        try:
+            new_session = ProcessingSession(
+                session_key=session_key,
+                user_id=user_id,
+                chat_id=chat_id,
+                bot_key=bot_key,
+                message=truncated_message,
+                started_at=datetime.now()
+            )
+            db.add(new_session)
+            await db.commit()
+            return True
+        except IntegrityError:
+            # 已经存在，说明有并发冲突
+            await db.rollback()
+            return False
+    return False
+
+
+async def remove_processing_session(user_id: str, chat_id: str, bot_key: str) -> None:
+    """标记会话处理完成（从数据库删除）"""
+    from ..database import get_session
+    from ..models import ProcessingSession
+    from sqlalchemy import delete
+    
+    session_key = get_session_key(user_id, chat_id, bot_key)
+    
+    async for db in get_session():
+        await db.execute(
+            delete(ProcessingSession).where(ProcessingSession.session_key == session_key)
+        )
+        await db.commit()
+        break
+
 
 def add_pending_request(request_id: str, bot_name: str, user: str, message: str) -> None:
     """添加一个正在处理的请求"""

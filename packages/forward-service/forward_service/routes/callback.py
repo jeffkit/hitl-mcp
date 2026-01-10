@@ -27,6 +27,9 @@ from .admin_commands import (
     check_agents_health,
     add_pending_request,
     remove_pending_request,
+    is_session_processing,
+    add_processing_session,
+    remove_processing_session,
 )
 
 logger = logging.getLogger(__name__)
@@ -166,8 +169,14 @@ async def handle_callback(
                 
                 elif cmd_type == "reset":
                     # /reset 或 /r - 新建会话（重置当前会话）
+                    # 同时清除正在处理的会话标记
+                    processing_info = await is_session_processing(from_user_id, chat_id, bot.bot_key)
+                    if processing_info:
+                        await remove_processing_session(from_user_id, chat_id, bot.bot_key)
+                        logger.info(f"强制清除正在处理的会话: user={from_user_id}, bot={bot.name}")
+                    
                     success = await session_mgr.reset_session(from_user_id, chat_id, bot.bot_key)
-                    if success:
+                    if success or processing_info:
                         await send_reply(
                             chat_id=chat_id,
                             message="✅ 会话已重置，下次发送消息将开始新对话",
@@ -311,9 +320,40 @@ async def handle_callback(
         )
         log_id = await add_request_log(log_data)
         
+        # === 会话并发控制：检查是否正在处理中 ===
+        processing_info = await is_session_processing(from_user_id, chat_id, bot.bot_key)
+        if processing_info:
+            elapsed = int(processing_info["elapsed_seconds"])
+            elapsed_str = f"{elapsed // 60}分{elapsed % 60}秒" if elapsed >= 60 else f"{elapsed}秒"
+            
+            logger.warning(f"会话正在处理中，拒绝新请求: user={from_user_id}, bot={bot.name}, elapsed={elapsed_str}")
+            
+            await send_reply(
+                chat_id=chat_id,
+                message=f"⏳ 当前会话正在处理中（已等待 {elapsed_str}）\n\n"
+                        f"正在处理: {processing_info['message']}\n\n"
+                        f"💡 请等待当前请求完成，或使用 `/R` 重置会话开始新对话",
+                msg_type="text",
+                bot_key=bot.bot_key
+            )
+            return {"errcode": 0, "errmsg": "session busy"}
+        
         # 生成请求 ID 用于追踪
         import uuid
         request_id = str(uuid.uuid4())[:8]
+        
+        # 标记会话开始处理（使用数据库，跨进程共享）
+        session_added = await add_processing_session(from_user_id, chat_id, bot.bot_key, content or "(image)")
+        if not session_added:
+            # 并发冲突：另一个进程已经在处理这个会话
+            logger.warning(f"并发冲突，会话已被另一个进程处理: user={from_user_id}, bot={bot.name}")
+            await send_reply(
+                chat_id=chat_id,
+                message="⏳ 当前会话正在处理中，请稍候...\n\n💡 或使用 `/R` 重置会话开始新对话",
+                msg_type="text",
+                bot_key=bot.bot_key
+            )
+            return {"errcode": 0, "errmsg": "session busy (concurrent)"}
         
         # 添加到 pending 请求列表
         add_pending_request(
@@ -332,8 +372,9 @@ async def handle_callback(
                 session_id=current_session_id
             )
         finally:
-            # 无论成功失败，都从 pending 列表移除
+            # 无论成功失败，都从 pending 列表和处理中会话移除
             remove_pending_request(request_id)
+            await remove_processing_session(from_user_id, chat_id, bot.bot_key)
         
         duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
         
