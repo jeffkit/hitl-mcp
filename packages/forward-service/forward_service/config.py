@@ -258,11 +258,11 @@ class ConfigDB:
         return None
 
     def get_bot(self, bot_key: str) -> Optional[BotConfig]:
-        """根据 bot_key 获取 Bot 配置"""
+        """根据 bot_key 获取 Bot 配置（从内存缓存）"""
         return self.bots.get(bot_key)
 
     def get_bot_or_default(self, bot_key: str | None) -> Optional[BotConfig]:
-        """获取 Bot 配置，如果找不到则返回默认 Bot"""
+        """获取 Bot 配置，如果找不到则返回默认 Bot（从内存缓存）"""
         if bot_key and bot_key in self.bots:
             return self.bots[bot_key]
 
@@ -271,6 +271,45 @@ class ConfigDB:
             logger.info(f"Bot {bot_key} 不存在，使用默认 Bot: {self.default_bot_key}")
             return self.bots[self.default_bot_key]
 
+        return None
+
+    async def get_bot_from_db(self, bot_key: str) -> Optional[BotConfig]:
+        """
+        从数据库实时读取 Bot 配置（跨进程一致性）
+        
+        多进程部署时，内存缓存可能不同步。此方法直接从数据库读取，
+        确保获取到最新的配置。
+        """
+        db = get_db_manager()
+        
+        async with db.get_session() as session:
+            bot_repo = get_chatbot_repository(session)
+            
+            bot = await bot_repo.get_by_bot_key(bot_key)
+            if not bot:
+                return None
+            
+            # 预加载 access_rules
+            await session.refresh(bot, attribute_names=["access_rules"])
+            
+            return BotConfig.from_bot(bot)
+
+    async def get_bot_or_default_from_db(self, bot_key: str | None) -> Optional[BotConfig]:
+        """
+        从数据库实时读取 Bot 配置，如果找不到则返回默认 Bot
+        
+        多进程部署时使用此方法确保配置一致性。
+        """
+        if bot_key:
+            bot = await self.get_bot_from_db(bot_key)
+            if bot:
+                return bot
+        
+        # 回退到默认 Bot
+        if self.default_bot_key:
+            logger.info(f"Bot {bot_key} 不存在，使用默认 Bot: {self.default_bot_key}")
+            return await self.get_bot_from_db(self.default_bot_key)
+        
         return None
 
     def check_access(self, bot: BotConfig, user_id: str, chat_id: str | None = None, alias: str | None = None) -> tuple[bool, str]:

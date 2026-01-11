@@ -87,8 +87,8 @@ async def handle_callback(
         bot_key = config.extract_bot_key_from_webhook_url(webhook_url)
         logger.info(f"提取的 bot_key: {bot_key}")
         
-        # 获取 Bot 配置（如果找不到会回退到 default_bot）
-        bot = config.get_bot_or_default(bot_key)
+        # 获取 Bot 配置（从数据库实时读取，确保多进程一致性）
+        bot = await config.get_bot_or_default_from_db(bot_key)
         if not bot:
             logger.warning(f"未找到 bot_key={bot_key} 的配置，且无默认 Bot")
             await send_reply(
@@ -108,7 +108,7 @@ async def handle_callback(
             # 尝试回退到默认 Bot
             if bot.bot_key != config.default_bot_key:
                 logger.info(f"尝试回退到默认 Bot: {config.default_bot_key}")
-                default_bot = config.get_bot(config.default_bot_key)
+                default_bot = await config.get_bot_from_db(config.default_bot_key)
                 if default_bot:
                     default_allowed, default_reason = config.check_access(default_bot, from_user_id, chat_id, from_user_alias)
                     if default_allowed:
@@ -194,6 +194,19 @@ async def handle_callback(
                     return {"errcode": 0, "errmsg": "slash command handled"}
                 
                 elif cmd_type == "change":
+                    # /change 或 /c - 切换会话
+                    # 如果没有参数，显示会话列表并提示用法
+                    if not cmd_arg:
+                        sessions = await session_mgr.list_sessions(from_user_id, chat_id, bot_key=bot.bot_key)
+                        reply_msg = session_mgr.format_session_list(sessions, hint="switch")
+                        await send_reply(
+                            chat_id=chat_id,
+                            message=reply_msg,
+                            msg_type="text",
+                            bot_key=bot.bot_key
+                        )
+                        return {"errcode": 0, "errmsg": "slash command handled"}
+                    
                     # /change <short_id> [message] - 切换会话，可选附带消息
                     target_session = await session_mgr.change_session(from_user_id, chat_id, cmd_arg, bot_key=bot.bot_key)
                     if not target_session:

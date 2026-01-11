@@ -24,3 +24,10 @@ packages = ["forward_service"]
 
 [tool.uv]
 extra-index-url = ["http://mirrors.tencent.com/repository/pypi/tencent_pypi/simple"]
+
+[dependency-groups]
+dev = [
+    "greenlet>=3.3.0",
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]

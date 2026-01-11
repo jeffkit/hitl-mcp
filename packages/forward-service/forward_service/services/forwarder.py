@@ -40,8 +40,8 @@ async def forward_to_agent_with_bot(
     Returns:
         AgentResult 或 None
     """
-    # 获取 Bot 配置
-    bot = config.get_bot_or_default(bot_key)
+    # 获取 Bot 配置（从数据库实时读取，确保多进程一致性）
+    bot = await config.get_bot_or_default_from_db(bot_key)
     if not bot:
         logger.warning(f"未找到 bot_key={bot_key} 的配置，且无默认 Bot")
         return None
