@@ -24,7 +24,8 @@ SLASH_COMMANDS = {
     "list": re.compile(r'^/(sess|s)\s*$', re.IGNORECASE),
     "reset": re.compile(r'^/(reset|r)\s*$', re.IGNORECASE),
     # 允许会话 ID 后面有空格和消息内容
-    "change": re.compile(r'^/(change|c)\s+([a-f0-9]{6,8})(?:\s+(.+))?$', re.IGNORECASE | re.DOTALL),
+    # /c 或 /c <short_id> [message]
+    "change": re.compile(r'^/(change|c)(?:\s+([a-f0-9]{6,8})(?:\s+(.+))?)?$', re.IGNORECASE | re.DOTALL),
     
     # 系统状态命令（需要管理员权限）
     "ping": re.compile(r'^/(ping|p)\s*$', re.IGNORECASE),
@@ -325,14 +326,22 @@ class SessionManager:
         
         return None
     
-    def format_session_list(self, sessions: list[UserSession]) -> str:
+    def format_session_list(self, sessions: list[UserSession], hint: str = "list") -> str:
         """
         格式化会话列表为用户可读的消息
+        
+        Args:
+            sessions: 会话列表
+            hint: 提示类型，"list" 表示来自 /s，"switch" 表示来自 /c
         """
         if not sessions:
+            if hint == "switch":
+                return "📭 暂无可切换的会话\n\n💡 使用 `/r` 新建会话"
             return "📭 暂无会话记录"
         
-        lines = ["📋 **最近会话**\n"]
+        # 根据 hint 使用不同的标题，避免企微消息收敛
+        title = "📋 **最近会话**" if hint == "list" else "🔀 **切换会话**"
+        lines = [title + "\n"]
         
         for i, s in enumerate(sessions, 1):
             active_mark = "✅" if s.is_active else "  "
@@ -340,7 +349,10 @@ class SessionManager:
             lines.append(f"{active_mark} `{s.short_id}` - {preview} ({s.message_count}条)")
         
         lines.append("\n---")
-        lines.append("💡 命令: `/c <短ID>` 切换会话, `/r` 新建会话")
+        if hint == "switch":
+            lines.append("💡 用法: `/c <短ID>` 切换, `/c <短ID> 消息` 切换并发送")
+        else:
+            lines.append("💡 命令: `/c <短ID>` 切换会话, `/r` 新建会话")
         
         return "\n".join(lines)
 

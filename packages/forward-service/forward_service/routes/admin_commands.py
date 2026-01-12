@@ -407,19 +407,60 @@ def get_pending_requests() -> list[dict]:
 
 
 async def get_pending_list() -> str:
-    """获取正在处理的请求"""
-    pending = get_pending_requests()
+    """获取正在处理的请求（从数据库读取，跨进程共享）"""
+    from ..database import get_session
+    from ..models import ProcessingSession
+    from sqlalchemy import select
     
-    if not pending:
+    pending_db = []
+    now = datetime.now()
+    
+    # 从数据库读取正在处理的会话（跨进程共享）
+    async for db in get_session():
+        result = await db.execute(
+            select(ProcessingSession).order_by(ProcessingSession.started_at.asc())
+        )
+        sessions = result.scalars().all()
+        
+        for s in sessions:
+            elapsed = (now - s.started_at).total_seconds()
+            pending_db.append({
+                "user": s.user_id,
+                "message": s.message,
+                "bot_key": s.bot_key[:8] + "...",
+                "elapsed_seconds": elapsed,
+                "elapsed_str": f"{int(elapsed // 60)}分{int(elapsed % 60)}秒"
+            })
+        break
+    
+    # 合并内存中的 pending 请求（兼容旧逻辑）
+    pending_mem = get_pending_requests()
+    
+    if not pending_db and not pending_mem:
         return "✅ 当前没有正在处理的请求"
     
-    lines = [f"⏳ 正在处理的请求 ({len(pending)} 个)\n"]
-    for i, req in enumerate(pending, 1):
-        lines.append(f"{i}. {req['bot_name']}")
-        lines.append(f"   用户: {req['user']}")
-        lines.append(f"   消息: {req['message']}")
-        lines.append(f"   等待: {req['elapsed_str']}")
-        lines.append("")
+    lines = []
+    
+    if pending_db:
+        lines.append(f"⏳ 正在处理的会话 ({len(pending_db)} 个)")
+        lines.append("(数据库，跨进程共享)\n")
+        for i, req in enumerate(pending_db, 1):
+            lines.append(f"{i}. 用户: {req['user']}")
+            lines.append(f"   消息: {req['message']}")
+            lines.append(f"   等待: {req['elapsed_str']}")
+            lines.append("")
+    
+    if pending_mem:
+        if pending_db:
+            lines.append("---")
+        lines.append(f"⏳ 内存中的请求 ({len(pending_mem)} 个)")
+        lines.append("(单进程，仅调试用)\n")
+        for i, req in enumerate(pending_mem, 1):
+            lines.append(f"{i}. {req['bot_name']}")
+            lines.append(f"   用户: {req['user']}")
+            lines.append(f"   消息: {req['message']}")
+            lines.append(f"   等待: {req['elapsed_str']}")
+            lines.append("")
     
     return "\n".join(lines)
 

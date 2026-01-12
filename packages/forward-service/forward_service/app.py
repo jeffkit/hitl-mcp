@@ -101,6 +101,18 @@ async def lifespan(app: FastAPI):
         # 初始化会话管理器
         init_session_manager(get_db_manager())
         logger.info("  会话管理器已初始化")
+        
+        # 清理残留的 processing_sessions（服务重启时可能有未清理的记录）
+        from .database import get_session
+        from .models import ProcessingSession
+        from sqlalchemy import delete
+        
+        async for db in get_session():
+            result = await db.execute(delete(ProcessingSession))
+            if result.rowcount > 0:
+                logger.warning(f"  清理了 {result.rowcount} 条残留的 processing_sessions 记录")
+            await db.commit()
+            break
 
         # 验证配置
         errors = config.validate()
