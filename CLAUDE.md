@@ -88,14 +88,10 @@ uv run pytest tests/test_database.py::TestChatbotRepository::test_create_bot -v
 ### Deployment
 
 ```bash
-# Deploy HIL Server
-./deploy_hil.sh
-
-# Deploy Forward Service
-./deploy_forward.sh
-
-# Deploy DevCloud Worker
-./deploy_worker.sh
+# 同步代码到 Pro 服务器
+./scripts/sync_to_pro.sh          # 同步所有服务
+./scripts/sync_to_pro.sh forward  # 只同步 forward-service
+./scripts/sync_to_pro.sh hil      # 只同步 hil-server
 ```
 
 ---
@@ -274,76 +270,69 @@ python migrate_to_database.py --force
 
 ## Deployment Architecture
 
-### Production Servers
+### Production Server (Pro)
 
-#### **dev 服务器** (旧目录结构)
+| 项目 | 值 |
+|------|-----|
+| **主机名** | VM-243-90-tencentos |
+| **IP 地址** | 21.6.243.90 |
+| **域名** | hitl.woa.com |
+| **SSH 别名** | pro |
 
-| 服务 | 代码位置 | WorkingDirectory |
-|------|----------|------------------|
-| forward-service | `/root/projects/hil-mcp/forward_service/` | `/root/projects/hil-mcp` |
-| hil-server | `/root/projects/hil-mcp-direct/hil_server/` | `/root/projects/hil-mcp-direct` |
+#### 目录结构
 
-**⚠️ 重要**: dev 服务器使用旧目录结构，代码需同步到正确位置：
-```bash
-# forward-service: 同步 forward_service/ 子目录内容（不含 tests）
-rsync -avz packages/forward-service/forward_service/ dev:/root/projects/hil-mcp/forward_service/
-
-# hil-server: 同步 hil_server/ 子目录内容
-rsync -avz packages/hil-server/hil_server/ dev:/root/projects/hil-mcp-direct/hil_server/
+```
+/data/projects/hitl/
+├── .env                        # 环境变量配置
+├── packages/
+│   ├── hil-server/             # HIL 服务 (端口 8081)
+│   └── forward-service/        # 转发服务 (端口 8083)
+└── website/                    # 静态网站
 ```
 
-#### **devg 服务器** (monorepo 结构)
+#### 服务配置
 
-| 服务 | 代码位置 | WorkingDirectory |
-|------|----------|------------------|
-| forward-service | `/data/projects/hil-mcp/packages/forward-service/` | 同左 |
-| hil-server | `/data/projects/hil-mcp/packages/hil-server/` | 同左 |
+| 服务 | Systemd 单元 | 端口 |
+|------|-------------|------|
+| HIL Server | `hil-service.service` | 8081 |
+| Forward Service | `forward-service.service` | 8083 |
 
-**部署命令**:
-```bash
-# forward-service
-rsync -avz packages/forward-service/ devg:/data/projects/hil-mcp/packages/forward-service/
+#### 数据库
 
-# hil-server
-rsync -avz packages/hil-server/ devg:/data/projects/hil-mcp/packages/hil-server/
-```
+- **类型**: MySQL
+- **主机**: 9.135.244.245:3306
+- **数据库**: agentstudio
+- **字符集**: utf8mb4
 
-#### 端口配置
-
-| 服务 | 端口 | 域名 (devg) |
-|------|------|-------------|
-| hil-server | 8081 | test-hitl.woa.com |
-| forward-service | 8083 | test-hitl.woa.com/forward/ |
-
-### Systemd Services
-
-- `hil-forward.service` - Forward Service
-- `hil-worker.service` - DevCloud Worker
-- `hil-server-direct.service` - HIL Server
-
-**Service management**:
-```bash
-sudo systemctl start|stop|restart|status <service-name>
-sudo journalctl -u <service-name> -f  # View logs
-```
-
-### 部署脚本
-
-项目提供了两个同步脚本，避免手动部署时搞错路径：
+#### 部署命令
 
 ```bash
-# 同步代码到 dev 服务器
-./scripts/deploy/sync_to_dev.sh          # 同步所有服务
-./scripts/deploy/sync_to_dev.sh forward  # 只同步 forward-service
-./scripts/deploy/sync_to_dev.sh hil      # 只同步 hil-server
+# 同步代码到 Pro 服务器
+rsync -avz --exclude='__pycache__' --exclude='.venv' --exclude='data' \
+  packages/hil-server/ pro:/data/projects/hitl/packages/hil-server/
 
-# 同步代码到 devg 服务器
-./scripts/deploy/sync_to_devg.sh         # 同步所有服务
-./scripts/deploy/sync_to_devg.sh forward # 只同步 forward-service
-./scripts/deploy/sync_to_devg.sh hil     # 只同步 hil-server
+rsync -avz --exclude='__pycache__' --exclude='.venv' --exclude='data' \
+  packages/forward-service/ pro:/data/projects/hitl/packages/forward-service/
+
+# 重启服务
+ssh pro "sudo systemctl restart hil-service forward-service"
 ```
 
-**⚠️ 重要**: 始终使用这些脚本进行部署，它们会自动处理不同服务器的目录结构差异。
+### 服务管理
+
+```bash
+# 查看状态
+sudo systemctl status hil-service forward-service
+
+# 查看日志
+sudo journalctl -u hil-service -f
+sudo journalctl -u forward-service -f
+
+# 重启服务
+sudo systemctl restart hil-service forward-service
+```
+
+**详细部署文档**: 参见 `docs/PRO_DEPLOYMENT.md`
 
 ---
 
@@ -417,10 +406,10 @@ USE_DATABASE=true python -m <service>.app
 
 ## Related Documentation
 
-- `README.md` - Main project documentation (840+ lines)
-- `DATABASE_SUMMARY.md` - Database implementation summary
-- `DATABASE_MIGRATION.md` - Data migration guide
-- `DEPLOY_BOT_MANAGEMENT.md` - Bot management deployment
+- `README.md` - 主项目文档
+- `docs/PRO_DEPLOYMENT.md` - Pro 服务器部署文档 ⭐
+- `docs/DATABASE_SUMMARY.md` - 数据库实现摘要
+- `docs/API.md` - API 接口文档
 
 ---
 
