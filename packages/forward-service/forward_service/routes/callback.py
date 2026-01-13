@@ -12,17 +12,14 @@ from ..config import config
 from ..sender import send_reply
 from ..session_manager import get_session_manager
 from ..utils import extract_content
-from ..services import forward_to_agent_with_bot, forward_to_agent_with_user_project
+from ..services import forward_to_agent_with_bot
 from .admin import add_request_log, update_request_log, RequestLogData
-from .project_commands import (
-    is_project_command,
-    handle_project_command,
-    USE_PROJECT_RE,
-)
 from .admin_commands import (
     check_is_admin,
     get_system_status,
     get_admin_help,
+    get_admin_full_help,
+    get_regular_user_help,
     get_bots_list,
     get_bot_detail,
     update_bot_config,
@@ -32,9 +29,10 @@ from .admin_commands import (
     check_agents_health,
     add_pending_request,
     remove_pending_request,
-    is_session_processing,
-    add_processing_session,
-    remove_processing_session,
+)
+from .project_commands import (
+    is_project_command,
+    handle_project_command
 )
 
 logger = logging.getLogger(__name__)
@@ -73,7 +71,7 @@ async def handle_callback(
         data = await request.json()
         
         chat_id = data.get("chatid", "")
-        chat_type = data.get("chattype", "group")
+        _chat_type = data.get("chattype", "group")  # 保留备用，暂未使用
         msg_type = data.get("msgtype", "")
         from_user = data.get("from", {})
         from_user_name = from_user.get("name", "unknown")
@@ -92,8 +90,8 @@ async def handle_callback(
         bot_key = config.extract_bot_key_from_webhook_url(webhook_url)
         logger.info(f"提取的 bot_key: {bot_key}")
         
-        # 获取 Bot 配置（从数据库实时读取，确保多进程一致性）
-        bot = await config.get_bot_or_default_from_db(bot_key)
+        # 获取 Bot 配置（如果找不到会回退到 default_bot）
+        bot = config.get_bot_or_default(bot_key)
         if not bot:
             logger.warning(f"未找到 bot_key={bot_key} 的配置，且无默认 Bot")
             await send_reply(
@@ -113,7 +111,7 @@ async def handle_callback(
             # 尝试回退到默认 Bot
             if bot.bot_key != config.default_bot_key:
                 logger.info(f"尝试回退到默认 Bot: {config.default_bot_key}")
-                default_bot = await config.get_bot_from_db(config.default_bot_key)
+                default_bot = config.get_bot(config.default_bot_key)
                 if default_bot:
                     default_allowed, default_reason = config.check_access(default_bot, from_user_id, chat_id, from_user_alias)
                     if default_allowed:
@@ -151,28 +149,21 @@ async def handle_callback(
             logger.warning("消息内容为空，跳过处理")
             return {"errcode": 0, "errmsg": "empty content"}
         
+        # === 项目命令处理 ===
+        if content and is_project_command(content):
+            success, response_msg = await handle_project_command(bot.bot_key, chat_id, content)
+            await send_reply(
+                chat_id=chat_id,
+                message=response_msg,
+                msg_type="text",
+                bot_key=bot.bot_key
+            )
+            return {"errcode": 0, "errmsg": "project command handled"}
+        
         # === 会话管理：处理 Slash 命令 ===
+        session_mgr = get_session_manager()  # 提前获取，供项目命令和 slash 命令使用
+        
         if content:
-            # 首先检查是否是项目配置命令
-            if is_project_command(content):
-                logger.info(f"检测到项目命令: {content[:50]}...")
-                success, reply_msg = await handle_project_command(bot.bot_key, chat_id, content)
-
-                # 如果是 /use 命令且成功，重置会话以便下次对话使用新项目
-                if success and USE_PROJECT_RE.match(content):
-                    # 重置会话，下次对话将创建新会话并关联到项目
-                    await session_mgr.reset_session(from_user_id, chat_id, bot.bot_key)
-
-                await send_reply(
-                    chat_id=chat_id,
-                    message=reply_msg,
-                    msg_type="text",
-                    bot_key=bot.bot_key
-                )
-                return {"errcode": 0, "errmsg": "project command handled"}
-
-            # 然后处理其他斜杠命令
-            session_mgr = get_session_manager()
             slash_cmd = session_mgr.parse_slash_command(content)
             
             if slash_cmd:
@@ -193,14 +184,8 @@ async def handle_callback(
                 
                 elif cmd_type == "reset":
                     # /reset 或 /r - 新建会话（重置当前会话）
-                    # 同时清除正在处理的会话标记
-                    processing_info = await is_session_processing(from_user_id, chat_id, bot.bot_key)
-                    if processing_info:
-                        await remove_processing_session(from_user_id, chat_id, bot.bot_key)
-                        logger.info(f"强制清除正在处理的会话: user={from_user_id}, bot={bot.name}")
-                    
                     success = await session_mgr.reset_session(from_user_id, chat_id, bot.bot_key)
-                    if success or processing_info:
+                    if success:
                         await send_reply(
                             chat_id=chat_id,
                             message="✅ 会话已重置，下次发送消息将开始新对话",
@@ -218,19 +203,6 @@ async def handle_callback(
                     return {"errcode": 0, "errmsg": "slash command handled"}
                 
                 elif cmd_type == "change":
-                    # /change 或 /c - 切换会话
-                    # 如果没有参数，显示会话列表并提示用法
-                    if not cmd_arg:
-                        sessions = await session_mgr.list_sessions(from_user_id, chat_id, bot_key=bot.bot_key)
-                        reply_msg = session_mgr.format_session_list(sessions, hint="switch")
-                        await send_reply(
-                            chat_id=chat_id,
-                            message=reply_msg,
-                            msg_type="text",
-                            bot_key=bot.bot_key
-                        )
-                        return {"errcode": 0, "errmsg": "slash command handled"}
-                    
                     # /change <short_id> [message] - 切换会话，可选附带消息
                     target_session = await session_mgr.change_session(from_user_id, chat_id, cmd_arg, bot_key=bot.bot_key)
                     if not target_session:
@@ -247,16 +219,9 @@ async def handle_callback(
                         logger.info(f"会话已切换到 {target_session.short_id}，继续转发消息: {extra_msg[:30]}...")
                         content = extra_msg
                     else:
-                        # 构建响应消息（包含项目信息）
-                        reply_msg = f"✅ 已切换到会话 `{target_session.short_id}`\n最后消息: {target_session.last_message or '(无)'}"
-
-                        # 添加项目信息
-                        if target_session.current_project_id:
-                            reply_msg += f"\n📦 项目: `{target_session.current_project_id}`"
-
                         await send_reply(
                             chat_id=chat_id,
-                            message=reply_msg,
+                            message=f"✅ 已切换到会话 `{target_session.short_id}`\n最后消息: {target_session.last_message or '(无)'}",
                             msg_type="text",
                             bot_key=bot.bot_key
                         )
@@ -294,7 +259,23 @@ async def handle_callback(
                         )
                     return {"errcode": 0, "errmsg": "slash command handled"}
                 
-                elif cmd_type in ("help", "bots", "bot", "pending", "recent", "errors", "health"):
+                elif cmd_type == "help":
+                    # /help 命令对所有用户可用，但显示不同内容
+                    is_admin = await check_is_admin(from_user_id, from_user_alias)
+                    if is_admin:
+                        response_msg = get_admin_full_help()
+                    else:
+                        response_msg = get_regular_user_help()
+                    
+                    await send_reply(
+                        chat_id=chat_id,
+                        message=response_msg,
+                        msg_type="text",
+                        bot_key=bot.bot_key
+                    )
+                    return {"errcode": 0, "errmsg": "slash command handled"}
+                
+                elif cmd_type in ("bots", "bot", "pending", "recent", "errors", "health"):
                     # 其他管理员命令
                     is_admin = await check_is_admin(from_user_id, from_user_alias)
                     if not is_admin:
@@ -307,9 +288,7 @@ async def handle_callback(
                         return {"errcode": 0, "errmsg": "permission denied"}
                     
                     # 根据命令类型获取响应
-                    if cmd_type == "help":
-                        response_msg = await get_admin_help()
-                    elif cmd_type == "bots":
+                    if cmd_type == "bots":
                         response_msg = await get_bots_list()
                     elif cmd_type == "bot":
                         # extra_msg 格式可能是 "field_type:value"
@@ -349,6 +328,25 @@ async def handle_callback(
         # 获取目标 URL（用于日志）
         target_url = bot.forward_config.get_url()
         
+        # 检查是否有可用的转发目标（Bot 配置或用户项目）
+        if not target_url:
+            # 检查用户是否有绑定的项目
+            from ..database import get_db_manager
+            from ..repository import get_user_project_repository
+            db_manager = get_db_manager()
+            async with db_manager.get_session() as session:
+                project_repo = get_user_project_repository(session)
+                user_projects = await project_repo.get_user_projects(bot.bot_key, chat_id)
+                if not user_projects:
+                    # 没有目标 URL 也没有绑定项目，显示帮助信息
+                    await send_reply(
+                        chat_id=chat_id,
+                        message=get_user_help(),
+                        msg_type="text",
+                        bot_key=bot.bot_key
+                    )
+                    return {"errcode": 0, "errmsg": "no target configured, help shown"}
+        
         # 创建日志记录（持久化到数据库）
         log_data = RequestLogData(
             chat_id=chat_id,
@@ -364,40 +362,9 @@ async def handle_callback(
         )
         log_id = await add_request_log(log_data)
         
-        # === 会话并发控制：检查是否正在处理中 ===
-        processing_info = await is_session_processing(from_user_id, chat_id, bot.bot_key)
-        if processing_info:
-            elapsed = int(processing_info["elapsed_seconds"])
-            elapsed_str = f"{elapsed // 60}分{elapsed % 60}秒" if elapsed >= 60 else f"{elapsed}秒"
-            
-            logger.warning(f"会话正在处理中，拒绝新请求: user={from_user_id}, bot={bot.name}, elapsed={elapsed_str}")
-            
-            await send_reply(
-                chat_id=chat_id,
-                message=f"⏳ 当前会话正在处理中（已等待 {elapsed_str}）\n\n"
-                        f"正在处理: {processing_info['message']}\n\n"
-                        f"💡 请等待当前请求完成，或使用 `/R` 重置会话开始新对话",
-                msg_type="text",
-                bot_key=bot.bot_key
-            )
-            return {"errcode": 0, "errmsg": "session busy"}
-        
         # 生成请求 ID 用于追踪
         import uuid
         request_id = str(uuid.uuid4())[:8]
-        
-        # 标记会话开始处理（使用数据库，跨进程共享）
-        session_added = await add_processing_session(from_user_id, chat_id, bot.bot_key, content or "(image)")
-        if not session_added:
-            # 并发冲突：另一个进程已经在处理这个会话
-            logger.warning(f"并发冲突，会话已被另一个进程处理: user={from_user_id}, bot={bot.name}")
-            await send_reply(
-                chat_id=chat_id,
-                message="⏳ 当前会话正在处理中，请稍候...\n\n💡 或使用 `/R` 重置会话开始新对话",
-                msg_type="text",
-                bot_key=bot.bot_key
-            )
-            return {"errcode": 0, "errmsg": "session busy (concurrent)"}
         
         # 添加到 pending 请求列表
         add_pending_request(
@@ -408,24 +375,16 @@ async def handle_callback(
         )
         
         try:
-            # 转发到 Agent（支持用户项目配置）
-            # 获取当前会话的项目ID（如果有）
-            session_mgr = get_session_manager()
-            current_session = await session_mgr.get_active_session(from_user_id, chat_id, bot.bot_key)
-            current_project_id = current_session.current_project_id if current_session else None
-
-            result = await forward_to_agent_with_user_project(
+            # 转发到 Agent（使用 Bot 配置，带上 session_id）
+            result = await forward_to_agent_with_bot(
                 bot_key=bot.bot_key,
-                chat_id=chat_id,
                 content=content or "",
                 timeout=config.timeout,
-                session_id=current_session_id,
-                current_project_id=current_project_id
+                session_id=current_session_id
             )
         finally:
-            # 无论成功失败，都从 pending 列表和处理中会话移除
+            # 无论成功失败，都从 pending 列表移除
             remove_pending_request(request_id)
-            await remove_processing_session(from_user_id, chat_id, bot.bot_key)
         
         duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
         
@@ -455,10 +414,9 @@ async def handle_callback(
                 chat_id=chat_id,
                 bot_key=bot.bot_key,
                 session_id=result.session_id,
-                last_message=content or "(image)",
-                current_project_id=current_project_id
+                last_message=content or "(image)"
             )
-            logger.info(f"会话已记录: session={result.session_id[:8]}, project={current_project_id or 'None'}")
+            logger.info(f"会话已记录: session={result.session_id[:8]}...")
         
         # 发送结果给用户（使用正确的 bot_key）
         send_result = await send_reply(
