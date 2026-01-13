@@ -64,8 +64,8 @@ class TestUserProjectConfigRepository:
             is_default=True
         )
 
-        test_db_session.refresh(project1)
-        test_db_session.refresh(project2)
+        await test_db_session.refresh(project1)
+        await test_db_session.refresh(project2)
 
         assert project1.is_default is False
         assert project2.is_default is True

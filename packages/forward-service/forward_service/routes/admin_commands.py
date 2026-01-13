@@ -5,7 +5,7 @@
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -60,7 +60,7 @@ async def get_system_status() -> str:
             log_repo = get_forward_log_repository(session)
             
             # 获取今日统计
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             
             # 今日请求数
             today_stmt = (
@@ -167,7 +167,7 @@ async def get_bot_detail(bot_name: str) -> str:
     try:
         db_manager = get_db_manager()
         async with db_manager.get_session() as session:
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             
             # 今日请求数
             today_stmt = (
