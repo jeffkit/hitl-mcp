@@ -258,6 +258,54 @@ async def handle_remove_project(
         return False, f"❌ 删除失败: {str(e)}"
 
 
+async def handle_use_project(
+    bot_key: str,
+    chat_id: str,
+    project_id: str
+) -> Tuple[bool, str]:
+    """
+    处理 /use 命令
+
+    用法: /use <project_id>
+
+    功能：切换到指定项目（重置会话，下次对话将使用新项目）
+    """
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_user_project_repository(session)
+
+            # 检查项目是否存在
+            project = await repo.get_by_project_id(bot_key, chat_id, project_id)
+            if not project:
+                return False, f"❌ 项目 `{project_id}` 不存在\n\n💡 使用 `/list-projects` 查看已有项目"
+
+            if not project.enabled:
+                return False, f"❌ 项目 `{project_id}` 已禁用"
+
+            # 构建成功消息
+            lines = [
+                f"✅ 已切换到项目 `{project_id}`",
+                f"📦 项目名称: {project.project_name or project_id}",
+                f"🔗 转发目标: `{project.url_template}`",
+            ]
+
+            if project.api_key:
+                lines.append(f"🔑 API Key: ***")
+
+            if project.timeout != 60:
+                lines.append(f"⏱️ 超时: {project.timeout}秒")
+
+            lines.append("")
+            lines.append("💡 现在可以开始对话了！新会话将使用此项目。")
+
+            return True, "\n".join(lines)
+
+    except Exception as e:
+        logger.error(f"切换项目失败: {e}", exc_info=True)
+        return False, f"❌ 切换失败: {str(e)}"
+
+
 async def handle_current_project(
     bot_key: str,
     chat_id: str
@@ -362,9 +410,10 @@ async def handle_project_command(
     elif CURRENT_PROJECT_RE.match(message):
         return await handle_current_project(bot_key, chat_id)
 
-    # /use (单独处理，因为需要在会话层处理)
+    # /use
     elif USE_PROJECT_RE.match(message):
-        # 这个命令在 callback 中处理，这里返回 False
-        return False, ""
+        match = USE_PROJECT_RE.match(message)
+        project_id = match.group(1)
+        return await handle_use_project(bot_key, chat_id, project_id)
 
     return False, "❌ 未知的项目命令"

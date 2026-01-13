@@ -85,7 +85,8 @@ class SessionManager:
         chat_id: str,
         bot_key: str,
         session_id: str,
-        last_message: str
+        last_message: str,
+        current_project_id: str | None = None
     ) -> UserSession:
         """
         记录或更新会话
@@ -139,13 +140,14 @@ class SessionManager:
                     short_id=short_id,
                     last_message=truncated_message,
                     message_count=1,
-                    is_active=True
+                    is_active=True,
+                    current_project_id=current_project_id
                 )
                 db.add(new_session)
                 await db.commit()
                 await db.refresh(new_session)
-                
-                logger.info(f"新会话创建: user={user_id[:10]}, session={short_id}")
+
+                logger.info(f"新会话创建: user={user_id[:10]}, session={short_id}, project={current_project_id or 'None'}")
                 return new_session
     
     async def list_sessions(

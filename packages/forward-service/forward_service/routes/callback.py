@@ -12,11 +12,12 @@ from ..config import config
 from ..sender import send_reply
 from ..session_manager import get_session_manager
 from ..utils import extract_content
-from ..services import forward_to_agent_with_bot
+from ..services import forward_to_agent_with_bot, forward_to_agent_with_user_project
 from .admin import add_request_log, update_request_log, RequestLogData
 from .project_commands import (
     is_project_command,
     handle_project_command,
+    USE_PROJECT_RE,
 )
 from .admin_commands import (
     check_is_admin,
@@ -156,6 +157,12 @@ async def handle_callback(
             if is_project_command(content):
                 logger.info(f"检测到项目命令: {content[:50]}...")
                 success, reply_msg = await handle_project_command(bot.bot_key, chat_id, content)
+
+                # 如果是 /use 命令且成功，重置会话以便下次对话使用新项目
+                if success and USE_PROJECT_RE.match(content):
+                    # 重置会话，下次对话将创建新会话并关联到项目
+                    await session_mgr.reset_session(from_user_id, chat_id, bot.bot_key)
+
                 await send_reply(
                     chat_id=chat_id,
                     message=reply_msg,
@@ -401,12 +408,19 @@ async def handle_callback(
         )
         
         try:
-            # 转发到 Agent（使用 Bot 配置，带上 session_id）
-            result = await forward_to_agent_with_bot(
+            # 转发到 Agent（支持用户项目配置）
+            # 获取当前会话的项目ID（如果有）
+            session_mgr = get_session_manager()
+            current_session = await session_mgr.get_active_session(from_user_id, chat_id, bot.bot_key)
+            current_project_id = current_session.current_project_id if current_session else None
+
+            result = await forward_to_agent_with_user_project(
                 bot_key=bot.bot_key,
+                chat_id=chat_id,
                 content=content or "",
                 timeout=config.timeout,
-                session_id=current_session_id
+                session_id=current_session_id,
+                current_project_id=current_project_id
             )
         finally:
             # 无论成功失败，都从 pending 列表和处理中会话移除
@@ -441,9 +455,10 @@ async def handle_callback(
                 chat_id=chat_id,
                 bot_key=bot.bot_key,
                 session_id=result.session_id,
-                last_message=content or "(image)"
+                last_message=content or "(image)",
+                current_project_id=current_project_id
             )
-            logger.info(f"会话已记录: session={result.session_id[:8]}...")
+            logger.info(f"会话已记录: session={result.session_id[:8]}, project={current_project_id or 'None'}")
         
         # 发送结果给用户（使用正确的 bot_key）
         send_result = await send_reply(
