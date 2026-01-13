@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ..config import config
 from ..database import get_db_manager
-from ..repository import get_forward_log_repository
+from ..repository import get_forward_log_repository, get_user_project_repository
 
 logger = logging.getLogger(__name__)
 
@@ -423,6 +423,250 @@ async def update_admin_users(request: Request):
             }
     except Exception as e:
         logger.error(f"更新管理员列表失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ============== 用户项目配置 API ==============
+
+@router.get("/user-projects")
+async def get_user_projects(
+    bot_key: str,
+    chat_id: str
+):
+    """
+    获取指定用户在指定 Bot 下的所有项目配置
+
+    Args:
+        bot_key: Bot Key
+        chat_id: 用户/群 ID
+    """
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_user_project_repository(session)
+            projects = await repo.get_user_projects(bot_key, chat_id, enabled_only=False)
+
+            return {
+                "success": True,
+                "bot_key": bot_key,
+                "chat_id": chat_id,
+                "projects": [p.to_dict() for p in projects],
+                "count": len(projects)
+            }
+    except Exception as e:
+        logger.error(f"获取用户项目配置失败: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "projects": []
+        }
+
+
+@router.post("/user-projects")
+async def create_user_project(request: Request):
+    """
+    创建用户项目配置
+
+    请求体格式:
+    {
+        "bot_key": "bot1",
+        "chat_id": "user123",
+        "project_id": "test",
+        "url_template": "https://api.test.com/webhook",
+        "api_key": "sk-test-123",
+        "project_name": "测试环境",
+        "timeout": 60,
+        "is_default": false
+    }
+    """
+    try:
+        data = await request.json()
+
+        # 验证必填字段
+        required_fields = ["bot_key", "chat_id", "project_id", "url_template"]
+        for field in required_fields:
+            if field not in data:
+                return {"success": False, "error": f"缺少必填字段: {field}"}
+
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_user_project_repository(session)
+
+            # 检查是否已存在
+            existing = await repo.get_by_project_id(
+                data["bot_key"],
+                data["chat_id"],
+                data["project_id"]
+            )
+            if existing:
+                return {
+                    "success": False,
+                    "error": f"项目 {data['project_id']} 已存在"
+                }
+
+            # 创建项目配置
+            project = await repo.create(
+                bot_key=data["bot_key"],
+                chat_id=data["chat_id"],
+                project_id=data["project_id"],
+                url_template=data["url_template"],
+                api_key=data.get("api_key"),
+                project_name=data.get("project_name"),
+                timeout=data.get("timeout", 60),
+                is_default=data.get("is_default", False),
+                enabled=data.get("enabled", True)
+            )
+
+            return {
+                "success": True,
+                "message": "项目配置创建成功",
+                "project": project.to_dict()
+            }
+    except Exception as e:
+        logger.error(f"创建用户项目配置失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.put("/user-projects/{project_id}")
+async def update_user_project(
+    project_id: int,
+    request: Request
+):
+    """
+    更新用户项目配置
+
+    Args:
+        project_id: 项目配置 ID（数据库主键）
+
+    请求体格式:
+    {
+        "url_template": "https://new-url.com",
+        "api_key": "new-key",
+        "project_name": "新名称",
+        "timeout": 30,
+        "is_default": true,
+        "enabled": true
+    }
+    """
+    try:
+        data = await request.json()
+
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_user_project_repository(session)
+
+            # 更新项目配置
+            project = await repo.update(
+                config_id=project_id,
+                url_template=data.get("url_template"),
+                api_key=data.get("api_key"),
+                project_name=data.get("project_name"),
+                timeout=data.get("timeout"),
+                is_default=data.get("is_default"),
+                enabled=data.get("enabled")
+            )
+
+            if not project:
+                return {
+                    "success": False,
+                    "error": f"项目配置 ID {project_id} 不存在"
+                }
+
+            return {
+                "success": True,
+                "message": "项目配置更新成功",
+                "project": project.to_dict()
+            }
+    except Exception as e:
+        logger.error(f"更新用户项目配置失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.delete("/user-projects/{project_id}")
+async def delete_user_project(project_id: int):
+    """
+    删除用户项目配置
+
+    Args:
+        project_id: 项目配置 ID（数据库主键）
+    """
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_user_project_repository(session)
+
+            success = await repo.delete(project_id)
+
+            if not success:
+                return {
+                    "success": False,
+                    "error": f"项目配置 ID {project_id} 不存在"
+                }
+
+            return {
+                "success": True,
+                "message": "项目配置删除成功"
+            }
+    except Exception as e:
+        logger.error(f"删除用户项目配置失败: {e}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.post("/user-projects/set-default")
+async def set_default_user_project(request: Request):
+    """
+    设置用户的默认项目
+
+    请求体格式:
+    {
+        "bot_key": "bot1",
+        "chat_id": "user123",
+        "project_id": "test"
+    }
+    """
+    try:
+        data = await request.json()
+
+        # 验证必填字段
+        required_fields = ["bot_key", "chat_id", "project_id"]
+        for field in required_fields:
+            if field not in data:
+                return {"success": False, "error": f"缺少必填字段: {field}"}
+
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_user_project_repository(session)
+
+            success = await repo.set_default(
+                bot_key=data["bot_key"],
+                chat_id=data["chat_id"],
+                project_id=data["project_id"]
+            )
+
+            if not success:
+                return {
+                    "success": False,
+                    "error": "设置默认项目失败，项目可能不存在"
+                }
+
+            return {
+                "success": True,
+                "message": f"已将项目 {data['project_id']} 设为默认"
+            }
+    except Exception as e:
+        logger.error(f"设置默认项目失败: {e}")
         return {
             "success": False,
             "error": str(e)

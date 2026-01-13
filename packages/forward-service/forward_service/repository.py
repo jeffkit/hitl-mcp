@@ -9,7 +9,7 @@ from typing import Optional, List
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Chatbot, ChatAccessRule, ForwardLog, SystemConfig
+from .models import Chatbot, ChatAccessRule, ForwardLog, SystemConfig, UserProjectConfig
 from .database import get_db_manager
 
 logger = logging.getLogger(__name__)
@@ -684,3 +684,361 @@ def get_forward_log_repository(session: AsyncSession) -> ForwardLogRepository:
 def get_system_config_repository(session: AsyncSession) -> SystemConfigRepository:
     """获取 SystemConfigRepository 实例"""
     return SystemConfigRepository(session)
+
+
+# ============== UserProjectConfig Repository ==============
+
+class UserProjectConfigRepository:
+    """
+    用户项目配置数据访问层
+
+    提供对 user_project_configs 表的所有数据库操作
+    """
+
+    def __init__(self, session: AsyncSession):
+        """
+        初始化 Repository
+
+        Args:
+            session: SQLAlchemy AsyncSession
+        """
+        self.session = session
+
+    async def create(
+        self,
+        bot_key: str,
+        chat_id: str,
+        project_id: str,
+        url_template: str,
+        api_key: Optional[str] = None,
+        project_name: Optional[str] = None,
+        timeout: int = 60,
+        is_default: bool = False,
+        enabled: bool = True
+    ) -> UserProjectConfig:
+        """
+        创建新的用户项目配置
+
+        Args:
+            bot_key: 所属 Bot Key
+            chat_id: 用户/群 ID
+            project_id: 项目标识
+            url_template: 转发 URL 模板
+            api_key: API Key（可选）
+            project_name: 项目名称（可选）
+            timeout: 超时时间
+            is_default: 是否为默认项目
+            enabled: 是否启用
+
+        Returns:
+            创建的 UserProjectConfig 对象
+        """
+        # 如果设置为默认，先将同一用户的其他默认项目取消
+        if is_default:
+            await self._clear_default_flag(bot_key, chat_id)
+
+        config = UserProjectConfig(
+            bot_key=bot_key,
+            chat_id=chat_id,
+            project_id=project_id,
+            url_template=url_template,
+            api_key=api_key,
+            project_name=project_name,
+            timeout=timeout,
+            is_default=is_default,
+            enabled=enabled
+        )
+
+        self.session.add(config)
+        await self.session.flush()
+
+        logger.info(f"创建用户项目配置: bot={bot_key[:10]}, user={chat_id[:10]}, project={project_id}")
+        return config
+
+    async def get_by_id(self, config_id: int) -> Optional[UserProjectConfig]:
+        """
+        根据 ID 获取配置
+
+        Args:
+            config_id: 配置 ID
+
+        Returns:
+            UserProjectConfig 对象或 None
+        """
+        stmt = select(UserProjectConfig).where(UserProjectConfig.id == config_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_by_project_id(
+        self,
+        bot_key: str,
+        chat_id: str,
+        project_id: str
+    ) -> Optional[UserProjectConfig]:
+        """
+        根据 bot_key + chat_id + project_id 获取配置
+
+        Args:
+            bot_key: Bot Key
+            chat_id: 用户/群 ID
+            project_id: 项目 ID
+
+        Returns:
+            UserProjectConfig 对象或 None
+        """
+        stmt = select(UserProjectConfig).where(
+            UserProjectConfig.bot_key == bot_key,
+            UserProjectConfig.chat_id == chat_id,
+            UserProjectConfig.project_id == project_id
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_user_projects(
+        self,
+        bot_key: str,
+        chat_id: str,
+        enabled_only: bool = True
+    ) -> List[UserProjectConfig]:
+        """
+        获取用户在指定 Bot 下的所有项目配置
+
+        Args:
+            bot_key: Bot Key
+            chat_id: 用户/群 ID
+            enabled_only: 是否只返回启用的配置
+
+        Returns:
+            UserProjectConfig 对象列表
+        """
+        conditions = [
+            UserProjectConfig.bot_key == bot_key,
+            UserProjectConfig.chat_id == chat_id
+        ]
+
+        if enabled_only:
+            conditions.append(UserProjectConfig.enabled == True)
+
+        stmt = select(UserProjectConfig).where(*conditions).order_by(
+            UserProjectConfig.is_default.desc(),
+            UserProjectConfig.created_at
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_default_project(
+        self,
+        bot_key: str,
+        chat_id: str
+    ) -> Optional[UserProjectConfig]:
+        """
+        获取用户的默认项目配置
+
+        Args:
+            bot_key: Bot Key
+            chat_id: 用户/群 ID
+
+        Returns:
+            默认的 UserProjectConfig 对象或 None
+        """
+        stmt = select(UserProjectConfig).where(
+            UserProjectConfig.bot_key == bot_key,
+            UserProjectConfig.chat_id == chat_id,
+            UserProjectConfig.is_default == True,
+            UserProjectConfig.enabled == True
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def update(
+        self,
+        config_id: int,
+        url_template: Optional[str] = None,
+        api_key: Optional[str] = None,
+        project_name: Optional[str] = None,
+        timeout: Optional[int] = None,
+        is_default: Optional[bool] = None,
+        enabled: Optional[bool] = None
+    ) -> Optional[UserProjectConfig]:
+        """
+        更新项目配置
+
+        Args:
+            config_id: 配置 ID
+            url_template: 新的 URL 模板（可选）
+            api_key: 新的 API Key（可选）
+            project_name: 新的项目名称（可选）
+            timeout: 新的超时时间（可选）
+            is_default: 新的默认标记（可选）
+            enabled: 新的启用状态（可选）
+
+        Returns:
+            更新后的 UserProjectConfig 对象，如果不存在返回 None
+        """
+        # 构建更新字典
+        update_values = {}
+        if url_template is not None:
+            update_values['url_template'] = url_template
+        if api_key is not None:
+            update_values['api_key'] = api_key
+        if project_name is not None:
+            update_values['project_name'] = project_name
+        if timeout is not None:
+            update_values['timeout'] = timeout
+        if enabled is not None:
+            update_values['enabled'] = enabled
+        if is_default is not None:
+            update_values['is_default'] = is_default
+
+        if not update_values:
+            return await self.get_by_id(config_id)
+
+        # 如果设置为默认，先将同一用户的其他默认项目取消
+        if is_default:
+            config = await self.get_by_id(config_id)
+            if config:
+                await self._clear_default_flag(config.bot_key, config.chat_id)
+
+        # 执行更新
+        stmt = update(UserProjectConfig).where(
+            UserProjectConfig.id == config_id
+        ).values(**update_values)
+        await self.session.execute(stmt)
+        await self.session.flush()
+
+        logger.info(f"更新用户项目配置: id={config_id}")
+        return await self.get_by_id(config_id)
+
+    async def delete(self, config_id: int) -> bool:
+        """
+        删除项目配置
+
+        Args:
+            config_id: 配置 ID
+
+        Returns:
+            是否成功删除
+        """
+        stmt = delete(UserProjectConfig).where(UserProjectConfig.id == config_id)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+
+        if result.rowcount > 0:
+            logger.info(f"删除用户项目配置: id={config_id}")
+            return True
+        return False
+
+    async def delete_by_project_id(
+        self,
+        bot_key: str,
+        chat_id: str,
+        project_id: str
+    ) -> bool:
+        """
+        根据 bot_key + chat_id + project_id 删除配置
+
+        Args:
+            bot_key: Bot Key
+            chat_id: 用户/群 ID
+            project_id: 项目 ID
+
+        Returns:
+            是否成功删除
+        """
+        stmt = delete(UserProjectConfig).where(
+            UserProjectConfig.bot_key == bot_key,
+            UserProjectConfig.chat_id == chat_id,
+            UserProjectConfig.project_id == project_id
+        )
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+
+        if result.rowcount > 0:
+            logger.info(f"删除用户项目配置: bot={bot_key[:10]}, user={chat_id[:10]}, project={project_id}")
+            return True
+        return False
+
+    async def set_default(
+        self,
+        bot_key: str,
+        chat_id: str,
+        project_id: str
+    ) -> bool:
+        """
+        设置默认项目
+
+        Args:
+            bot_key: Bot Key
+            chat_id: 用户/群 ID
+            project_id: 项目 ID
+
+        Returns:
+            是否成功设置
+        """
+        # 先取消其他默认项目
+        await self._clear_default_flag(bot_key, chat_id)
+
+        # 设置新的默认项目
+        stmt = update(UserProjectConfig).where(
+            UserProjectConfig.bot_key == bot_key,
+            UserProjectConfig.chat_id == chat_id,
+            UserProjectConfig.project_id == project_id
+        ).values(is_default=True)
+
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+
+        if result.rowcount > 0:
+            logger.info(f"设置默认项目: bot={bot_key[:10]}, user={chat_id[:10]}, project={project_id}")
+            return True
+        return False
+
+    async def count_user_projects(
+        self,
+        bot_key: str,
+        chat_id: str,
+        enabled_only: bool = True
+    ) -> int:
+        """
+        统计用户的项目配置数量
+
+        Args:
+            bot_key: Bot Key
+            chat_id: 用户/群 ID
+            enabled_only: 是否只统计启用的配置
+
+        Returns:
+            配置数量
+        """
+        conditions = [
+            UserProjectConfig.bot_key == bot_key,
+            UserProjectConfig.chat_id == chat_id
+        ]
+
+        if enabled_only:
+            conditions.append(UserProjectConfig.enabled == True)
+
+        stmt = select(func.count(UserProjectConfig.id)).where(*conditions)
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
+
+    async def _clear_default_flag(self, bot_key: str, chat_id: str) -> None:
+        """
+        清除用户的所有默认项目标记（内部方法）
+
+        Args:
+            bot_key: Bot Key
+            chat_id: 用户/群 ID
+        """
+        stmt = update(UserProjectConfig).where(
+            UserProjectConfig.bot_key == bot_key,
+            UserProjectConfig.chat_id == chat_id,
+            UserProjectConfig.is_default == True
+        ).values(is_default=False)
+
+        await self.session.execute(stmt)
+
+
+def get_user_project_repository(session: AsyncSession) -> UserProjectConfigRepository:
+    """获取 UserProjectConfigRepository 实例"""
+    return UserProjectConfigRepository(session)

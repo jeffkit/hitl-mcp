@@ -329,7 +329,7 @@ class SessionManager:
     def format_session_list(self, sessions: list[UserSession], hint: str = "list") -> str:
         """
         格式化会话列表为用户可读的消息
-        
+
         Args:
             sessions: 会话列表
             hint: 提示类型，"list" 表示来自 /s，"switch" 表示来自 /c
@@ -338,22 +338,28 @@ class SessionManager:
             if hint == "switch":
                 return "📭 暂无可切换的会话\n\n💡 使用 `/r` 新建会话"
             return "📭 暂无会话记录"
-        
+
         # 根据 hint 使用不同的标题，避免企微消息收敛
         title = "📋 **最近会话**" if hint == "list" else "🔀 **切换会话**"
         lines = [title + "\n"]
-        
+
         for i, s in enumerate(sessions, 1):
             active_mark = "✅" if s.is_active else "  "
             preview = (s.last_message[:30] + "...") if s.last_message and len(s.last_message) > 30 else (s.last_message or "")
-            lines.append(f"{active_mark} `{s.short_id}` - {preview} ({s.message_count}条)")
-        
+
+            # 添加项目信息
+            project_info = ""
+            if s.current_project_id:
+                project_info = f" - 📦 `{s.current_project_id}`"
+
+            lines.append(f"{active_mark} `{s.short_id}`{project_info}\n   {preview} ({s.message_count}条)")
+
         lines.append("\n---")
         if hint == "switch":
             lines.append("💡 用法: `/c <短ID>` 切换, `/c <短ID> 消息` 切换并发送")
         else:
             lines.append("💡 命令: `/c <短ID>` 切换会话, `/r` 新建会话")
-        
+
         return "\n".join(lines)
 
 
