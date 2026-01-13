@@ -2,8 +2,14 @@
 callback.py 集成测试
 
 使用 Mock 模拟外部依赖，完整测试 handle_callback 函数的各种场景
+
+注意：此测试文件需要与最新的 callback.py 同步。
+部分测试依赖已移除的功能（如 is_session_processing），暂时跳过。
 """
 import pytest
+
+# 临时跳过整个测试文件，等待与最新代码同步
+pytestmark = pytest.mark.skip(reason="Tests need synchronization with latest callback.py - is_session_processing removed")
 import pytest_asyncio
 import json
 from datetime import datetime
@@ -12,10 +18,6 @@ from io import BytesIO
 
 from forward_service.config import BotConfig, ForwardConfig, AccessControl
 from forward_service.services.forwarder import AgentResult
-
-
-# 临时跳过：测试需要与最新代码同步
-pytestmark = pytest.mark.skip(reason="Test file needs synchronization with latest callback.py")
 
 
 class MockRequest:
