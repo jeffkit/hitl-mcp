@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { botApi, type Bot } from '@/api/client'
+import { generateUUID } from '@/lib/utils'
 
 export function BotsPage() {
   const [bots, setBots] = useState<Bot[]>([])
@@ -54,7 +55,7 @@ export function BotsPage() {
     setFormData({
       name: '',
       description: '',
-      bot_key: crypto.randomUUID(),
+      bot_key: generateUUID(),
       url_template: '',
       api_key: '',
       timeout: 1200,
