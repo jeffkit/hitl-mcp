@@ -112,6 +112,15 @@ async def admin_page():
     return {"error": "Admin page not found"}
 
 
+@router.get("/user-projects/page")
+async def user_projects_page():
+    """用户项目管理页面"""
+    user_projects_html = STATIC_DIR / "user-projects.html"
+    if user_projects_html.exists():
+        return FileResponse(user_projects_html)
+    return {"error": "User projects page not found"}
+
+
 # ============== 状态和配置 API ==============
 
 @router.get("/status")
