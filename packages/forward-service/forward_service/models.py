@@ -255,19 +255,160 @@ class Chatbot(Base):
         return data
 
 
+class UserProjectConfig(Base):
+    """
+    用户项目配置表
+
+    存储每个用户在 Bot 下配置的多个转发项目：
+    - 一个 Bot 下，每个用户可以配置多个项目
+    - 每个项目包含完整的转发配置（URL、API Key）
+    - 支持设置默认项目，优先级高于 Bot 级别配置
+    """
+    __tablename__ = "user_project_configs"
+
+    # 主键
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # 所属 Bot
+    bot_key: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="所属 Bot Key"
+    )
+
+    # 用户/群标识
+    chat_id: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        index=True,
+        comment="用户/群 ID"
+    )
+
+    # 项目标识
+    project_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="项目标识（如 'test', 'prod'）"
+    )
+
+    # 项目基本信息
+    project_name: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="项目名称（显示用）"
+    )
+
+    # 转发配置
+    url_template: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="转发目标 URL 模板"
+    )
+
+    agent_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        default="",
+        comment="Agent ID (历史字段，保留用于兼容)"
+    )
+
+    api_key: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="转发请求的 API Key"
+    )
+
+    timeout: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=60,
+        comment="转发请求超时时间 (秒)"
+    )
+
+    # 默认标记
+    is_default: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="是否为该用户的默认项目"
+    )
+
+    # 状态
+    enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+        comment="是否启用"
+    )
+
+    # 时间戳
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        comment="创建时间"
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        comment="更新时间"
+    )
+
+    # 约束和索引
+    __table_args__ = (
+        UniqueConstraint(
+            "bot_key", "chat_id", "project_id",
+            name="uq_user_project_bot_chat_project"
+        ),
+        Index("idx_user_projects_lookup", "bot_key", "chat_id", "enabled"),
+        Index("idx_user_projects_default", "bot_key", "chat_id", "is_default"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<UserProjectConfig(id={self.id}, bot={self.bot_key[:10]}, user={self.chat_id[:10]}, project={self.project_id})>"
+
+    def get_url(self) -> str:
+        """获取完整的转发 URL (替换占位符)"""
+        # 保留 agent_id 替换逻辑用于兼容，但实际使用中 URL 应该已经包含完整信息
+        return self.url_template.replace("{agent_id}", self.agent_id or "")
+
+    def to_dict(self) -> dict:
+        """转换为字典 (用于 API 返回)"""
+        return {
+            "id": self.id,
+            "bot_key": self.bot_key,
+            "chat_id": self.chat_id,
+            "project_id": self.project_id,
+            "project_name": self.project_name,
+            "url_template": self.url_template,
+            "api_key": self.api_key,
+            "timeout": self.timeout,
+            "is_default": self.is_default,
+            "enabled": self.enabled,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class UserSession(Base):
     """
     用户会话表
-    
+
     记录用户与 Agent 的会话信息，用于：
     - 会话持续性：下次用户上行时带上 session_id
     - 会话管理：支持 /sess, /reset, /change 命令
+    - 项目关联：每个会话可以关联一个用户项目配置
     """
     __tablename__ = "user_sessions"
-    
+
     # 主键
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    
+
     # 用户标识
     user_id: Mapped[str] = mapped_column(
         String(100),
@@ -275,7 +416,7 @@ class UserSession(Base):
         index=True,
         comment="用户 ID"
     )
-    
+
     # 会话上下文
     chat_id: Mapped[str] = mapped_column(
         String(200),
@@ -283,14 +424,14 @@ class UserSession(Base):
         index=True,
         comment="Chat ID (群ID或私聊ID)"
     )
-    
+
     bot_key: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
         index=True,
         comment="关联的 Bot Key"
     )
-    
+
     # Agent 会话 ID
     session_id: Mapped[str] = mapped_column(
         String(100),
@@ -298,28 +439,42 @@ class UserSession(Base):
         index=True,
         comment="Agent 返回的 Session ID"
     )
-    
+
     short_id: Mapped[str] = mapped_column(
         String(8),
         nullable=False,
         index=True,
         comment="Session ID 短标识 (前8位)"
     )
-    
+
     # 会话信息
     last_message: Mapped[Optional[str]] = mapped_column(
         String(500),
         nullable=True,
         comment="用户最后一条消息 (用于展示)"
     )
-    
+
     message_count: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
         default=1,
         comment="消息计数"
     )
-    
+
+    # 项目关联（新增）
+    current_project_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="当前使用的项目 ID"
+    )
+
+    project_config_id: Mapped[Optional[int]] = mapped_column(
+        Integer,
+        ForeignKey("user_project_configs.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="关联的项目配置 ID (外键)"
+    )
+
     # 状态
     is_active: Mapped[bool] = mapped_column(
         Boolean,
@@ -328,7 +483,7 @@ class UserSession(Base):
         index=True,
         comment="是否为当前活跃会话"
     )
-    
+
     # 时间戳
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -336,7 +491,7 @@ class UserSession(Base):
         default=datetime.utcnow,
         comment="创建时间"
     )
-    
+
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,
@@ -344,11 +499,12 @@ class UserSession(Base):
         onupdate=datetime.utcnow,
         comment="更新时间"
     )
-    
+
     # 索引
     __table_args__ = (
         Index("idx_user_session_active", "user_id", "chat_id", "bot_key", "is_active"),
         Index("idx_user_session_short_id", "user_id", "chat_id", "short_id"),
+        Index("idx_user_session_project", "current_project_id"),
     )
     
     def __repr__(self) -> str:
@@ -543,7 +699,21 @@ class ForwardLog(Base):
         index=True,
         comment="Agent 会话 ID"
     )
-    
+
+    # 项目信息（新增）
+    project_id: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="使用的项目 ID"
+    )
+
+    project_name: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="项目名称（用于显示）"
+    )
+
     # 响应信息
     status: Mapped[str] = mapped_column(
         String(20),
@@ -596,6 +766,8 @@ class ForwardLog(Base):
             "bot_name": self.bot_name,
             "target_url": self.target_url,
             "session_id": self.session_id,
+            "project_id": self.project_id,
+            "project_name": self.project_name,
             "status": self.status,
             "response": self.response,
             "error": self.error,

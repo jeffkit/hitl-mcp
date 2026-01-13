@@ -14,6 +14,10 @@ from ..session_manager import get_session_manager
 from ..utils import extract_content
 from ..services import forward_to_agent_with_bot
 from .admin import add_request_log, update_request_log, RequestLogData
+from .project_commands import (
+    is_project_command,
+    handle_project_command,
+)
 from .admin_commands import (
     check_is_admin,
     get_system_status,
@@ -148,6 +152,19 @@ async def handle_callback(
         
         # === 会话管理：处理 Slash 命令 ===
         if content:
+            # 首先检查是否是项目配置命令
+            if is_project_command(content):
+                logger.info(f"检测到项目命令: {content[:50]}...")
+                success, reply_msg = await handle_project_command(bot.bot_key, chat_id, content)
+                await send_reply(
+                    chat_id=chat_id,
+                    message=reply_msg,
+                    msg_type="text",
+                    bot_key=bot.bot_key
+                )
+                return {"errcode": 0, "errmsg": "project command handled"}
+
+            # 然后处理其他斜杠命令
             session_mgr = get_session_manager()
             slash_cmd = session_mgr.parse_slash_command(content)
             
@@ -223,9 +240,16 @@ async def handle_callback(
                         logger.info(f"会话已切换到 {target_session.short_id}，继续转发消息: {extra_msg[:30]}...")
                         content = extra_msg
                     else:
+                        # 构建响应消息（包含项目信息）
+                        reply_msg = f"✅ 已切换到会话 `{target_session.short_id}`\n最后消息: {target_session.last_message or '(无)'}"
+
+                        # 添加项目信息
+                        if target_session.current_project_id:
+                            reply_msg += f"\n📦 项目: `{target_session.current_project_id}`"
+
                         await send_reply(
                             chat_id=chat_id,
-                            message=f"✅ 已切换到会话 `{target_session.short_id}`\n最后消息: {target_session.last_message or '(无)'}",
+                            message=reply_msg,
                             msg_type="text",
                             bot_key=bot.bot_key
                         )
