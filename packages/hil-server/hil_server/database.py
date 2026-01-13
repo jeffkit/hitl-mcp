@@ -64,6 +64,19 @@ class DatabaseManager:
             engine_kwargs.update({
                 "connect_args": {"check_same_thread": False},
             })
+        else:
+            # MySQL/PostgreSQL 连接池配置
+            # pool_pre_ping: 使用连接前检查连接是否有效，避免使用已断开的连接
+            # pool_recycle: 连接回收时间（秒），应小于 MySQL wait_timeout（默认8小时）
+            # pool_size: 连接池大小
+            # max_overflow: 允许超出 pool_size 的最大连接数
+            engine_kwargs.update({
+                "pool_pre_ping": True,
+                "pool_recycle": 3600,  # 1小时回收一次连接
+                "pool_size": 5,
+                "max_overflow": 10,
+            })
+            logger.info("MySQL 连接池配置: pool_pre_ping=True, pool_recycle=3600")
         
         self._engine = create_async_engine(self.database_url, **engine_kwargs)
         self._session_factory = async_sessionmaker(
