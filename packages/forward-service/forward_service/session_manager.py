@@ -8,7 +8,7 @@ Forward Service 会话管理器
 """
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import select, update, and_, desc
@@ -115,7 +115,7 @@ class SessionManager:
                 existing.last_message = truncated_message
                 existing.message_count += 1
                 existing.is_active = True
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(timezone.utc)
                 await db.commit()
                 return existing
             else:
@@ -286,7 +286,7 @@ class SessionManager:
             
             # 激活目标会话
             target.is_active = True
-            target.updated_at = datetime.utcnow()
+            target.updated_at = datetime.now(timezone.utc)
             await db.commit()
             
             logger.info(f"会话已切换: user={user_id[:10]}, session={target.short_id}")

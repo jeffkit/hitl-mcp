@@ -4,7 +4,7 @@ Forward Service 数据库访问层 (Repository/DAO)
 提供对数据库的 CRUD 操作，封装所有数据库访问逻辑。
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -594,7 +594,7 @@ class ForwardLogRepository:
     async def cleanup_old_logs(self, days: int = 30) -> int:
         """清理指定天数之前的日志"""
         from datetime import timedelta
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         
         stmt = delete(ForwardLog).where(ForwardLog.timestamp < cutoff)
         result = await self.session.execute(stmt)

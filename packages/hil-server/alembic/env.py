@@ -44,7 +44,9 @@ if database_url:
         # 未知类型，保持原样
         sync_url = database_url
 
-    config.set_main_option("sqlalchemy.url", sync_url)
+    # 转义 % 符号，避免 configparser 解析问题
+    escaped_url = sync_url.replace("%", "%%")
+    config.set_main_option("sqlalchemy.url", escaped_url)
     print(f"[Alembic] 使用环境变量 HIL_DATABASE_URL: {sync_url[:50]}...")
 
 # ============== 模型元数据 ==============
@@ -74,6 +76,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         # 渲染项配置
         render_as_batch=True,  # SQLite 支持 ALTER TABLE
+        version_table="hil_alembic_version",  # 使用独立的版本表
     )
 
     with context.begin_transaction():
@@ -107,6 +110,7 @@ def run_migrations_online() -> None:
             render_as_batch=True,  # SQLite 支持 ALTER TABLE
             compare_type=True,  # 比较列类型
             compare_server_default=True,  # 比较默认值
+            version_table="hil_alembic_version",  # 使用独立的版本表
         )
 
         with context.begin_transaction():

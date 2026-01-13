@@ -5,7 +5,7 @@
 """
 import logging
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Request
@@ -254,7 +254,7 @@ async def get_stats(days: int = 7):
             repo = get_forward_log_repository(session)
             
             # 计算时间范围
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             start_date = now - timedelta(days=days)
             
             # 总数统计
