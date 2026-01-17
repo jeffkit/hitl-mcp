@@ -487,7 +487,7 @@ async def create_user_project(request: Request):
         "url_template": "https://api.test.com/webhook",
         "api_key": "sk-test-123",
         "project_name": "测试环境",
-        "timeout": 60,
+        "timeout": 300,
         "is_default": false
     }
     """
@@ -524,7 +524,7 @@ async def create_user_project(request: Request):
                 url_template=data["url_template"],
                 api_key=data.get("api_key"),
                 project_name=data.get("project_name"),
-                timeout=data.get("timeout", 60),
+                timeout=data.get("timeout", 300),
                 is_default=data.get("is_default", False),
                 enabled=data.get("enabled", True)
             )

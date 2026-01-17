@@ -11,7 +11,7 @@
 """
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Tuple
 
 from ..database import get_db_manager
 from ..repository import get_user_project_repository
@@ -20,9 +20,10 @@ logger = logging.getLogger(__name__)
 
 
 # ============== 命令正则匹配 ==============
+# 每个命令都有简写版本：/add-project = /ap, /list-projects = /lp 等
 
 ADD_PROJECT_RE = re.compile(
-    r'^/add-project\s+(\S+)\s+(\S+)'  # project_id, url
+    r'^/(?:add-project|ap)\s+(\S+)\s+(\S+)'  # project_id, url
     r'(?:\s+--api-key\s+(\S+))?'       # optional: api_key
     r'(?:\s+--name\s+(.+?))?'          # optional: project_name
     r'(?:\s+--timeout\s+(\d+))?'       # optional: timeout
@@ -31,27 +32,27 @@ ADD_PROJECT_RE = re.compile(
 )
 
 LIST_PROJECTS_RE = re.compile(
-    r'^/(?:list-projects|projects)\s*$',
+    r'^/(?:list-projects|projects|lp)\s*$',
     re.IGNORECASE
 )
 
 USE_PROJECT_RE = re.compile(
-    r'^/use\s+(\S+)$',
+    r'^/(?:use|u)\s+(\S+)$',
     re.IGNORECASE
 )
 
 SET_DEFAULT_RE = re.compile(
-    r'^/set-default\s+(\S+)$',
+    r'^/(?:set-default|sd)\s+(\S+)$',
     re.IGNORECASE
 )
 
 REMOVE_PROJECT_RE = re.compile(
-    r'^/remove-project\s+(\S+)$',
+    r'^/(?:remove-project|rp)\s+(\S+)$',
     re.IGNORECASE
 )
 
 CURRENT_PROJECT_RE = re.compile(
-    r'^/(?:current-project|current)\s*$',
+    r'^/(?:current-project|current|cp)\s*$',
     re.IGNORECASE
 )
 
@@ -80,7 +81,7 @@ async def handle_add_project(
     url = match.group(2)
     api_key = match.group(3) if match.lastindex >= 3 else None
     project_name = match.group(4) if match.lastindex >= 4 else None
-    timeout = int(match.group(5)) if match.lastindex >= 5 and match.group(5) else 60
+    timeout = int(match.group(5)) if match.lastindex >= 5 and match.group(5) else 300
     is_default = match.group(0).endswith("--default") or False
 
     try:
@@ -88,13 +89,38 @@ async def handle_add_project(
         async with db_manager.get_session() as session:
             repo = get_user_project_repository(session)
 
-            # 检查是否已存在
+            # 1. 先检查项目 ID 是否已存在（按 bot_key + chat_id + project_id 联合去重）
             existing = await repo.get_by_project_id(bot_key, chat_id, project_id)
             if existing:
-                return False, f"❌ 项目 `{project_id}` 已存在\n\n💡 使用 `/list-projects` 查看已有项目"
+                return False, f"❌ 项目 `{project_id}` 已存在\n\n💡 使用 `/projects` 或 `/lp` 查看已有项目\n💡 使用 `/rp {project_id}` 可删除后重新添加"
 
-            # 创建项目配置
-            project = await repo.create(
+            # 2. 测试连通性
+            test_result = await _test_agent_connectivity(url, api_key)
+            
+            # 连接失败时拒绝保存
+            if not test_result["success"]:
+                lines = [
+                    "❌ **连接测试失败，项目未保存**",
+                    "",
+                    f"🔗 URL: `{url}`",
+                ]
+                
+                if api_key:
+                    masked_key = api_key[:4] + "***" + api_key[-4:] if len(api_key) > 8 else "***"
+                    lines.append(f"🔐 API Key: `{masked_key}`")
+                
+                lines.append("")
+                lines.append(f"❌ 错误: {test_result['error']}")
+                if test_result.get('response'):
+                    lines.append(f"📋 响应: {test_result['response'][:300]}")
+                lines.append("")
+                lines.append("💡 请检查 URL 和 API Key 是否正确后重试")
+                lines.append("📖 文档: https://agentstudio.woa.com/docs/qywx-bot")
+                
+                return False, "\n".join(lines)
+
+            # 3. 连接成功，创建项目配置
+            _project = await repo.create(
                 bot_key=bot_key,
                 chat_id=chat_id,
                 project_id=project_id,
@@ -106,34 +132,74 @@ async def handle_add_project(
                 enabled=True
             )
 
-            # 格式化响应消息
+            # 格式化成功响应
             lines = [
-                "✅ 项目配置成功",
+                "🎉 **项目添加成功！**",
+                "",
                 f"📦 项目ID: `{project_id}`",
                 f"🔗 URL: `{url}`",
             ]
 
             if api_key:
-                # 隐藏 API Key 的大部分
                 masked_key = api_key[:4] + "***" + api_key[-4:] if len(api_key) > 8 else "***"
                 lines.append(f"🔐 API Key: `{masked_key}`")
 
             if project_name:
                 lines.append(f"📛 项目名称: {project_name}")
 
-            if timeout != 60:
-                lines.append(f"⏱️ 超时: {timeout}秒")
-
             if is_default:
                 lines.append("⭐ 已设为默认项目")
 
-            lines.append("\n💡 现在可以开始对话了！")
+            lines.append("")
+            lines.append("✅ **连接测试成功！**")
+            lines.append("")
+            lines.append("💡 **下一步**：直接发送消息开始对话！")
 
             return True, "\n".join(lines)
 
     except Exception as e:
         logger.error(f"添加项目失败: {e}", exc_info=True)
         return False, f"❌ 添加项目失败: {str(e)}"
+
+
+async def _test_agent_connectivity(url: str, api_key: str | None) -> dict:
+    """
+    测试 Agent 连通性
+    
+    发送一个测试消息，检查是否能正常响应
+    
+    Returns:
+        {"success": bool, "error": str?, "response": str?}
+    """
+    import httpx
+    
+    try:
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        
+        # 发送测试消息
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                url,
+                json={"message": "ping"},
+                headers=headers
+            )
+            
+            if response.status_code == 200:
+                return {"success": True}
+            else:
+                return {
+                    "success": False,
+                    "error": f"HTTP {response.status_code}",
+                    "response": response.text
+                }
+    except httpx.TimeoutException:
+        return {"success": False, "error": "连接超时 (15秒)"}
+    except httpx.ConnectError as e:
+        return {"success": False, "error": f"无法连接: {str(e)}"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 async def handle_list_projects(
@@ -168,9 +234,9 @@ async def handle_list_projects(
                 lines.append(f"   🔗 {p.url_template}")
 
                 if p.api_key:
-                    lines.append(f"   🔑 API Key: ***")
+                    lines.append("   🔑 API Key: ***")
 
-                if p.timeout != 60:
+                if p.timeout != 300:
                     lines.append(f"   ⏱️ 超时: {p.timeout}秒")
 
                 lines.append("")  # 空行分隔
@@ -261,14 +327,15 @@ async def handle_remove_project(
 async def handle_use_project(
     bot_key: str,
     chat_id: str,
-    project_id: str
+    project_id: str,
+    user_id: str = ""
 ) -> Tuple[bool, str]:
     """
     处理 /use 命令
 
     用法: /use <project_id>
 
-    功能：切换到指定项目（重置会话，下次对话将使用新项目）
+    功能：切换到指定项目（更新当前会话的项目）
     """
     try:
         db_manager = get_db_manager()
@@ -283,23 +350,29 @@ async def handle_use_project(
             if not project.enabled:
                 return False, f"❌ 项目 `{project_id}` 已禁用"
 
-            # 构建成功消息
-            lines = [
-                f"✅ 已切换到项目 `{project_id}`",
-                f"📦 项目名称: {project.project_name or project_id}",
-                f"🔗 转发目标: `{project.url_template}`",
-            ]
+        # 更新会话的项目 ID
+        if user_id:
+            from ..session_manager import get_session_manager
+            session_mgr = get_session_manager()
+            await session_mgr.set_session_project(user_id, chat_id, bot_key, project_id)
 
-            if project.api_key:
-                lines.append(f"🔑 API Key: ***")
+        # 构建成功消息
+        lines = [
+            f"✅ 已切换到项目 `{project_id}`",
+            f"📦 项目名称: {project.project_name or project_id}",
+            f"🔗 转发目标: `{project.url_template}`",
+        ]
 
-            if project.timeout != 60:
-                lines.append(f"⏱️ 超时: {project.timeout}秒")
+        if project.api_key:
+            lines.append("🔑 API Key: ***")
 
-            lines.append("")
-            lines.append("💡 现在可以开始对话了！新会话将使用此项目。")
+        if project.timeout != 300:
+            lines.append(f"⏱️ 超时: {project.timeout}秒")
 
-            return True, "\n".join(lines)
+        lines.append("")
+        lines.append("💡 现在可以开始对话了！")
+
+        return True, "\n".join(lines)
 
     except Exception as e:
         logger.error(f"切换项目失败: {e}", exc_info=True)
@@ -337,9 +410,9 @@ async def handle_current_project(
             lines.append(f"🔗 URL: `{project.url_template}`")
 
             if project.api_key:
-                lines.append(f"🔑 API Key: ***")
+                lines.append("🔑 API Key: ***")
 
-            if project.timeout != 60:
+            if project.timeout != 300:
                 lines.append(f"⏱️ 超时: {project.timeout}秒")
 
             return True, "\n".join(lines)
@@ -371,7 +444,8 @@ def is_project_command(message: str) -> bool:
 async def handle_project_command(
     bot_key: str,
     chat_id: str,
-    message: str
+    message: str,
+    user_id: str = ""
 ) -> Tuple[bool, str]:
     """
     处理项目配置命令
@@ -380,6 +454,7 @@ async def handle_project_command(
         bot_key: Bot Key
         chat_id: 用户/群 ID
         message: 消息内容
+        user_id: 用户 ID（用于 /use 命令更新会话）
 
     Returns:
         (success, response_message)
@@ -414,6 +489,115 @@ async def handle_project_command(
     elif USE_PROJECT_RE.match(message):
         match = USE_PROJECT_RE.match(message)
         project_id = match.group(1)
-        return await handle_use_project(bot_key, chat_id, project_id)
+        return await handle_use_project(bot_key, chat_id, project_id, user_id)
 
     return False, "❌ 未知的项目命令"
+
+
+def get_user_help() -> str:
+    """
+    获取新用户帮助信息（没有绑定任何项目）
+    
+    当 Bot 没有配置转发目标且用户没有绑定项目时显示
+    """
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    
+    return f"""👋 **欢迎使用！**
+
+请先绑定一个 Agent 项目：
+
+📦 **添加项目**
+```
+/ap <项目ID> <URL> --api-key <API_KEY> [--default]
+```
+
+示例:
+```
+/ap test https://agentstudio.woa.com/a2a/xxx/messages --api-key sk-xxx --default
+```
+
+📖 **获取 URL 和 API-Key**
+👉 https://agentstudio.woa.com/docs/qywx-bot
+
+💡 常用命令：
+• `/lp` - 查看我的项目
+• `/cp` - 当前项目
+• `/help` - 帮助
+
+---
+⏱️ {timestamp}"""
+
+
+def get_regular_user_help() -> str:
+    """
+    获取普通用户帮助信息（已绑定项目）
+    """
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    
+    return f"""📖 **用户帮助**
+
+📦 **项目管理**
+• `/lp` (`/projects`) - 查看我的项目
+• `/ap <ID> <URL> --api-key <KEY>` - 添加项目
+• `/u <ID>` (`/use`) - 切换项目
+• `/sd <ID>` (`/set-default`) - 设为默认
+• `/rp <ID>` (`/remove-project`) - 删除项目
+• `/cp` (`/current`) - 当前项目
+
+💬 **会话管理**
+• `/s` - 列出会话
+• `/r` - 重置会话
+• `/c <ID>` - 切换会话
+
+📖 文档：https://agentstudio.woa.com/docs/qywx-bot
+
+---
+⏱️ {timestamp}"""
+
+
+def get_admin_full_help() -> str:
+    """
+    获取管理员帮助信息（包含所有命令）
+    """
+    from datetime import datetime
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    
+    return f"""📖 **管理员帮助**
+
+🔧 **系统状态**
+• `/ping` - 健康检查
+• `/status` - 系统状态
+
+🤖 **Bot 管理**
+• `/bots` - 列出所有 Bot
+• `/bot <name>` - 查看详情
+• `/bot <name> url <URL>` - 修改 URL
+• `/bot <name> key <KEY>` - 修改 API Key
+
+📊 **请求监控**
+• `/pending` - 处理中的请求
+• `/recent` - 最近日志
+• `/errors` - 错误日志
+
+🏥 **运维**
+• `/health` - Agent 可达性检查
+
+---
+
+📦 **项目管理**
+• `/lp` (`/projects`) - 查看我的项目
+• `/ap <ID> <URL> --api-key <KEY>` - 添加项目
+• `/u <ID>` (`/use`) - 切换项目
+• `/sd <ID>` (`/set-default`) - 设为默认
+• `/rp <ID>` (`/remove-project`) - 删除项目
+• `/cp` (`/current`) - 当前项目
+
+💬 **会话管理**
+• `/s` - 列出会话
+• `/r` - 重置会话
+• `/c <ID>` - 切换会话
+
+---
+⏱️ {timestamp}"""

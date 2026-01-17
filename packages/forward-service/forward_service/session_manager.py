@@ -24,8 +24,7 @@ SLASH_COMMANDS = {
     "list": re.compile(r'^/(sess|s)\s*$', re.IGNORECASE),
     "reset": re.compile(r'^/(reset|r)\s*$', re.IGNORECASE),
     # 允许会话 ID 后面有空格和消息内容
-    # /c 或 /c <short_id> [message]
-    "change": re.compile(r'^/(change|c)(?:\s+([a-f0-9]{6,8})(?:\s+(.+))?)?$', re.IGNORECASE | re.DOTALL),
+    "change": re.compile(r'^/(change|c)\s+([a-f0-9]{6,8})(?:\s+(.+))?$', re.IGNORECASE | re.DOTALL),
     
     # 系统状态命令（需要管理员权限）
     "ping": re.compile(r'^/(ping|p)\s*$', re.IGNORECASE),
@@ -146,7 +145,7 @@ class SessionManager:
                 db.add(new_session)
                 await db.commit()
                 await db.refresh(new_session)
-
+                
                 logger.info(f"新会话创建: user={user_id[:10]}, session={short_id}, project={current_project_id or 'None'}")
                 return new_session
     
@@ -184,6 +183,65 @@ class SessionManager:
                 .limit(limit)
             )
             return list(result.scalars().all())
+    
+    async def set_session_project(
+        self,
+        user_id: str,
+        chat_id: str,
+        bot_key: str,
+        project_id: str
+    ) -> bool:
+        """
+        设置活跃会话的项目 ID
+        
+        Args:
+            user_id: 用户 ID
+            chat_id: 会话 ID
+            bot_key: Bot Key
+            project_id: 要切换到的项目 ID
+        
+        Returns:
+            是否成功设置
+        """
+        async with self._db_manager.get_session() as db:
+            # 更新活跃会话的 current_project_id
+            result = await db.execute(
+                update(UserSession)
+                .where(and_(
+                    UserSession.user_id == user_id,
+                    UserSession.chat_id == chat_id,
+                    UserSession.bot_key == bot_key,
+                    UserSession.is_active == True
+                ))
+                .values(
+                    current_project_id=project_id,
+                    updated_at=datetime.now(timezone.utc)
+                )
+            )
+            await db.commit()
+            
+            if result.rowcount > 0:
+                logger.info(f"会话项目已切换: user={user_id[:10]}, project={project_id}")
+                return True
+            
+            # 如果没有活跃会话，创建一个新的空会话来保存项目偏好
+            import uuid
+            new_session_id = str(uuid.uuid4())
+            new_session = UserSession(
+                user_id=user_id,
+                chat_id=chat_id,
+                bot_key=bot_key,
+                session_id=new_session_id,
+                short_id=new_session_id[:8],
+                last_message="(项目切换)",
+                message_count=0,
+                is_active=True,
+                current_project_id=project_id
+            )
+            db.add(new_session)
+            await db.commit()
+            logger.info(f"创建新会话用于项目切换: user={user_id[:10]}, project={project_id}")
+            return True
     
     async def reset_session(
         self,
@@ -328,40 +386,23 @@ class SessionManager:
         
         return None
     
-    def format_session_list(self, sessions: list[UserSession], hint: str = "list") -> str:
+    def format_session_list(self, sessions: list[UserSession]) -> str:
         """
         格式化会话列表为用户可读的消息
-
-        Args:
-            sessions: 会话列表
-            hint: 提示类型，"list" 表示来自 /s，"switch" 表示来自 /c
         """
         if not sessions:
-            if hint == "switch":
-                return "📭 暂无可切换的会话\n\n💡 使用 `/r` 新建会话"
             return "📭 暂无会话记录"
-
-        # 根据 hint 使用不同的标题，避免企微消息收敛
-        title = "📋 **最近会话**" if hint == "list" else "🔀 **切换会话**"
-        lines = [title + "\n"]
-
+        
+        lines = ["📋 **最近会话**\n"]
+        
         for i, s in enumerate(sessions, 1):
             active_mark = "✅" if s.is_active else "  "
             preview = (s.last_message[:30] + "...") if s.last_message and len(s.last_message) > 30 else (s.last_message or "")
-
-            # 添加项目信息
-            project_info = ""
-            if s.current_project_id:
-                project_info = f" - 📦 `{s.current_project_id}`"
-
-            lines.append(f"{active_mark} `{s.short_id}`{project_info}\n   {preview} ({s.message_count}条)")
-
+            lines.append(f"{active_mark} `{s.short_id}` - {preview} ({s.message_count}条)")
+        
         lines.append("\n---")
-        if hint == "switch":
-            lines.append("💡 用法: `/c <短ID>` 切换, `/c <短ID> 消息` 切换并发送")
-        else:
-            lines.append("💡 命令: `/c <短ID>` 切换会话, `/r` 新建会话")
-
+        lines.append("💡 命令: `/c <短ID>` 切换会话, `/r` 新建会话")
+        
         return "\n".join(lines)
 
 

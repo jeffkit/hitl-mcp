@@ -26,44 +26,52 @@ from .repository import get_chatbot_repository, get_access_rule_repository
 
 logger = logging.getLogger(__name__)
 
+# 默认超时时间（秒）- 用户项目和 Bot 共用
+DEFAULT_TIMEOUT = 300  # 5 分钟
+
 
 # ============== 数据类定义 (与 config_v2 兼容) ==============
 
 class ForwardConfig:
-    """转发配置 (与 config_v2.ForwardConfig 兼容)"""
+    """转发配置"""
     def __init__(
         self,
-        url_template: str,
-        agent_id: str = "",
+        target_url: str,
         api_key: str = "",
-        timeout: int = 60
+        timeout: int = DEFAULT_TIMEOUT
     ):
-        self.url_template = url_template
-        self.agent_id = agent_id
+        self.target_url = target_url
         self.api_key = api_key
         self.timeout = timeout
 
     def to_dict(self) -> dict:
         return {
-            "url_template": self.url_template,
-            "agent_id": self.agent_id,
+            "target_url": self.target_url,
             "api_key": self.api_key,
             "timeout": self.timeout
         }
+    
+    def get_url(self) -> str:
+        """获取目标 URL（直接返回，不再需要模板替换）"""
+        return self.target_url
 
     @classmethod
     def from_bot(cls, bot: Chatbot) -> "ForwardConfig":
         """从 Chatbot 模型创建 ForwardConfig"""
+        # 优先使用 target_url，如果没有则从旧的 url_template + agent_id 构建
+        if hasattr(bot, 'target_url') and bot.target_url:
+            url = bot.target_url
+        elif hasattr(bot, 'url_template') and bot.url_template:
+            # 兼容旧数据：用 agent_id 替换模板
+            url = bot.url_template.replace("{agent_id}", bot.agent_id or "")
+        else:
+            url = ""
+        
         return cls(
-            url_template=bot.url_template,
-            agent_id=bot.agent_id or "",
+            target_url=url,
             api_key=bot.api_key or "",
             timeout=bot.timeout
         )
-
-    def get_url(self) -> str:
-        """获取完整 URL（替换占位符）"""
-        return self.url_template.replace("{agent_id}", self.agent_id)
 
 
 class AccessControl:
@@ -156,7 +164,7 @@ class BotConfig:
         self.bot_key = bot_key
         self.name = name
         self.description = description
-        self.forward_config = forward_config or ForwardConfig(url_template="")
+        self.forward_config = forward_config or ForwardConfig(target_url="")
         self.access_control = access_control or AccessControl()
         self.enabled = enabled
         self._bot = _bot  # 保留数据库模型引用
@@ -203,7 +211,7 @@ class ConfigDB:
         self.default_bot_key: str = ""
         self.bots: dict[str, BotConfig] = {}
         self.port: int = 8083
-        self.timeout: int = 60
+        self.timeout: int = DEFAULT_TIMEOUT
         self.callback_auth_key: str = ""
         self.callback_auth_value: str = ""
 
@@ -258,11 +266,11 @@ class ConfigDB:
         return None
 
     def get_bot(self, bot_key: str) -> Optional[BotConfig]:
-        """根据 bot_key 获取 Bot 配置（从内存缓存）"""
+        """根据 bot_key 获取 Bot 配置"""
         return self.bots.get(bot_key)
 
     def get_bot_or_default(self, bot_key: str | None) -> Optional[BotConfig]:
-        """获取 Bot 配置，如果找不到则返回默认 Bot（从内存缓存）"""
+        """获取 Bot 配置，如果找不到则返回默认 Bot"""
         if bot_key and bot_key in self.bots:
             return self.bots[bot_key]
 
@@ -271,45 +279,6 @@ class ConfigDB:
             logger.info(f"Bot {bot_key} 不存在，使用默认 Bot: {self.default_bot_key}")
             return self.bots[self.default_bot_key]
 
-        return None
-
-    async def get_bot_from_db(self, bot_key: str) -> Optional[BotConfig]:
-        """
-        从数据库实时读取 Bot 配置（跨进程一致性）
-        
-        多进程部署时，内存缓存可能不同步。此方法直接从数据库读取，
-        确保获取到最新的配置。
-        """
-        db = get_db_manager()
-        
-        async with db.get_session() as session:
-            bot_repo = get_chatbot_repository(session)
-            
-            bot = await bot_repo.get_by_bot_key(bot_key)
-            if not bot:
-                return None
-            
-            # 预加载 access_rules
-            await session.refresh(bot, attribute_names=["access_rules"])
-            
-            return BotConfig.from_bot(bot)
-
-    async def get_bot_or_default_from_db(self, bot_key: str | None) -> Optional[BotConfig]:
-        """
-        从数据库实时读取 Bot 配置，如果找不到则返回默认 Bot
-        
-        多进程部署时使用此方法确保配置一致性。
-        """
-        if bot_key:
-            bot = await self.get_bot_from_db(bot_key)
-            if bot:
-                return bot
-        
-        # 回退到默认 Bot
-        if self.default_bot_key:
-            logger.info(f"Bot {bot_key} 不存在，使用默认 Bot: {self.default_bot_key}")
-            return await self.get_bot_from_db(self.default_bot_key)
-        
         return None
 
     def check_access(self, bot: BotConfig, user_id: str, chat_id: str | None = None, alias: str | None = None) -> tuple[bool, str]:
@@ -433,7 +402,7 @@ class ConfigDB:
                             url_template=forward_config.get("url_template"),
                             agent_id=forward_config.get("agent_id"),
                             api_key=forward_config.get("api_key"),
-                            timeout=forward_config.get("timeout", 60),
+                            timeout=forward_config.get("timeout", DEFAULT_TIMEOUT),
                             access_mode=access_control.get("mode", "allow_all"),
                             enabled=bot_dict.get("enabled", True)
                         )
@@ -470,8 +439,9 @@ class ConfigDB:
             errors.append(f"默认 Bot Key '{self.default_bot_key}' 不存在于 bots 配置中")
 
         for bot_key, bot in self.bots.items():
-            if not bot.forward_config.url_template:
-                errors.append(f"Bot '{bot_key}' 的 forward_config.url_template 未配置")
+            # target_url 现在是可选的，用户可以通过绑定项目来指定转发目标
+            # 所以不再强制验证 target_url
+            pass
 
         return errors
 
@@ -517,9 +487,9 @@ class ConfigDB:
 
             return result
 
-    async def get_bot(self, bot_key: str) -> dict | None:
+    async def get_bot_detail(self, bot_key: str) -> dict | None:
         """
-        获取单个 Bot 详情
+        获取单个 Bot 详情（从数据库）
 
         Args:
             bot_key: Bot Key
@@ -583,8 +553,8 @@ class ConfigDB:
             {"success": bool, "bot": dict, "error": str}
         """
         try:
-            # 验证必填字段
-            required_fields = ["bot_key", "name", "url_template"]
+            # 验证必填字段（target_url 可选，用户可以通过绑定项目来指定）
+            required_fields = ["bot_key", "name"]
             missing = [f for f in required_fields if not data.get(f)]
             if missing:
                 return {"success": False, "error": f"缺少必填字段: {', '.join(missing)}"}
@@ -600,14 +570,13 @@ class ConfigDB:
                 if existing:
                     return {"success": False, "error": f"Bot Key '{data['bot_key']}' 已存在"}
 
-                # 创建 Bot
+                # 创建 Bot（target_url 可选）
                 bot = await bot_repo.create(
                     bot_key=data["bot_key"],
                     name=data["name"],
-                    url_template=data["url_template"],
-                    agent_id=data.get("agent_id", ""),
+                    target_url=data.get("target_url", ""),  # 可选，用户可通过绑定项目指定
                     api_key=data.get("api_key", ""),
-                    timeout=data.get("timeout", 60),
+                    timeout=data.get("timeout", DEFAULT_TIMEOUT),
                     access_mode=data.get("access_mode", "allow_all"),
                     description=data.get("description", ""),
                     enabled=data.get("enabled", True)
@@ -629,8 +598,8 @@ class ConfigDB:
 
                 logger.info(f"创建 Bot 成功: {data['bot_key']}")
 
-                # 返回创建的 Bot 详情
-                created_bot = await self.get_bot(data["bot_key"])
+                # 返回创建的 Bot 详情（使用异步方法从数据库获取）
+                created_bot = await self.get_bot_detail(data["bot_key"])
                 return {"success": True, "bot": created_bot}
 
         except Exception as e:
@@ -665,8 +634,7 @@ class ConfigDB:
                     bot_id=bot.id,
                     name=data.get("name"),
                     description=data.get("description"),
-                    url_template=data.get("url_template"),
-                    agent_id=data.get("agent_id"),
+                    target_url=data.get("target_url"),
                     api_key=data.get("api_key"),
                     timeout=data.get("timeout"),
                     access_mode=data.get("access_mode"),

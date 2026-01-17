@@ -40,7 +40,7 @@ class ChatbotRepository:
         url_template: str,
         agent_id: str = "",
         api_key: str = "",
-        timeout: int = 60,
+        timeout: int = 300,
         access_mode: str = "allow_all",
         description: str = "",
         enabled: bool = True
@@ -712,7 +712,7 @@ class UserProjectConfigRepository:
         url_template: str,
         api_key: Optional[str] = None,
         project_name: Optional[str] = None,
-        timeout: int = 60,
+        timeout: int = 300,
         is_default: bool = False,
         enabled: bool = True
     ) -> UserProjectConfig:
