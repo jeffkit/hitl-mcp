@@ -542,6 +542,57 @@ class ConfigDB:
                 ]
             }
 
+    async def get_bot_or_default_from_db(self, bot_key: str | None) -> Optional[BotConfig]:
+        """
+        从数据库获取 Bot 配置，如果指定的 bot_key 不存在，返回默认 Bot
+
+        Args:
+            bot_key: Bot Key，可以为 None
+
+        Returns:
+            BotConfig 对象，如果都不存在返回 None
+        """
+        db = get_db_manager()
+
+        async with db.get_session() as session:
+            bot_repo = get_chatbot_repository(session)
+
+            # 1. 尝试获取指定的 bot
+            if bot_key:
+                bot = await bot_repo.get_by_bot_key(bot_key)
+                if bot and bot.enabled:
+                    return BotConfig(
+                        bot_key=bot.bot_key,
+                        name=bot.name,
+                        description=bot.description or "",
+                        forward_config=ForwardConfig(
+                            target_url=bot.get_url(),
+                            api_key=bot.api_key or "",
+                            timeout=bot.timeout
+                        ),
+                        access_mode=bot.access_mode,
+                        enabled=bot.enabled
+                    )
+
+            # 2. 尝试获取默认 bot
+            if self.default_bot_key:
+                default_bot = await bot_repo.get_by_bot_key(self.default_bot_key)
+                if default_bot and default_bot.enabled:
+                    return BotConfig(
+                        bot_key=default_bot.bot_key,
+                        name=default_bot.name,
+                        description=default_bot.description or "",
+                        forward_config=ForwardConfig(
+                            target_url=default_bot.get_url(),
+                            api_key=default_bot.api_key or "",
+                            timeout=default_bot.timeout
+                        ),
+                        access_mode=default_bot.access_mode,
+                        enabled=default_bot.enabled
+                    )
+
+            return None
+
     async def create_bot(self, data: dict) -> dict:
         """
         创建新 Bot
