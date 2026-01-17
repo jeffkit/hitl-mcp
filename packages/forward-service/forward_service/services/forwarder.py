@@ -98,7 +98,7 @@ async def get_forward_config_for_user(
 
     logger.info(f"使用 Bot 默认配置: {bot.name}")
     return ForwardConfig(
-        url_template=bot.forward_config.url_template,
+        url_template=bot.forward_config.target_url,
         api_key=bot.forward_config.api_key,
         timeout=bot.forward_config.timeout,
         project_id=None,
