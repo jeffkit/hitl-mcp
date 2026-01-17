@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { botApi, type Bot } from '@/api/client'
+import { generateUUID } from '@/lib/utils'
 
 export function BotsPage() {
   const [bots, setBots] = useState<Bot[]>([])
@@ -54,7 +55,7 @@ export function BotsPage() {
     setFormData({
       name: '',
       description: '',
-      bot_key: crypto.randomUUID(),
+      bot_key: generateUUID(),
       url_template: '',
       api_key: '',
       timeout: 1200,
@@ -321,13 +322,13 @@ export function BotsPage() {
               />
             </div>
             <div className="space-y-2">
-              <label className="text-sm font-medium">目标 URL *</label>
+              <label className="text-sm font-medium">目标 URL（可选）</label>
               <Input
                 placeholder="https://example.com/a2a/your-agent-id/messages"
                 value={formData.url_template}
                 onChange={(e) => setFormData({ ...formData, url_template: e.target.value })}
               />
-              <p className="text-xs text-muted-foreground">Agent 的完整请求地址</p>
+              <p className="text-xs text-muted-foreground">可选：用户可通过绑定项目指定目标 Agent</p>
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">API Key</label>
@@ -426,7 +427,7 @@ export function BotsPage() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>取消</Button>
-            <Button onClick={handleSave} disabled={saving || !formData.name || !formData.url_template}>
+            <Button onClick={handleSave} disabled={saving || !formData.name}>
               {saving ? '保存中...' : '保存'}
             </Button>
           </DialogFooter>

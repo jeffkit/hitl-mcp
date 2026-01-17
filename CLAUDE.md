@@ -174,6 +174,7 @@ app.py (API endpoints)
 - `fly-pigeon>=2.0.0` - Tencent fly-pigeon API (internal mirror required)
 - `greenlet>=3.0.0,<3.1.0` - Version locked to avoid compilation failures
 - `mcp>=1.0.0` - Model Context Protocol
+- `alembic>=1.13.0` - Database migration tool (hil-server, forward-service)
 
 **Tencent Mirror Configuration** (.uvrc):
 ```toml
@@ -182,17 +183,41 @@ extra-index-url = ["http://mirrors.tencent.com/repository/pypi/tencent_pypi/simp
 
 ### Database Schema
 
-**chatbots table**:
+**hil-server (2 张表)**:
 ```sql
-id, bot_key (unique), name, description, url_template,
-agent_id, api_key, timeout, access_mode, enabled,
-created_at, updated_at
+-- hil_sessions: HIL 会话表
+id, session_id (unique), short_id, chat_id, chat_type, message,
+project_name, images (JSON), status, created_at, expire_at, updated_at
+
+-- hil_replies: 会话回复表
+id, session_id (foreign key), msg_type, content, image_url,
+from_user (JSON), raw_data (JSON), timestamp
 ```
 
-**chat_access_rules table**:
+**forward-service (7 张表)**:
 ```sql
+-- chatbots: Bot 配置表
+id, bot_key (unique), name, description, url_template,
+agent_id, api_key, timeout, access_mode, enabled, created_at, updated_at
+
+-- chat_access_rules: 访问规则表（黑白名单）
 id, chatbot_id (foreign key), chat_id, rule_type ('whitelist'/'blacklist'),
 remark, created_at
+
+-- user_sessions: 用户会话表
+id, user_id, chat_id, bot_key, session_id, short_id,
+last_message, message_count, is_active, created_at, updated_at
+
+-- forward_logs: 转发日志表
+id, timestamp, chat_id, from_user_id, from_user_name,
+content, msg_type, bot_key, bot_name, target_url, session_id,
+status, response, error, duration_ms
+
+-- processing_sessions: 处理中会话表（并发控制）
+id, session_key (unique), user_id, chat_id, bot_key, message, started_at
+
+-- system_config: 系统配置表（key-value 存储）
+id, key (unique), value (JSON), description, created_at, updated_at
 ```
 
 ### Session Management (HIL Server)
@@ -255,6 +280,7 @@ uv run pytest tests/test_database.py -v
 
 ### Database Migration
 
+**数据迁移 (JSON → Database)**:
 ```bash
 # Dry run (no actual writes)
 python migrate_to_database.py --dry-run
@@ -265,6 +291,83 @@ python migrate_to_database.py
 # Force overwrite existing records
 python migrate_to_database.py --force
 ```
+
+**数据库结构迁移 (Alembic)**:
+
+本项目使用 **Alembic** 管理数据库 schema 版本，支持平滑升级和回滚。
+
+**支持的服务**:
+- `hil-server` - 2 张表 (hil_sessions, hil_replies)
+- `forward-service` - 7 张表 (chatbots, chat_access_rules, user_sessions, forward_logs, processing_sessions, system_config)
+
+**常用命令**:
+```bash
+# 进入服务目录
+cd packages/hil-server       # 或 cd packages/forward-service
+
+# 查看当前数据库版本
+alembic current
+
+# 查看迁移历史
+alembic history
+
+# 生成新的迁移（修改 models.py 后执行）
+alembic revision --autogenerate -m "描述你的变更"
+
+# 执行迁移（升级到最新版本）
+alembic upgrade head
+
+# 回退一个版本
+alembic downgrade -1
+
+# 生成 SQL 供审查（不执行）
+alembic upgrade head --sql > migration.sql
+```
+
+**工作流程**（当需要修改数据库结构时）:
+```bash
+# 1. 修改 models.py（添加/删除表或字段）
+
+# 2. 生成迁移脚本
+alembic revision --autogenerate -m "add new field"
+
+# 3. 检查生成的迁移脚本（alembic/versions/xxxxx_.py）
+#    - 确认 upgrade() 函数符合预期
+#    - 确认 downgrade() 函数可以正确回滚
+
+# 4. 执行迁移
+alembic upgrade head
+
+# 5. 测试应用功能
+
+# 6. 提交代码
+git add alembic/versions/xxxxx_.py
+git commit -m "feat: database migration - add new field"
+```
+
+**生产环境部署**:
+```bash
+# 1. 生成 SQL 供审查
+alembic upgrade head --sql > migration.sql
+
+# 2. 审查 SQL 内容
+
+# 3. 备份数据库
+cp data/service.db data/service.db.backup
+
+# 4. 执行迁移
+alembic upgrade head
+
+# 5. 验证应用功能
+```
+
+**环境变量**:
+- `hil-server`: `HIL_DATABASE_URL` - 默认 `sqlite+aiosqlite:///./data/hil_server.db`
+- `forward-service`: `DATABASE_URL` - 默认 `sqlite+aiosqlite:///./data/forward_service.db`
+
+**详细文档**:
+- `packages/hil-server/ALEMBIC_GUIDE.md`
+- `packages/forward-service/ALEMBIC_GUIDE.md`
 
 ---
 
@@ -360,6 +463,36 @@ curl -X PUT http://localhost:8083/admin/config \
 
 **JSON Mode**: Edit `data/forward_bots.json` (hot reload)
 
+### Adding New Database Models or Fields
+
+当需要修改数据库结构（添加新表、新字段、修改字段类型等）时，**必须使用 Alembic** 进行迁移：
+
+```bash
+# 1. 修改 models.py
+# 例如：添加新字段
+cd packages/hil-server  # 或 packages/forward-service
+
+# 编辑 hil_server/models.py (或 forward_service/models.py)
+# 添加新的 Column 或修改现有字段定义
+
+# 2. 生成迁移脚本
+alembic revision --autogenerate -m "add new field to table"
+
+# 3. 检查生成的迁移脚本
+cat alembic/versions/xxxxx_add_new_field_to_table.py
+# 确认 upgrade() 和 downgrade() 函数正确
+
+# 4. 执行迁移
+alembic upgrade head
+
+# 5. 测试应用功能
+# 6. 提交迁移脚本
+git add alembic/versions/xxxxx_add_new_field_to_table.py
+git commit -m "feat: database migration - add new field"
+```
+
+**⚠️ 重要**: 不要直接修改数据库表结构，必须通过 Alembic 迁移，确保开发/测试/生产环境同步。
+
 ### Migrating from JSON to Database
 
 ```bash
@@ -406,10 +539,14 @@ USE_DATABASE=true python -m <service>.app
 
 ## Related Documentation
 
-- `README.md` - 主项目文档
+- `README.md` - Main project documentation
 - `docs/PRO_DEPLOYMENT.md` - Pro 服务器部署文档 ⭐
-- `docs/DATABASE_SUMMARY.md` - 数据库实现摘要
+- `docs/DATABASE_SUMMARY.md` - Database implementation summary
 - `docs/API.md` - API 接口文档
+- `DATABASE_MIGRATION.md` - Data migration guide (JSON → Database)
+- `DEPLOY_BOT_MANAGEMENT.md` - Bot management deployment
+- `packages/hil-server/ALEMBIC_GUIDE.md` - HIL Server 数据库迁移指南
+- `packages/forward-service/ALEMBIC_GUIDE.md` - Forward Service 数据库迁移指南
 
 ---
 
