@@ -570,7 +570,6 @@ class ConfigDB:
                             api_key=bot.api_key or "",
                             timeout=bot.timeout
                         ),
-                        access_mode=bot.access_mode,
                         enabled=bot.enabled
                     )
 
@@ -587,7 +586,6 @@ class ConfigDB:
                             api_key=default_bot.api_key or "",
                             timeout=default_bot.timeout
                         ),
-                        access_mode=default_bot.access_mode,
                         enabled=default_bot.enabled
                     )
 
