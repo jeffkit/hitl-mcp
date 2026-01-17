@@ -9,6 +9,7 @@
 """
 import pytest
 import pytest_asyncio
+from contextlib import asynccontextmanager
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -475,3 +476,67 @@ class TestSessionManagerInit:
         finally:
             # 恢复原始值
             sm_module._session_manager = original
+
+
+class TestSessionManagerSetSessionProject:
+    """测试 SessionManager.set_session_project 方法"""
+
+    @pytest.fixture
+    def mock_db_manager(self):
+        """创建 mock 数据库管理器"""
+        mock_manager = MagicMock()
+        mock_session = AsyncMock()
+        mock_session.execute = AsyncMock()
+        mock_session.commit = AsyncMock()
+        mock_session.add = MagicMock()
+        mock_session.refresh = AsyncMock()
+        
+        @asynccontextmanager
+        async def get_session():
+            yield mock_session
+        
+        mock_manager.get_session = get_session
+        return mock_manager
+
+    @pytest.fixture
+    def session_manager(self, mock_db_manager):
+        """创建 SessionManager 实例"""
+        return SessionManager(mock_db_manager)
+
+    @pytest.mark.asyncio
+    async def test_set_session_project_existing_session(self, session_manager, mock_db_manager):
+        """测试更新已有会话的项目"""
+        # 模拟更新影响了 1 行
+        mock_result = MagicMock()
+        mock_result.rowcount = 1
+        
+        async with mock_db_manager.get_session() as session:
+            session.execute.return_value = mock_result
+
+        result = await session_manager.set_session_project(
+            user_id="user123",
+            chat_id="chat456",
+            bot_key="bot789",
+            project_id="new_project"
+        )
+
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_set_session_project_no_existing_session(self, session_manager, mock_db_manager):
+        """测试没有活跃会话时创建新会话"""
+        # 模拟更新影响了 0 行（没有现有会话）
+        mock_result = MagicMock()
+        mock_result.rowcount = 0
+        
+        async with mock_db_manager.get_session() as session:
+            session.execute.return_value = mock_result
+
+        result = await session_manager.set_session_project(
+            user_id="user123",
+            chat_id="chat456",
+            bot_key="bot789",
+            project_id="new_project"
+        )
+
+        assert result is True

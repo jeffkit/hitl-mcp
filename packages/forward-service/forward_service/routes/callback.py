@@ -12,7 +12,7 @@ from ..config import config
 from ..sender import send_reply
 from ..session_manager import get_session_manager
 from ..utils import extract_content
-from ..services import forward_to_agent_with_bot
+from ..services import forward_to_agent_with_user_project
 from .admin import add_request_log, update_request_log, RequestLogData
 from .admin_commands import (
     check_is_admin,
@@ -151,7 +151,7 @@ async def handle_callback(
         
         # === 项目命令处理 ===
         if content and is_project_command(content):
-            success, response_msg = await handle_project_command(bot.bot_key, chat_id, content)
+            success, response_msg = await handle_project_command(bot.bot_key, chat_id, content, from_user_id)
             await send_reply(
                 chat_id=chat_id,
                 message=response_msg,
@@ -375,12 +375,16 @@ async def handle_callback(
         )
         
         try:
-            # 转发到 Agent（使用 Bot 配置，带上 session_id）
-            result = await forward_to_agent_with_bot(
+            # 转发到 Agent（优先使用用户项目配置，带上 session_id）
+            # 获取当前会话指定的项目 ID（如果有）
+            current_project_id = active_session.current_project_id if active_session else None
+            result = await forward_to_agent_with_user_project(
                 bot_key=bot.bot_key,
+                chat_id=chat_id,
                 content=content or "",
                 timeout=config.timeout,
-                session_id=current_session_id
+                session_id=current_session_id,
+                current_project_id=current_project_id
             )
         finally:
             # 无论成功失败，都从 pending 列表移除
@@ -419,9 +423,16 @@ async def handle_callback(
             logger.info(f"会话已记录: session={result.session_id[:8]}...")
         
         # 发送结果给用户（使用正确的 bot_key）
+        # 在消息头部添加项目名和会话 ID
+        message_prefix = ""
+        if result.project_id or result.session_id:
+            project_tag = f"[{result.project_name or result.project_id}]" if result.project_id else "[默认]"
+            session_tag = f"#{result.session_id[:8]}" if result.session_id else ""
+            message_prefix = f"{project_tag} {session_tag}\n"
+        
         send_result = await send_reply(
             chat_id=chat_id,
-            message=result.reply,
+            message=message_prefix + result.reply,
             msg_type=result.msg_type,
             bot_key=bot.bot_key
         )
