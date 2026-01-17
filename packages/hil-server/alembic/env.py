@@ -10,11 +10,41 @@
 import os
 import sys
 from logging.config import fileConfig
+from pathlib import Path
 
 from sqlalchemy import engine_from_config, pool
 
 # 将项目根目录添加到 Python 路径
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
+
+# ============== 加载 .env 文件 ==============
+# 优先从当前目录的 .env 读取，然后是项目根目录的 .env
+def load_dotenv_file():
+    """加载 .env 文件到环境变量"""
+    # 尝试的 .env 文件路径
+    env_paths = [
+        project_root / ".env",  # packages/hil-server/.env
+        project_root.parent.parent / ".env",  # hitl/.env (旧的共享配置)
+    ]
+    
+    for env_path in env_paths:
+        if env_path.exists():
+            print(f"[Alembic] 加载 .env 文件: {env_path}")
+            with open(env_path, "r") as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#") and "=" in line:
+                        key, _, value = line.partition("=")
+                        key = key.strip()
+                        value = value.strip()
+                        # 不覆盖已有的环境变量
+                        if key not in os.environ:
+                            os.environ[key] = value
+            return True
+    return False
+
+load_dotenv_file()
 
 from alembic import context
 from hil_server.models import Base
