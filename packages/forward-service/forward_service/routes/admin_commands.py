@@ -5,7 +5,7 @@
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -60,7 +60,7 @@ async def get_system_status() -> str:
             log_repo = get_forward_log_repository(session)
             
             # 获取今日统计
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             
             # 今日请求数
             today_stmt = (
@@ -136,6 +136,63 @@ async def get_admin_help() -> str:
 • /c <id> - 切换会话"""
 
 
+def get_admin_full_help() -> str:
+    """生成管理员完整帮助信息（同步函数）"""
+    current_time = datetime.now().strftime("%H:%M:%S")
+    return f"""📖 **管理员帮助**
+
+📦 **项目管理**
+  `/ap <ID> <URL> [--api-key KEY] [--default]` - 添加项目
+  `/lp` - 查看我的项目
+  `/u <ID>` - 切换项目
+  `/sd <ID>` - 设为默认
+  `/rp <ID>` - 删除项目
+  `/cp` - 当前项目
+
+💬 **会话管理**
+  `/s` - 列出会话
+  `/r` - 重置会话
+  `/c <ID>` - 切换会话
+
+🔧 **管理员命令**
+  `/ping` - 健康检查
+  `/status` - 系统状态
+  `/bots` - 列出所有 Bot
+  `/bot <name>` - 查看详情
+  `/bot <name> url <URL>` - 修改 URL
+  `/pending` - 处理中的请求
+  `/recent` - 最近日志
+  `/errors` - 错误日志
+  `/health` - Agent 可达性
+
+📖 文档: https://agentstudio.woa.com/docs/qywx-bot
+⏱️ {current_time}"""
+
+
+def get_regular_user_help() -> str:
+    """生成普通用户帮助信息（同步函数）"""
+    current_time = datetime.now().strftime("%H:%M:%S")
+    return f"""📖 **用户帮助**
+
+📦 **项目管理**
+  `/ap <ID> <URL> [--api-key KEY] [--default]` - 添加项目
+  `/lp` - 查看我的项目
+  `/u <ID>` - 切换项目
+  `/sd <ID>` - 设为默认
+  `/rp <ID>` - 删除项目
+  `/cp` - 当前项目
+
+💬 **会话管理**
+  `/s` - 列出会话
+  `/r` - 重置会话
+  `/c <ID>` - 切换会话
+
+💡 **如何获取 URL 和 API Key**
+  请参考文档：https://agentstudio.woa.com/docs/qywx-bot
+
+⏱️ {current_time}"""
+
+
 # ============== Bot 管理命令 ==============
 
 async def get_bots_list() -> str:
@@ -167,7 +224,7 @@ async def get_bot_detail(bot_name: str) -> str:
     try:
         db_manager = get_db_manager()
         async with db_manager.get_session() as session:
-            today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
             
             # 今日请求数
             today_stmt = (
@@ -287,91 +344,10 @@ async def update_bot_config(bot_name: str, field: str, value: str) -> str:
 # 存储正在处理的请求 {request_id: {bot_name, user, message, start_time}}
 _pending_requests: dict = {}
 
-# ============== 会话处理状态管理（数据库持久化，跨进程共享）==============
 
 def get_session_key(user_id: str, chat_id: str, bot_key: str) -> str:
-    """生成会话的唯一标识"""
+    """生成会话唯一标识"""
     return f"{user_id}:{chat_id}:{bot_key}"
-
-
-async def is_session_processing(user_id: str, chat_id: str, bot_key: str) -> dict | None:
-    """
-    检查会话是否正在处理中（数据库查询，跨进程共享）
-    
-    Returns:
-        如果正在处理，返回会话信息 {message, start_time, elapsed_seconds}
-        否则返回 None
-    """
-    from ..database import get_session
-    from ..models import ProcessingSession
-    from sqlalchemy import select
-    
-    session_key = get_session_key(user_id, chat_id, bot_key)
-    
-    async for db in get_session():
-        result = await db.execute(
-            select(ProcessingSession).where(ProcessingSession.session_key == session_key)
-        )
-        session = result.scalar_one_or_none()
-        
-        if session:
-            elapsed = (datetime.now() - session.started_at).total_seconds()
-            return {
-                "message": session.message,
-                "start_time": session.started_at,
-                "elapsed_seconds": elapsed
-            }
-    return None
-
-
-async def add_processing_session(user_id: str, chat_id: str, bot_key: str, message: str) -> bool:
-    """
-    标记会话开始处理（数据库写入，跨进程共享）
-    
-    Returns:
-        True 如果成功添加，False 如果已经存在（并发冲突）
-    """
-    from ..database import get_session
-    from ..models import ProcessingSession
-    from sqlalchemy.exc import IntegrityError
-    
-    session_key = get_session_key(user_id, chat_id, bot_key)
-    truncated_message = message[:50] + "..." if len(message) > 50 else message
-    
-    async for db in get_session():
-        try:
-            new_session = ProcessingSession(
-                session_key=session_key,
-                user_id=user_id,
-                chat_id=chat_id,
-                bot_key=bot_key,
-                message=truncated_message,
-                started_at=datetime.now()
-            )
-            db.add(new_session)
-            await db.commit()
-            return True
-        except IntegrityError:
-            # 已经存在，说明有并发冲突
-            await db.rollback()
-            return False
-    return False
-
-
-async def remove_processing_session(user_id: str, chat_id: str, bot_key: str) -> None:
-    """标记会话处理完成（从数据库删除）"""
-    from ..database import get_session
-    from ..models import ProcessingSession
-    from sqlalchemy import delete
-    
-    session_key = get_session_key(user_id, chat_id, bot_key)
-    
-    async for db in get_session():
-        await db.execute(
-            delete(ProcessingSession).where(ProcessingSession.session_key == session_key)
-        )
-        await db.commit()
-        break
 
 
 def add_pending_request(request_id: str, bot_name: str, user: str, message: str) -> None:
@@ -407,60 +383,19 @@ def get_pending_requests() -> list[dict]:
 
 
 async def get_pending_list() -> str:
-    """获取正在处理的请求（从数据库读取，跨进程共享）"""
-    from ..database import get_session
-    from ..models import ProcessingSession
-    from sqlalchemy import select
+    """获取正在处理的请求"""
+    pending = get_pending_requests()
     
-    pending_db = []
-    now = datetime.now()
-    
-    # 从数据库读取正在处理的会话（跨进程共享）
-    async for db in get_session():
-        result = await db.execute(
-            select(ProcessingSession).order_by(ProcessingSession.started_at.asc())
-        )
-        sessions = result.scalars().all()
-        
-        for s in sessions:
-            elapsed = (now - s.started_at).total_seconds()
-            pending_db.append({
-                "user": s.user_id,
-                "message": s.message,
-                "bot_key": s.bot_key[:8] + "...",
-                "elapsed_seconds": elapsed,
-                "elapsed_str": f"{int(elapsed // 60)}分{int(elapsed % 60)}秒"
-            })
-        break
-    
-    # 合并内存中的 pending 请求（兼容旧逻辑）
-    pending_mem = get_pending_requests()
-    
-    if not pending_db and not pending_mem:
+    if not pending:
         return "✅ 当前没有正在处理的请求"
     
-    lines = []
-    
-    if pending_db:
-        lines.append(f"⏳ 正在处理的会话 ({len(pending_db)} 个)")
-        lines.append("(数据库，跨进程共享)\n")
-        for i, req in enumerate(pending_db, 1):
-            lines.append(f"{i}. 用户: {req['user']}")
-            lines.append(f"   消息: {req['message']}")
-            lines.append(f"   等待: {req['elapsed_str']}")
-            lines.append("")
-    
-    if pending_mem:
-        if pending_db:
-            lines.append("---")
-        lines.append(f"⏳ 内存中的请求 ({len(pending_mem)} 个)")
-        lines.append("(单进程，仅调试用)\n")
-        for i, req in enumerate(pending_mem, 1):
-            lines.append(f"{i}. {req['bot_name']}")
-            lines.append(f"   用户: {req['user']}")
-            lines.append(f"   消息: {req['message']}")
-            lines.append(f"   等待: {req['elapsed_str']}")
-            lines.append("")
+    lines = [f"⏳ 正在处理的请求 ({len(pending)} 个)\n"]
+    for i, req in enumerate(pending, 1):
+        lines.append(f"{i}. {req['bot_name']}")
+        lines.append(f"   用户: {req['user']}")
+        lines.append(f"   消息: {req['message']}")
+        lines.append(f"   等待: {req['elapsed_str']}")
+        lines.append("")
     
     return "\n".join(lines)
 
