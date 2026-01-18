@@ -2,10 +2,16 @@
 消息发送器
 
 Direct 模式下直接调用 fly-pigeon
+
+功能：
+- 消息格式化：添加会话标识头
+- 消息分拆：当消息超过 4K 时自动分拆
+- 每条分拆的消息都保留会话标识，方便用户回复
 """
 import logging
 
 from .config import config
+from .message_splitter import split_and_format_message, needs_split
 
 logger = logging.getLogger(__name__)
 
@@ -101,21 +107,49 @@ async def send_message_direct(
     """
     直接发送消息（Direct 模式）
     
+    当消息超过 4K 时会自动分拆成多条消息，每条都带有会话标识头。
+    
     Args:
+        short_id: 会话短 ID（用于消息头部标识）
+        message: 消息内容
+        chat_id: 目标会话 ID
+        project_name: 项目名称（显示在消息头部）
+        images: 图片列表（base64 或 URL）
         wait_reply: 是否等待回复（影响消息格式）
     
     Returns:
-        { success: bool, error?: str }
+        { success: bool, error?: str, parts_sent?: int }
     """
     try:
-        # 格式化消息（添加头部和回复提示）
-        formatted_message = format_message_with_header(message, short_id, project_name, wait_reply)
-        
-        # 发送文本消息
-        send_to_wecom(
-            message=formatted_message,
-            chat_id=chat_id
-        )
+        # 检查是否需要分拆
+        if needs_split(message, short_id, project_name, wait_reply):
+            # 分拆消息
+            split_messages = split_and_format_message(
+                message=message,
+                short_id=short_id,
+                project_name=project_name,
+                wait_reply=wait_reply
+            )
+            
+            logger.info(f"消息过长，分拆为 {len(split_messages)} 条")
+            
+            # 逐条发送
+            for split_msg in split_messages:
+                send_to_wecom(
+                    message=split_msg.content,
+                    chat_id=chat_id
+                )
+            
+            parts_sent = len(split_messages)
+        else:
+            # 不需要分拆，使用原有逻辑
+            formatted_message = format_message_with_header(message, short_id, project_name, wait_reply)
+            
+            send_to_wecom(
+                message=formatted_message,
+                chat_id=chat_id
+            )
+            parts_sent = 1
         
         # 发送图片
         if images:
@@ -130,7 +164,7 @@ async def send_message_direct(
                 except Exception as e:
                     logger.warning(f"发送图片失败: {image_url}, {e}")
         
-        return {"success": True}
+        return {"success": True, "parts_sent": parts_sent}
         
     except Exception as e:
         logger.error(f"发送消息失败: {e}", exc_info=True)
