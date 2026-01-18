@@ -1,0 +1,110 @@
+"""
+隧道服务集成模块
+
+将 tunely TunnelServer 集成到 Forward Service 中，支持：
+- 通过 WebSocket 建立隧道连接
+- 通过隧道转发 HTTP 请求到内网 Agent
+- 企微命令管理隧道
+"""
+import logging
+from typing import Optional
+
+from tunely import TunnelServer, TunnelServerConfig
+
+logger = logging.getLogger(__name__)
+
+# 全局隧道服务器实例
+tunnel_server: TunnelServer = TunnelServer()
+
+# 隧道域名后缀（用于识别隧道请求）
+TUNNEL_DOMAIN_SUFFIX = ".tunnel"
+
+
+async def init_tunnel_server(database_url: str) -> None:
+    """
+    初始化隧道服务器
+    
+    Args:
+        database_url: 数据库连接 URL（与 Forward Service 共用）
+    """
+    global tunnel_server
+    
+    config = TunnelServerConfig(
+        database_url=database_url,
+        ws_path="/ws/tunnel",  # WebSocket 端点路径
+    )
+    tunnel_server = TunnelServer(config=config)
+    await tunnel_server.initialize()
+    
+    logger.info(f"隧道服务器已初始化: ws_path={config.ws_path}")
+
+
+def get_tunnel_server() -> TunnelServer:
+    """获取隧道服务器实例"""
+    return tunnel_server
+
+
+def is_tunnel_url(url: str) -> bool:
+    """
+    检查 URL 是否是隧道地址
+    
+    Args:
+        url: 目标 URL，例如 http://my-agent.tunnel/api/chat
+        
+    Returns:
+        True 如果是隧道地址
+    """
+    from urllib.parse import urlparse
+    
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc.split(":")[0]  # 去掉端口
+        return host.endswith(TUNNEL_DOMAIN_SUFFIX)
+    except Exception:
+        return False
+
+
+def extract_tunnel_domain(url: str) -> Optional[str]:
+    """
+    从 URL 中提取隧道域名
+    
+    Args:
+        url: 目标 URL，例如 http://my-agent.tunnel/api/chat
+        
+    Returns:
+        隧道域名，例如 "my-agent"，如果不是隧道 URL 则返回 None
+    """
+    from urllib.parse import urlparse
+    
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc.split(":")[0]
+        
+        if host.endswith(TUNNEL_DOMAIN_SUFFIX):
+            # 去掉 .tunnel 后缀
+            return host[:-len(TUNNEL_DOMAIN_SUFFIX)]
+        return None
+    except Exception:
+        return None
+
+
+def extract_tunnel_path(url: str) -> str:
+    """
+    从 URL 中提取路径
+    
+    Args:
+        url: 目标 URL，例如 http://my-agent.tunnel/api/chat
+        
+    Returns:
+        路径，例如 "/api/chat"
+    """
+    from urllib.parse import urlparse
+    
+    try:
+        parsed = urlparse(url)
+        path = parsed.path or "/"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+        return path
+    except Exception:
+        return "/"
