@@ -140,6 +140,7 @@ async def send_message(request: SendMessageRequest):
                 chat_id=request.chat_id,
                 project_name=request.project_name,
                 images=request.images,
+                chat_type=request.chat_type,
                 wait_reply=request.wait_reply,
             )
         else:
@@ -269,6 +270,7 @@ async def handle_callback(
                     project_name=None,
                     images=None,
                     wait_reply=False,
+                    chat_type=chat_type,
                 )
                 return {"errcode": 0, "errmsg": "slash command handled"}
         
@@ -288,7 +290,7 @@ async def handle_callback(
                 logger.warning(f"多个等待中的会话，需要用户引用回复")
                 # Direct 模式：发送多会话提示
                 sessions = result.get("waiting_sessions", [])
-                await _send_multiple_sessions_hint_direct(chat_id, sessions, from_user)
+                await _send_multiple_sessions_hint_direct(chat_id, sessions, from_user, chat_type)
             else:
                 logger.warning(f"回调处理: {error}")
         
@@ -335,10 +337,11 @@ async def _send_idle_hint_direct(chat_id: str, chat_type: str, from_user: dict, 
         project_name=None,
         images=None,
         wait_reply=False,
+        chat_type=chat_type,
     )
 
 
-async def _send_multiple_sessions_hint_direct(chat_id: str, sessions: list, from_user: dict):
+async def _send_multiple_sessions_hint_direct(chat_id: str, sessions: list, from_user: dict, chat_type: str = "group"):
     """Direct 模式：发送多会话提示消息"""
     user_name = from_user.get("name", "用户")
     
@@ -366,6 +369,7 @@ async def _send_multiple_sessions_hint_direct(chat_id: str, sessions: list, from
         project_name=None,
         images=None,
         wait_reply=False,
+        chat_type=chat_type,
     )
 
 

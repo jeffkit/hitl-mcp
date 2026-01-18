@@ -19,12 +19,14 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from forward_service.models import Base, Chatbot, ChatAccessRule
+from forward_service.models import Base, Chatbot, ChatAccessRule, ChatInfo
 from forward_service.repository import (
     ChatbotRepository,
     ChatAccessRuleRepository,
+    ChatInfoRepository,
     get_chatbot_repository,
-    get_access_rule_repository
+    get_access_rule_repository,
+    get_chat_info_repository
 )
 
 
@@ -535,6 +537,136 @@ class TestChatAccessRuleRepository:
         # 验证
         blacklist = await rule_repo.get_blacklist(bot.id)
         assert set(blacklist) == {"bad_user1", "bad_user2"}
+
+
+# ============== ChatInfoRepository 测试 ==============
+
+class TestChatInfoRepository:
+    """ChatInfoRepository 测试类"""
+
+    @pytest.mark.asyncio
+    async def test_record_chat_new(self, test_session: AsyncSession):
+        """测试首次记录 Chat 信息"""
+        repo = get_chat_info_repository(test_session)
+
+        info = await repo.record_chat(
+            chat_id="wrkSFfCgAAeOoN9UbWphOy5FXWKEiibA",
+            chat_type="group",
+            chat_name="测试群",
+            bot_key="test_bot_key"
+        )
+
+        assert info.id is not None
+        assert info.chat_id == "wrkSFfCgAAeOoN9UbWphOy5FXWKEiibA"
+        assert info.chat_type == "group"
+        assert info.chat_name == "测试群"
+        assert info.first_bot_key == "test_bot_key"
+        assert info.message_count == 1
+        assert info.is_group is True
+        assert info.is_single is False
+
+    @pytest.mark.asyncio
+    async def test_record_chat_update(self, test_session: AsyncSession):
+        """测试更新已存在的 Chat 信息"""
+        repo = get_chat_info_repository(test_session)
+
+        # 首次记录
+        await repo.record_chat(
+            chat_id="chat1",
+            chat_type="single",
+            bot_key="bot1"
+        )
+
+        # 再次记录（更新）
+        info = await repo.record_chat(
+            chat_id="chat1",
+            chat_type="single",
+            bot_key="bot2"
+        )
+
+        # 验证 message_count 增加
+        assert info.message_count == 2
+        # bot_key 不会更新（只记录首次）
+        assert info.first_bot_key == "bot1"
+
+    @pytest.mark.asyncio
+    async def test_get_chat_type(self, test_session: AsyncSession):
+        """测试获取 chat_type"""
+        repo = get_chat_info_repository(test_session)
+
+        # 记录一个群聊
+        await repo.record_chat(chat_id="group1", chat_type="group")
+        # 记录一个私聊
+        await repo.record_chat(chat_id="single1", chat_type="single")
+
+        # 测试获取
+        assert await repo.get_chat_type("group1") == "group"
+        assert await repo.get_chat_type("single1") == "single"
+        assert await repo.get_chat_type("unknown") is None
+
+    @pytest.mark.asyncio
+    async def test_is_group(self, test_session: AsyncSession):
+        """测试 is_group 方法"""
+        repo = get_chat_info_repository(test_session)
+
+        await repo.record_chat(chat_id="g1", chat_type="group")
+        await repo.record_chat(chat_id="s1", chat_type="single")
+
+        assert await repo.is_group("g1") is True
+        assert await repo.is_group("s1") is False
+        assert await repo.is_group("unknown") is None
+
+    @pytest.mark.asyncio
+    async def test_get_all(self, test_session: AsyncSession):
+        """测试获取所有 Chat 信息"""
+        repo = get_chat_info_repository(test_session)
+
+        # 创建测试数据
+        await repo.record_chat(chat_id="g1", chat_type="group")
+        await repo.record_chat(chat_id="g2", chat_type="group")
+        await repo.record_chat(chat_id="s1", chat_type="single")
+
+        # 获取所有
+        all_chats = await repo.get_all()
+        assert len(all_chats) == 3
+
+        # 只获取群聊
+        groups = await repo.get_groups()
+        assert len(groups) == 2
+
+        # 只获取私聊
+        singles = await repo.get_singles()
+        assert len(singles) == 1
+
+    @pytest.mark.asyncio
+    async def test_count(self, test_session: AsyncSession):
+        """测试统计数量"""
+        repo = get_chat_info_repository(test_session)
+
+        await repo.record_chat(chat_id="g1", chat_type="group")
+        await repo.record_chat(chat_id="g2", chat_type="group")
+        await repo.record_chat(chat_id="s1", chat_type="single")
+
+        assert await repo.count() == 3
+        assert await repo.count(chat_type="group") == 2
+        assert await repo.count(chat_type="single") == 1
+
+    @pytest.mark.asyncio
+    async def test_delete(self, test_session: AsyncSession):
+        """测试删除 Chat 信息"""
+        repo = get_chat_info_repository(test_session)
+
+        await repo.record_chat(chat_id="test", chat_type="group")
+        assert await repo.get_chat_type("test") == "group"
+
+        # 删除
+        result = await repo.delete("test")
+        assert result is True
+        assert await repo.get_chat_type("test") is None
+
+        # 删除不存在的
+        result = await repo.delete("nonexistent")
+        assert result is False
 
 
 if __name__ == "__main__":

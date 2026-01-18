@@ -13,6 +13,8 @@ from ..sender import send_reply
 from ..session_manager import get_session_manager
 from ..utils import extract_content
 from ..services import forward_to_agent_with_user_project
+from ..database import get_db_manager
+from ..repository import get_chat_info_repository
 from .admin import add_request_log, update_request_log, RequestLogData
 from .admin_commands import (
     check_is_admin,
@@ -75,7 +77,7 @@ async def handle_callback(
         data = await request.json()
         
         chat_id = data.get("chatid", "")
-        _chat_type = data.get("chattype", "group")  # 保留备用，暂未使用
+        chat_type = data.get("chattype", "group")  # group 或 single
         msg_type = data.get("msgtype", "")
         from_user = data.get("from", {})
         from_user_name = from_user.get("name", "unknown")
@@ -83,7 +85,7 @@ async def handle_callback(
         from_user_alias = from_user.get("alias", "")  # 用户别名
         webhook_url = data.get("webhook_url", "")
         
-        logger.info(f"收到企微回调: chat_id={chat_id}, msg_type={msg_type}, from={from_user_name}")
+        logger.info(f"收到企微回调: chat_id={chat_id}, chat_type={chat_type}, msg_type={msg_type}, from={from_user_name}")
         
         # 忽略某些事件类型
         if msg_type in ("event", "enter_chat"):
@@ -93,6 +95,22 @@ async def handle_callback(
         # === 多 Bot 支持：从 webhook_url 提取 bot_key ===
         bot_key = config.extract_bot_key_from_webhook_url(webhook_url)
         logger.info(f"提取的 bot_key: {bot_key}")
+        
+        # === 记录 Chat 信息（chat_id -> chat_type 映射）===
+        try:
+            db_manager = get_db_manager()
+            async with db_manager.get_session() as session:
+                chat_info_repo = get_chat_info_repository(session)
+                await chat_info_repo.record_chat(
+                    chat_id=chat_id,
+                    chat_type=chat_type,
+                    chat_name=None,  # 企微回调暂不提供群名
+                    bot_key=bot_key
+                )
+                await session.commit()
+        except Exception as e:
+            # 记录失败不影响主流程
+            logger.warning(f"记录 chat_type 失败: {e}")
         
         # 获取 Bot 配置（如果找不到会回退到 default_bot）
         bot = config.get_bot_or_default(bot_key)
