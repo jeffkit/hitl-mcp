@@ -137,7 +137,7 @@ class TestGetForwardConfigForUser:
         mock_bot = MagicMock()
         mock_bot.name = "Test Bot"
         mock_bot.forward_config = MagicMock()
-        mock_bot.forward_config.url_template = "https://api.bot.com/webhook"
+        mock_bot.forward_config.target_url = "https://api.bot.com/webhook"
         mock_bot.forward_config.api_key = "sk-bot"
         mock_bot.forward_config.timeout = 30
 
