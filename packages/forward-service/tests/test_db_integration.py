@@ -59,7 +59,7 @@ async def test_database_config_initialization(mock_db_manager):
     bot = config.bots.get("test_bot_1")
     assert bot is not None
     assert bot.name == "测试 Bot 1"
-    assert bot.forward_config.url_template == "https://api1.com"
+    assert bot.forward_config.target_url == "https://api1.com"
 
     # 测试访问控制 (check_access 是同步方法)
     allowed, reason = config.check_access(bot, "user1")
@@ -88,8 +88,7 @@ async def test_config_dict_serialization():
         name="测试 Bot",
         description="测试描述",
         forward_config=ForwardConfig(
-            url_template="https://api.example.com/{agent_id}",
-            agent_id="agent123",
+            target_url="https://api.example.com/agent123",
             api_key="key456",
             timeout=30
         ),
@@ -107,7 +106,7 @@ async def test_config_dict_serialization():
     # 验证序列化结果
     assert d["bot_key"] == "test_key"
     assert d["name"] == "测试 Bot"
-    assert d["forward_config"]["url_template"] == "https://api.example.com/{agent_id}"
+    assert d["forward_config"]["target_url"] == "https://api.example.com/agent123"
     assert d["access_control"]["mode"] == "whitelist"
     assert d["access_control"]["whitelist"] == ["user1", "user2"]
     assert d["enabled"] == True

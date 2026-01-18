@@ -3,11 +3,17 @@ pytest 配置文件
 """
 import sys
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from contextlib import asynccontextmanager
+
+# Mock pigeon 模块以避免导入错误（pigeon 需要 SOCKS 代理支持）
+if 'pigeon' not in sys.modules:
+    sys.modules['pigeon'] = MagicMock()
+    sys.modules['pigeon.Bot'] = MagicMock()
 
 # 将包目录添加到 Python 路径
 pkg_root = Path(__file__).parent.parent
@@ -103,3 +109,20 @@ async def mock_db_manager(test_db_engine):
     
     # 恢复原始的 db_manager
     db_module.db_manager = original_db_manager
+
+
+@pytest.fixture(autouse=True)
+def mock_agent_connectivity():
+    """
+    Mock _test_agent_connectivity 函数
+    
+    在测试中跳过实际的 HTTP 连接测试
+    """
+    from unittest.mock import patch, AsyncMock
+    
+    with patch(
+        'forward_service.routes.project_commands._test_agent_connectivity',
+        new_callable=AsyncMock,
+        return_value={"success": True, "latency": 50, "response": {"status": "ok"}}
+    ):
+        yield

@@ -63,7 +63,7 @@ def create_mock_bot(
 ) -> BotConfig:
     """创建测试用的 Bot 配置"""
     forward_config = ForwardConfig(
-        url_template=url,
+        target_url=url,
         api_key=api_key,
         timeout=60
     )
@@ -122,7 +122,7 @@ class TestHandleCallbackAuth:
         with patch('forward_service.routes.callback.config') as mock_config, \
              patch('forward_service.routes.callback.send_reply') as mock_send, \
              patch('forward_service.routes.callback.extract_content') as mock_extract, \
-             patch('forward_service.routes.callback.forward_to_agent_with_bot') as mock_forward, \
+             patch('forward_service.routes.callback.forward_to_agent_with_user_project') as mock_forward, \
              patch('forward_service.routes.callback.add_pending_request') as mock_add_pending, \
              patch('forward_service.routes.callback.remove_pending_request') as mock_remove_pending, \
              patch('forward_service.routes.callback.get_session_manager', return_value=mock_session_mgr):
@@ -329,7 +329,7 @@ class TestHandleCallbackForward:
         with patch('forward_service.routes.callback.config') as mock_config, \
              patch('forward_service.routes.callback.send_reply') as mock_send, \
              patch('forward_service.routes.callback.extract_content') as mock_extract, \
-             patch('forward_service.routes.callback.forward_to_agent_with_bot') as mock_forward, \
+             patch('forward_service.routes.callback.forward_to_agent_with_user_project') as mock_forward, \
              patch('forward_service.routes.callback.add_request_log') as mock_add_log, \
              patch('forward_service.routes.callback.update_request_log') as mock_update_log, \
              patch('forward_service.routes.callback.add_pending_request') as mock_add_pending, \
@@ -365,7 +365,7 @@ class TestHandleCallbackForward:
         with patch('forward_service.routes.callback.config') as mock_config, \
              patch('forward_service.routes.callback.send_reply') as mock_send, \
              patch('forward_service.routes.callback.extract_content') as mock_extract, \
-             patch('forward_service.routes.callback.forward_to_agent_with_bot') as mock_forward, \
+             patch('forward_service.routes.callback.forward_to_agent_with_user_project') as mock_forward, \
              patch('forward_service.routes.callback.add_request_log') as mock_add_log, \
              patch('forward_service.routes.callback.update_request_log') as mock_update_log, \
              patch('forward_service.routes.callback.add_pending_request') as mock_add_pending, \
