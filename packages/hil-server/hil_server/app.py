@@ -68,6 +68,12 @@ async def lifespan(app: FastAPI):
     # 启动心跳任务（Relay 模式需要）
     task = asyncio.create_task(heartbeat_task())
     
+    # 启动文件清理任务（7 天后清理过期文件）
+    from .file_storage import get_file_storage
+    file_storage = get_file_storage()
+    await file_storage.start_cleanup_task(interval_hours=24)
+    logger.info("  [文件清理] 已启动定期清理任务（每 24 小时）")
+    
     yield
     
     # 停止心跳任务
@@ -76,6 +82,9 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
+    
+    # 停止文件清理任务
+    file_storage.stop_cleanup_task()
     
     # 关闭数据库连接
     if USE_DATABASE:

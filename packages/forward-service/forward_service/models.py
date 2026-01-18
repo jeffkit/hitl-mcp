@@ -850,6 +850,111 @@ class ProcessingSession(Base):
         }
 
 
+# ============== Chat 信息模型 ==============
+
+class ChatInfo(Base):
+    """
+    Chat 信息表
+    
+    存储 chat_id 和 chat_type 的对应关系：
+    - 首次收到某 chat_id 的回调时自动记录
+    - 用于在发送消息时判断目标类型（群聊/私聊）
+    - 不同 chat_type 有不同的消息条数限制
+    """
+    __tablename__ = "chat_info"
+    
+    # 主键
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    
+    # Chat ID (唯一)
+    chat_id: Mapped[str] = mapped_column(
+        String(200),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="Chat ID (群ID或私聊ID)"
+    )
+    
+    # Chat 类型
+    chat_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="group",
+        comment="Chat 类型: group (群聊) / single (私聊)"
+    )
+    
+    # Chat 名称（可选，用于显示）
+    chat_name: Mapped[Optional[str]] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Chat 名称（群名/用户名）"
+    )
+    
+    # 关联的 Bot Key（首次收到消息的 Bot）
+    first_bot_key: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="首次收到消息的 Bot Key"
+    )
+    
+    # 消息计数
+    message_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        comment="收到的消息总数"
+    )
+    
+    # 时间戳
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        comment="首次收到消息的时间"
+    )
+    
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        comment="最后收到消息的时间"
+    )
+    
+    # 索引
+    __table_args__ = (
+        Index("idx_chat_info_chat_id", "chat_id"),
+        Index("idx_chat_info_chat_type", "chat_type"),
+        Index("idx_chat_info_last_seen", "last_seen_at"),
+    )
+    
+    def __repr__(self) -> str:
+        return f"<ChatInfo(chat_id={self.chat_id[:20]}..., type={self.chat_type})>"
+    
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "chat_id": self.chat_id,
+            "chat_type": self.chat_type,
+            "chat_name": self.chat_name,
+            "first_bot_key": self.first_bot_key,
+            "message_count": self.message_count,
+            "first_seen_at": self.first_seen_at.isoformat() if self.first_seen_at else None,
+            "last_seen_at": self.last_seen_at.isoformat() if self.last_seen_at else None,
+        }
+    
+    @property
+    def is_group(self) -> bool:
+        """是否为群聊"""
+        return self.chat_type == "group"
+    
+    @property
+    def is_single(self) -> bool:
+        """是否为私聊"""
+        return self.chat_type == "single"
+
+
 # ============== 系统配置模型 ==============
 
 class SystemConfig(Base):

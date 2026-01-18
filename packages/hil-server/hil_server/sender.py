@@ -5,13 +5,20 @@ Direct 模式下直接调用 fly-pigeon
 
 功能：
 - 消息格式化：添加会话标识头
-- 消息分拆：当消息超过 4K 时自动分拆
+- 消息分拆：当消息超过 4K 时自动分拆（群聊）
+- 单聊截断：超过 4K 时截断消息并生成文件链接
 - 每条分拆的消息都保留会话标识，方便用户回复
 """
 import logging
 
 from .config import config
-from .message_splitter import split_and_format_message, needs_split
+from .message_splitter import (
+    split_and_format_message, 
+    needs_split, 
+    get_string_bytes,
+    MAX_MESSAGE_BYTES
+)
+from .file_storage import get_file_storage
 
 logger = logging.getLogger(__name__)
 
@@ -103,11 +110,14 @@ async def send_message_direct(
     project_name: str | None = None,
     images: list[str] | None = None,
     wait_reply: bool = True,
+    chat_type: str = "group",
 ) -> dict:
     """
     直接发送消息（Direct 模式）
     
-    当消息超过 4K 时会自动分拆成多条消息，每条都带有会话标识头。
+    根据 chat_type 采用不同的处理策略：
+    - 群聊 (group)：超过 4K 时分拆成多条消息
+    - 单聊 (single)：超过 4K 时截断并生成文件链接
     
     Args:
         short_id: 会话短 ID（用于消息头部标识）
@@ -116,31 +126,32 @@ async def send_message_direct(
         project_name: 项目名称（显示在消息头部）
         images: 图片列表（base64 或 URL）
         wait_reply: 是否等待回复（影响消息格式）
+        chat_type: 会话类型 (group/single)
     
     Returns:
-        { success: bool, error?: str, parts_sent?: int }
+        { success: bool, error?: str, parts_sent?: int, file_url?: str }
     """
     try:
-        # 检查是否需要分拆
+        # 检查是否需要特殊处理（消息超过 4K）
         if needs_split(message, short_id, project_name, wait_reply):
-            # 分拆消息
-            split_messages = split_and_format_message(
-                message=message,
-                short_id=short_id,
-                project_name=project_name,
-                wait_reply=wait_reply
-            )
-            
-            logger.info(f"消息过长，分拆为 {len(split_messages)} 条")
-            
-            # 逐条发送
-            for split_msg in split_messages:
-                send_to_wecom(
-                    message=split_msg.content,
-                    chat_id=chat_id
+            if chat_type == "single":
+                # 单聊：截断消息并生成文件链接
+                result = await _send_single_chat_with_file(
+                    message=message,
+                    short_id=short_id,
+                    project_name=project_name,
+                    chat_id=chat_id,
+                    wait_reply=wait_reply
                 )
-            
-            parts_sent = len(split_messages)
+            else:
+                # 群聊：分拆成多条消息
+                result = await _send_group_chat_split(
+                    message=message,
+                    short_id=short_id,
+                    project_name=project_name,
+                    chat_id=chat_id,
+                    wait_reply=wait_reply
+                )
         else:
             # 不需要分拆，使用原有逻辑
             formatted_message = format_message_with_header(message, short_id, project_name, wait_reply)
@@ -149,7 +160,7 @@ async def send_message_direct(
                 message=formatted_message,
                 chat_id=chat_id
             )
-            parts_sent = 1
+            result = {"success": True, "parts_sent": 1}
         
         # 发送图片
         if images:
@@ -164,8 +175,151 @@ async def send_message_direct(
                 except Exception as e:
                     logger.warning(f"发送图片失败: {image_url}, {e}")
         
-        return {"success": True, "parts_sent": parts_sent}
+        return result
         
     except Exception as e:
         logger.error(f"发送消息失败: {e}", exc_info=True)
         return {"success": False, "error": str(e)}
+
+
+async def _send_group_chat_split(
+    message: str,
+    short_id: str,
+    project_name: str | None,
+    chat_id: str,
+    wait_reply: bool
+) -> dict:
+    """
+    群聊处理：分拆消息成多条发送
+    """
+    split_messages = split_and_format_message(
+        message=message,
+        short_id=short_id,
+        project_name=project_name,
+        wait_reply=wait_reply
+    )
+    
+    logger.info(f"[群聊] 消息过长，分拆为 {len(split_messages)} 条")
+    
+    # 逐条发送
+    for split_msg in split_messages:
+        send_to_wecom(
+            message=split_msg.content,
+            chat_id=chat_id
+        )
+    
+    return {"success": True, "parts_sent": len(split_messages)}
+
+
+async def _send_single_chat_with_file(
+    message: str,
+    short_id: str,
+    project_name: str | None,
+    chat_id: str,
+    wait_reply: bool
+) -> dict:
+    """
+    单聊处理：截断消息并生成文件链接
+    
+    流程：
+    1. 保存完整消息为 .md 文件
+    2. 计算可用空间
+    3. 截断消息内容
+    4. 组装：[#short_id 项目名] + 截断内容 + 文件链接
+    5. 确保总长度 ≤ 4K
+    """
+    # 1. 保存完整消息为文件
+    file_storage = get_file_storage()
+    filename, file_url = file_storage.save_message(
+        content=message,
+        short_id=short_id,
+        project_name=project_name or ""
+    )
+    
+    logger.info(f"[单聊] 消息过长，已保存为文件: {filename}")
+    
+    # 2. 计算各部分的字节数
+    # 构建头部
+    if short_id:
+        if project_name:
+            header = f"[#{short_id} {project_name}]\n"
+        else:
+            header = f"[#{short_id}]\n"
+    else:
+        header = ""
+    
+    # 构建文件链接部分
+    link_suffix = f"\n\n---\n📎 **完整内容**: {file_url}"
+    
+    # 构建回复提示
+    reply_suffix = "\n\n---\n📮 **请回复**" if wait_reply else ""
+    
+    # 计算固定部分的字节数
+    header_bytes = get_string_bytes(header)
+    link_bytes = get_string_bytes(link_suffix)
+    reply_bytes = get_string_bytes(reply_suffix)
+    fixed_bytes = header_bytes + link_bytes + reply_bytes
+    
+    # 3. 计算可用于消息内容的空间
+    available_bytes = MAX_MESSAGE_BYTES - fixed_bytes - 50  # 预留 50 字节余量
+    
+    if available_bytes < 100:
+        # 空间太小，直接发送链接
+        logger.warning(f"[单聊] 可用空间太小 ({available_bytes} bytes)，只发送链接")
+        truncated_content = "（消息内容过长，请点击链接查看）"
+    else:
+        # 4. 截断消息内容
+        truncated_content = _truncate_message(message, available_bytes)
+    
+    # 5. 组装最终消息
+    final_message = f"{header}{truncated_content}{link_suffix}{reply_suffix}"
+    
+    # 验证最终长度
+    final_bytes = get_string_bytes(final_message)
+    if final_bytes > MAX_MESSAGE_BYTES:
+        logger.error(f"[单聊] 最终消息仍超过限制: {final_bytes} > {MAX_MESSAGE_BYTES}")
+        # 强制进一步截断
+        overflow = final_bytes - MAX_MESSAGE_BYTES + 50
+        truncated_content = _truncate_message(truncated_content, get_string_bytes(truncated_content) - overflow)
+        final_message = f"{header}{truncated_content}{link_suffix}{reply_suffix}"
+    
+    # 发送消息
+    send_to_wecom(
+        message=final_message,
+        chat_id=chat_id
+    )
+    
+    return {"success": True, "parts_sent": 1, "file_url": file_url}
+
+
+def _truncate_message(message: str, max_bytes: int) -> str:
+    """
+    截断消息到指定字节数
+    
+    尽量在换行符或句子边界处截断。
+    """
+    if get_string_bytes(message) <= max_bytes:
+        return message
+    
+    # 逐字符累积，直到接近限制
+    result_chars = []
+    current_bytes = 0
+    truncate_indicator = "...\n\n（以下内容已截断）"
+    indicator_bytes = get_string_bytes(truncate_indicator)
+    target_bytes = max_bytes - indicator_bytes
+    
+    for char in message:
+        char_bytes = get_string_bytes(char)
+        if current_bytes + char_bytes > target_bytes:
+            break
+        result_chars.append(char)
+        current_bytes += char_bytes
+    
+    truncated = ''.join(result_chars)
+    
+    # 尝试在换行符处截断
+    last_newline = truncated.rfind('\n')
+    if last_newline > len(truncated) * 0.5:  # 如果换行符在后半部分
+        truncated = truncated[:last_newline]
+    
+    return truncated + truncate_indicator

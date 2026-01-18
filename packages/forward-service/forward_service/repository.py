@@ -9,7 +9,7 @@ from typing import Optional, List
 from sqlalchemy import select, update, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Chatbot, ChatAccessRule, ForwardLog, SystemConfig, UserProjectConfig
+from .models import Chatbot, ChatAccessRule, ForwardLog, SystemConfig, UserProjectConfig, ChatInfo
 from .database import get_db_manager
 
 logger = logging.getLogger(__name__)
@@ -1042,3 +1042,190 @@ class UserProjectConfigRepository:
 def get_user_project_repository(session: AsyncSession) -> UserProjectConfigRepository:
     """获取 UserProjectConfigRepository 实例"""
     return UserProjectConfigRepository(session)
+
+
+# ============== ChatInfo Repository ==============
+
+class ChatInfoRepository:
+    """
+    Chat 信息数据访问层
+    
+    提供对 chat_info 表的所有数据库操作
+    用于存储和查询 chat_id -> chat_type 的映射关系
+    """
+    
+    def __init__(self, session: AsyncSession):
+        """
+        初始化 Repository
+        
+        Args:
+            session: SQLAlchemy AsyncSession
+        """
+        self.session = session
+    
+    async def get_by_chat_id(self, chat_id: str) -> Optional[ChatInfo]:
+        """
+        根据 chat_id 获取 Chat 信息
+        
+        Args:
+            chat_id: Chat ID
+        
+        Returns:
+            ChatInfo 对象或 None
+        """
+        stmt = select(ChatInfo).where(ChatInfo.chat_id == chat_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+    
+    async def get_chat_type(self, chat_id: str) -> Optional[str]:
+        """
+        获取 chat_id 对应的 chat_type
+        
+        Args:
+            chat_id: Chat ID
+        
+        Returns:
+            chat_type ("group" / "single") 或 None（如果未记录）
+        """
+        info = await self.get_by_chat_id(chat_id)
+        return info.chat_type if info else None
+    
+    async def is_group(self, chat_id: str) -> Optional[bool]:
+        """
+        判断 chat_id 是否为群聊
+        
+        Args:
+            chat_id: Chat ID
+        
+        Returns:
+            True（群聊）/ False（私聊）/ None（未知）
+        """
+        chat_type = await self.get_chat_type(chat_id)
+        if chat_type is None:
+            return None
+        return chat_type == "group"
+    
+    async def record_chat(
+        self,
+        chat_id: str,
+        chat_type: str,
+        chat_name: Optional[str] = None,
+        bot_key: Optional[str] = None
+    ) -> ChatInfo:
+        """
+        记录或更新 Chat 信息
+        
+        如果 chat_id 已存在，更新 last_seen_at 和 message_count
+        如果 chat_id 不存在，创建新记录
+        
+        Args:
+            chat_id: Chat ID
+            chat_type: Chat 类型 ("group" / "single")
+            chat_name: Chat 名称（可选）
+            bot_key: 收到消息的 Bot Key（可选）
+        
+        Returns:
+            ChatInfo 对象
+        """
+        existing = await self.get_by_chat_id(chat_id)
+        
+        if existing:
+            # 更新现有记录
+            existing.message_count += 1
+            existing.last_seen_at = datetime.now(timezone.utc)
+            # 如果 chat_type 发生变化（理论上不应该），记录日志
+            if existing.chat_type != chat_type:
+                logger.warning(
+                    f"Chat type changed: chat_id={chat_id}, "
+                    f"old={existing.chat_type}, new={chat_type}"
+                )
+                existing.chat_type = chat_type
+            # 更新 chat_name（如果提供）
+            if chat_name and not existing.chat_name:
+                existing.chat_name = chat_name
+            await self.session.flush()
+            return existing
+        else:
+            # 创建新记录
+            info = ChatInfo(
+                chat_id=chat_id,
+                chat_type=chat_type,
+                chat_name=chat_name,
+                first_bot_key=bot_key,
+                message_count=1
+            )
+            self.session.add(info)
+            await self.session.flush()
+            logger.info(f"记录新 Chat: chat_id={chat_id[:20]}..., type={chat_type}")
+            return info
+    
+    async def get_all(
+        self,
+        chat_type: Optional[str] = None,
+        limit: int = 100
+    ) -> List[ChatInfo]:
+        """
+        获取所有 Chat 信息
+        
+        Args:
+            chat_type: 过滤类型（可选）
+            limit: 返回数量限制
+        
+        Returns:
+            ChatInfo 对象列表
+        """
+        stmt = select(ChatInfo)
+        
+        if chat_type:
+            stmt = stmt.where(ChatInfo.chat_type == chat_type)
+        
+        stmt = stmt.order_by(ChatInfo.last_seen_at.desc()).limit(limit)
+        
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+    
+    async def get_groups(self, limit: int = 100) -> List[ChatInfo]:
+        """获取所有群聊"""
+        return await self.get_all(chat_type="group", limit=limit)
+    
+    async def get_singles(self, limit: int = 100) -> List[ChatInfo]:
+        """获取所有私聊"""
+        return await self.get_all(chat_type="single", limit=limit)
+    
+    async def count(self, chat_type: Optional[str] = None) -> int:
+        """
+        统计 Chat 数量
+        
+        Args:
+            chat_type: 过滤类型（可选）
+        
+        Returns:
+            Chat 数量
+        """
+        stmt = select(func.count(ChatInfo.id))
+        
+        if chat_type:
+            stmt = stmt.where(ChatInfo.chat_type == chat_type)
+        
+        result = await self.session.execute(stmt)
+        return result.scalar() or 0
+    
+    async def delete(self, chat_id: str) -> bool:
+        """
+        删除 Chat 信息
+        
+        Args:
+            chat_id: Chat ID
+        
+        Returns:
+            是否删除成功
+        """
+        stmt = delete(ChatInfo).where(ChatInfo.chat_id == chat_id)
+        result = await self.session.execute(stmt)
+        await self.session.flush()
+        return result.rowcount > 0
+
+
+def get_chat_info_repository(session: AsyncSession) -> ChatInfoRepository:
+    """获取 ChatInfoRepository 实例"""
+    return ChatInfoRepository(session)
