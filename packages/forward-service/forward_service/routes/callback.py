@@ -34,6 +34,10 @@ from .project_commands import (
     is_project_command,
     handle_project_command
 )
+from .tunnel_commands import (
+    is_tunnel_command,
+    handle_tunnel_command
+)
 
 logger = logging.getLogger(__name__)
 
@@ -159,6 +163,17 @@ async def handle_callback(
                 bot_key=bot.bot_key
             )
             return {"errcode": 0, "errmsg": "project command handled"}
+        
+        # === 隧道命令处理 ===
+        if content and is_tunnel_command(content):
+            success, response_msg = await handle_tunnel_command(content)
+            await send_reply(
+                chat_id=chat_id,
+                message=response_msg,
+                msg_type="text",
+                bot_key=bot.bot_key
+            )
+            return {"errcode": 0, "errmsg": "tunnel command handled"}
         
         # === 会话管理：处理 Slash 命令 ===
         session_mgr = get_session_manager()  # 提前获取，供项目命令和 slash 命令使用

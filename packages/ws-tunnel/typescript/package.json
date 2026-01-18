@@ -1,0 +1,43 @@
+{
+  "name": "ws-tunnel-client",
+  "version": "0.1.0",
+  "description": "WebSocket Tunnel Client - 透明反向代理隧道客户端",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ws-tunnel": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "pnpm run build"
+  },
+  "keywords": [
+    "websocket",
+    "tunnel",
+    "proxy",
+    "reverse-proxy"
+  ],
+  "author": "HITL Team",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.16.0",
+    "commander": "^12.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/ws": "^8.5.10",
+    "typescript": "^5.3.3",
+    "vitest": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
