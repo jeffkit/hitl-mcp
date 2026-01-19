@@ -523,7 +523,7 @@
                         'blacklist': `黑名单 (${bot.access_control?.blacklist?.length || 0})`
                     }[accessMode] || accessMode;
                     
-                    const url = bot.forward_config?.url_template || '-';
+                    const url = bot.target_url || bot.forward_config?.url_template || '-';
                     const displayUrl = url.length > 50 ? url.slice(0, 47) + '...' : url;
                     
                     html += `

@@ -87,7 +87,7 @@ export interface Bot {
   bot_key: string
   name: string
   description: string
-  url_template: string
+  target_url: string
   agent_id: string
   api_key: string
   timeout: number
