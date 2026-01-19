@@ -28,7 +28,7 @@ async def list_bots() -> dict:
 @router.get("/{bot_key}")
 async def get_bot_by_key(bot_key: str) -> dict:
     """获取单个 Bot 详情"""
-    bot = await config.get_bot(bot_key)
+    bot = await config.get_bot_detail(bot_key)
     if not bot:
         return {
             "success": False,
