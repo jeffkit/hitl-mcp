@@ -30,6 +30,7 @@ WS-Tunnel 服务端 SDK
 import asyncio
 import json
 import logging
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -113,6 +114,14 @@ class CreateTunnelResponse(BaseModel):
     domain: str
     token: str
     name: str | None = None
+
+
+class CheckAvailabilityResponse(BaseModel):
+    """检查名称可用性响应"""
+
+    available: bool
+    name: str
+    reason: str | None = None
 
 
 class TunnelInfo(BaseModel):
@@ -394,6 +403,13 @@ class TunnelServer:
         ):
             return await self._list_tunnels(x_api_key)
 
+        # 注意：check-availability 必须在 {domain} 之前注册，避免被当作 domain 匹配
+        @self.router.get(
+            "/api/tunnels/check-availability", response_model=CheckAvailabilityResponse
+        )
+        async def check_availability(name: str):
+            return await self._check_availability(name)
+
         @self.router.get("/api/tunnels/{domain}", response_model=TunnelInfo)
         async def get_tunnel(
             domain: str,
@@ -427,6 +443,39 @@ class TunnelServer:
         if self.config.admin_api_key:
             if api_key != self.config.admin_api_key:
                 raise HTTPException(status_code=401, detail="Invalid API key")
+
+    # 域名格式：字母数字开头，可包含中划线，长度 1-63
+    DOMAIN_PATTERN = re.compile(r"^[a-zA-Z0-9][-a-zA-Z0-9]{0,62}$")
+
+    async def _check_availability(self, name: str) -> CheckAvailabilityResponse:
+        """检查隧道名称是否可用"""
+        # 验证格式
+        if not self.DOMAIN_PATTERN.match(name):
+            return CheckAvailabilityResponse(
+                available=False,
+                name=name,
+                reason="Invalid domain format. Use letters, numbers, and hyphens only (1-63 chars, start with letter/number)",
+            )
+
+        if not self.db:
+            raise HTTPException(status_code=500, detail="Database not initialized")
+
+        async with self.db.session() as session:
+            repo = TunnelRepository(session)
+            existing = await repo.get_by_domain(name)
+
+            if existing:
+                return CheckAvailabilityResponse(
+                    available=False,
+                    name=name,
+                    reason="Domain already exists",
+                )
+
+            return CheckAvailabilityResponse(
+                available=True,
+                name=name,
+                reason=None,
+            )
 
     async def _handle_websocket(self, websocket: WebSocket) -> None:
         """处理 WebSocket 连接"""
