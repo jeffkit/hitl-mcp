@@ -40,6 +40,9 @@ from .protocol import (
     PongMessage,
     TunnelRequest,
     TunnelResponse,
+    StreamStartMessage,
+    StreamChunkMessage,
+    StreamEndMessage,
     parse_message,
 )
 
@@ -208,8 +211,11 @@ class TunnelClient:
                         self._on_request(message)
 
                     # 执行请求
+                    # 对于普通响应，返回 TunnelResponse
+                    # 对于 SSE 响应，返回 None（流式消息已在 _execute_request 中发送）
                     response = await self._execute_request(message)
-                    await websocket.send(response.model_dump_json())
+                    if response is not None:
+                        await websocket.send(response.model_dump_json())
 
                 else:
                     logger.warning(f"未知消息类型: {type(message)}")
@@ -219,11 +225,18 @@ class TunnelClient:
             except Exception as e:
                 logger.error(f"处理消息错误: {e}", exc_info=True)
 
-    async def _execute_request(self, request: TunnelRequest) -> TunnelResponse:
+    def _is_sse_response(self, headers: dict[str, str]) -> bool:
+        """检查是否是 SSE 响应"""
+        content_type = headers.get("content-type", "").lower()
+        return "text/event-stream" in content_type
+
+    async def _execute_request(self, request: TunnelRequest) -> TunnelResponse | None:
         """
         执行 HTTP 请求
 
         将隧道请求转发到本地目标服务
+        对于 SSE 响应，会发送 StreamStart/StreamChunk/StreamEnd 消息，不返回 TunnelResponse
+        对于普通响应，返回 TunnelResponse
         """
         start_time = time.time()
 
@@ -239,31 +252,40 @@ class TunnelClient:
                 except json.JSONDecodeError:
                     body = request.body
 
-            # 发送请求
+            # 使用 stream 模式发送请求，以便检测 SSE
             async with httpx.AsyncClient(timeout=request.timeout) as client:
-                response = await client.request(
+                async with client.stream(
                     method=request.method,
                     url=url,
                     headers=request.headers,
                     json=body if isinstance(body, (dict, list)) else None,
                     content=body if isinstance(body, str) else None,
-                )
+                ) as response:
+                    response_headers = dict(response.headers)
+                    
+                    # 检查是否是 SSE 响应
+                    if self._is_sse_response(response_headers):
+                        # SSE 流式响应处理
+                        await self._handle_sse_response(
+                            request_id=request.id,
+                            status=response.status_code,
+                            headers=response_headers,
+                            response=response,
+                            start_time=start_time,
+                        )
+                        return None  # SSE 响应已通过流式消息发送
+                    else:
+                        # 普通响应：读取完整内容
+                        response_body = await response.aread()
+                        duration_ms = int((time.time() - start_time) * 1000)
 
-            duration_ms = int((time.time() - start_time) * 1000)
-
-            # 获取响应体
-            try:
-                response_body = response.text
-            except Exception:
-                response_body = None
-
-            return TunnelResponse(
-                id=request.id,
-                status=response.status_code,
-                headers=dict(response.headers),
-                body=response_body,
-                duration_ms=duration_ms,
-            )
+                        return TunnelResponse(
+                            id=request.id,
+                            status=response.status_code,
+                            headers=response_headers,
+                            body=response_body.decode("utf-8", errors="replace"),
+                            duration_ms=duration_ms,
+                        )
 
         except httpx.TimeoutException:
             duration_ms = int((time.time() - start_time) * 1000)
@@ -289,6 +311,62 @@ class TunnelClient:
                 error=str(e),
                 duration_ms=duration_ms,
             )
+
+    async def _handle_sse_response(
+        self,
+        request_id: str,
+        status: int,
+        headers: dict[str, str],
+        response: httpx.Response,
+        start_time: float,
+    ) -> None:
+        """
+        处理 SSE 流式响应
+        
+        发送 StreamStart -> StreamChunk* -> StreamEnd 消息
+        """
+        if not self._websocket:
+            logger.error("WebSocket 未连接，无法发送流式响应")
+            return
+
+        # 发送 StreamStart
+        start_msg = StreamStartMessage(
+            id=request_id,
+            status=status,
+            headers=headers,
+        )
+        await self._websocket.send(start_msg.model_dump_json())
+        logger.debug(f"SSE 流开始: request_id={request_id}")
+
+        chunk_count = 0
+        error_msg = None
+
+        try:
+            # 流式读取并发送数据块
+            async for chunk in response.aiter_text():
+                if chunk:
+                    chunk_msg = StreamChunkMessage(
+                        id=request_id,
+                        data=chunk,
+                        sequence=chunk_count,
+                    )
+                    await self._websocket.send(chunk_msg.model_dump_json())
+                    chunk_count += 1
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"SSE 流读取错误: {e}")
+
+        # 发送 StreamEnd
+        duration_ms = int((time.time() - start_time) * 1000)
+        end_msg = StreamEndMessage(
+            id=request_id,
+            error=error_msg,
+            duration_ms=duration_ms,
+            total_chunks=chunk_count,
+        )
+        await self._websocket.send(end_msg.model_dump_json())
+        logger.debug(f"SSE 流结束: request_id={request_id}, chunks={chunk_count}, duration={duration_ms}ms")
 
 
 async def run_tunnel_client(

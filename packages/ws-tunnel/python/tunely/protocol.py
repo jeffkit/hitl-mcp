@@ -1,14 +1,17 @@
 """
 WS-Tunnel 协议定义
 
-协议版本: 1.0
+协议版本: 1.1 (SSE 支持)
 
 消息类型:
 - auth: 客户端认证请求
 - auth_ok: 服务端认证成功响应
 - auth_error: 服务端认证失败响应
 - request: 服务端发送的 HTTP 请求
-- response: 客户端返回的 HTTP 响应
+- response: 客户端返回的 HTTP 响应 (完整响应)
+- stream_start: 流式响应开始
+- stream_chunk: 流式响应数据块
+- stream_end: 流式响应结束
 - ping/pong: 心跳保活
 """
 
@@ -30,6 +33,11 @@ class MessageType(str, Enum):
     # 请求-响应
     REQUEST = "request"
     RESPONSE = "response"
+
+    # 流式响应（SSE 支持）
+    STREAM_START = "stream_start"
+    STREAM_CHUNK = "stream_chunk"
+    STREAM_END = "stream_end"
 
     # 心跳
     PING = "ping"
@@ -112,6 +120,58 @@ class TunnelResponse(BaseModel):
     )
 
 
+# ============== 流式响应消息（SSE 支持） ==============
+
+
+class StreamStartMessage(BaseModel):
+    """
+    流式响应开始（客户端 → 服务端）
+    
+    当检测到 SSE 响应（Content-Type: text/event-stream）时发送
+    """
+
+    type: MessageType = MessageType.STREAM_START
+    id: str = Field(..., description="请求 ID，与 TunnelRequest.id 对应")
+    status: int = Field(..., description="HTTP 状态码")
+    headers: dict[str, str] = Field(default_factory=dict, description="HTTP 响应头")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now().isoformat(), description="开始时间"
+    )
+
+
+class StreamChunkMessage(BaseModel):
+    """
+    流式响应数据块（客户端 → 服务端）
+    
+    包含一个 SSE 数据块
+    """
+
+    type: MessageType = MessageType.STREAM_CHUNK
+    id: str = Field(..., description="请求 ID，与 TunnelRequest.id 对应")
+    data: str = Field(..., description="数据块内容")
+    sequence: int = Field(default=0, description="数据块序号，从 0 开始")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now().isoformat(), description="发送时间"
+    )
+
+
+class StreamEndMessage(BaseModel):
+    """
+    流式响应结束（客户端 → 服务端）
+    
+    表示 SSE 流已结束
+    """
+
+    type: MessageType = MessageType.STREAM_END
+    id: str = Field(..., description="请求 ID，与 TunnelRequest.id 对应")
+    error: str | None = Field(default=None, description="错误信息（如果异常结束）")
+    duration_ms: int = Field(default=0, description="总耗时（毫秒）")
+    total_chunks: int = Field(default=0, description="总数据块数")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now().isoformat(), description="结束时间"
+    )
+
+
 # ============== 心跳消息 ==============
 
 
@@ -161,6 +221,12 @@ def parse_message(data: dict[str, Any]) -> BaseModel:
         return TunnelRequest(**data)
     elif msg_type == MessageType.RESPONSE:
         return TunnelResponse(**data)
+    elif msg_type == MessageType.STREAM_START:
+        return StreamStartMessage(**data)
+    elif msg_type == MessageType.STREAM_CHUNK:
+        return StreamChunkMessage(**data)
+    elif msg_type == MessageType.STREAM_END:
+        return StreamEndMessage(**data)
     elif msg_type == MessageType.PING:
         return PingMessage(**data)
     elif msg_type == MessageType.PONG:

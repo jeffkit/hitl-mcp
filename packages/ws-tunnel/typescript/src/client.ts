@@ -17,6 +17,9 @@ import {
   createPongMessage,
   createResponse,
   parseMessage,
+  StreamStartMessage,
+  StreamChunkMessage,
+  StreamEndMessage,
 } from './protocol.js';
 
 export interface TunnelClientConfig {
@@ -191,6 +194,14 @@ export class TunnelClient {
     console.error(`认证失败: ${message.error}`);
   }
 
+  /**
+   * 检查是否是 SSE 响应
+   */
+  private isSSEResponse(headers: Headers): boolean {
+    const contentType = headers.get('content-type') || '';
+    return contentType.toLowerCase().includes('text/event-stream');
+  }
+
   private async handleRequest(
     request: TunnelRequest,
     ws: WebSocket
@@ -198,7 +209,6 @@ export class TunnelClient {
     this.events.onRequest?.(request);
 
     const startTime = Date.now();
-    let response: TunnelResponse;
 
     try {
       // 构建完整 URL
@@ -228,24 +238,43 @@ export class TunnelClient {
         });
 
         clearTimeout(timeoutId);
+        const responseHeaders = Object.fromEntries(fetchResponse.headers.entries());
 
+        // 检查是否是 SSE 响应
+        if (this.isSSEResponse(fetchResponse.headers)) {
+          // SSE 流式响应处理
+          await this.handleSSEResponse(
+            request.id,
+            fetchResponse.status,
+            responseHeaders,
+            fetchResponse.body!,
+            ws,
+            startTime
+          );
+          return; // SSE 响应已通过流式消息发送
+        }
+
+        // 普通响应：读取完整内容
         const responseBody = await fetchResponse.text();
         const durationMs = Date.now() - startTime;
 
-        response = createResponse(
+        const response = createResponse(
           request.id,
           fetchResponse.status,
           responseBody,
-          Object.fromEntries(fetchResponse.headers.entries()),
+          responseHeaders,
           undefined,
           durationMs
         );
+        ws.send(JSON.stringify(response));
+
       } catch (error: any) {
         clearTimeout(timeoutId);
         throw error;
       }
     } catch (error: any) {
       const durationMs = Date.now() - startTime;
+      let response: TunnelResponse;
 
       if (error.name === 'AbortError') {
         response = createResponse(
@@ -275,9 +304,72 @@ export class TunnelClient {
           durationMs
         );
       }
+
+      ws.send(JSON.stringify(response));
+    }
+  }
+
+  /**
+   * 处理 SSE 流式响应
+   */
+  private async handleSSEResponse(
+    requestId: string,
+    status: number,
+    headers: Record<string, string>,
+    body: ReadableStream<Uint8Array>,
+    ws: WebSocket,
+    startTime: number
+  ): Promise<void> {
+    // 发送 StreamStart
+    const startMsg: StreamStartMessage = {
+      type: MessageType.STREAM_START,
+      id: requestId,
+      status,
+      headers,
+      timestamp: new Date().toISOString(),
+    };
+    ws.send(JSON.stringify(startMsg));
+
+    let chunkCount = 0;
+    let errorMsg: string | undefined;
+    const decoder = new TextDecoder();
+
+    try {
+      const reader = body.getReader();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const chunk = decoder.decode(value, { stream: true });
+        if (chunk) {
+          const chunkMsg: StreamChunkMessage = {
+            type: MessageType.STREAM_CHUNK,
+            id: requestId,
+            data: chunk,
+            sequence: chunkCount,
+            timestamp: new Date().toISOString(),
+          };
+          ws.send(JSON.stringify(chunkMsg));
+          chunkCount++;
+        }
+      }
+    } catch (error: any) {
+      errorMsg = error.message;
+      console.error('SSE 流读取错误:', error);
     }
 
-    ws.send(JSON.stringify(response));
+    // 发送 StreamEnd
+    const durationMs = Date.now() - startTime;
+    const endMsg: StreamEndMessage = {
+      type: MessageType.STREAM_END,
+      id: requestId,
+      error: errorMsg,
+      duration_ms: durationMs,
+      total_chunks: chunkCount,
+      timestamp: new Date().toISOString(),
+    };
+    ws.send(JSON.stringify(endMsg));
   }
 
   private sleep(ms: number): Promise<void> {

@@ -33,7 +33,7 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
@@ -49,6 +49,9 @@ from .protocol import (
     PongMessage,
     TunnelRequest,
     TunnelResponse,
+    StreamStartMessage,
+    StreamChunkMessage,
+    StreamEndMessage,
     parse_message,
 )
 from .repository import TunnelRepository
@@ -73,10 +76,23 @@ class ActiveConnection:
 
 @dataclass
 class PendingRequest:
-    """待响应的请求"""
+    """待响应的请求（普通响应）"""
 
     request_id: str
     future: asyncio.Future
+    created_at: datetime = field(default_factory=datetime.now)
+
+
+@dataclass
+class PendingStreamRequest:
+    """待响应的流式请求（SSE 支持）"""
+
+    request_id: str
+    queue: asyncio.Queue  # 存储流式数据块
+    started: bool = False
+    ended: bool = False
+    start_message: StreamStartMessage | None = None
+    end_message: StreamEndMessage | None = None
     created_at: datetime = field(default_factory=datetime.now)
 
 
@@ -149,8 +165,11 @@ class TunnelManager:
         # domain → token（缓存，用于快速查找）
         self._domain_token_map: dict[str, str] = {}
 
-        # request_id → PendingRequest
+        # request_id → PendingRequest（普通响应）
         self._pending_requests: dict[str, PendingRequest] = {}
+
+        # request_id → PendingStreamRequest（流式响应/SSE）
+        self._pending_stream_requests: dict[str, PendingStreamRequest] = {}
 
         self._lock = asyncio.Lock()
 
@@ -240,7 +259,7 @@ class TunnelManager:
         return list(self._domain_token_map.keys())
 
     async def create_pending_request(self, request_id: str) -> asyncio.Future:
-        """创建待响应的请求"""
+        """创建待响应的请求（普通响应）"""
         future = asyncio.get_event_loop().create_future()
         self._pending_requests[request_id] = PendingRequest(
             request_id=request_id,
@@ -249,7 +268,7 @@ class TunnelManager:
         return future
 
     async def complete_request(self, request_id: str, response: TunnelResponse) -> bool:
-        """完成请求"""
+        """完成请求（普通响应）"""
         pending = self._pending_requests.pop(request_id, None)
         if pending and not pending.future.done():
             pending.future.set_result(response)
@@ -262,6 +281,11 @@ class TunnelManager:
         if pending and not pending.future.done():
             pending.future.set_exception(Exception(error))
             return True
+        # 也检查流式请求
+        stream_pending = self._pending_stream_requests.pop(request_id, None)
+        if stream_pending:
+            await stream_pending.queue.put(None)  # 发送结束信号
+            return True
         return False
 
     async def update_heartbeat(self, token: str) -> None:
@@ -269,6 +293,51 @@ class TunnelManager:
         conn = self._connections.get(token)
         if conn:
             conn.last_heartbeat = datetime.now()
+
+    # ============== 流式请求支持（SSE） ==============
+
+    async def create_stream_request(self, request_id: str) -> PendingStreamRequest:
+        """创建待响应的流式请求"""
+        pending = PendingStreamRequest(
+            request_id=request_id,
+            queue=asyncio.Queue(),
+        )
+        self._pending_stream_requests[request_id] = pending
+        return pending
+
+    async def handle_stream_start(self, message: StreamStartMessage) -> bool:
+        """处理流式响应开始"""
+        pending = self._pending_stream_requests.get(message.id)
+        if pending:
+            pending.started = True
+            pending.start_message = message
+            await pending.queue.put(message)
+            return True
+        return False
+
+    async def handle_stream_chunk(self, message: StreamChunkMessage) -> bool:
+        """处理流式数据块"""
+        pending = self._pending_stream_requests.get(message.id)
+        if pending and pending.started and not pending.ended:
+            await pending.queue.put(message)
+            return True
+        return False
+
+    async def handle_stream_end(self, message: StreamEndMessage) -> bool:
+        """处理流式响应结束"""
+        pending = self._pending_stream_requests.get(message.id)
+        if pending:
+            pending.ended = True
+            pending.end_message = message
+            await pending.queue.put(message)
+            await pending.queue.put(None)  # 发送结束信号
+            # 注意：不立即删除，等迭代器完成后再清理
+            return True
+        return False
+
+    async def cleanup_stream_request(self, request_id: str) -> None:
+        """清理流式请求"""
+        self._pending_stream_requests.pop(request_id, None)
 
 
 # ============== 隧道服务器 ==============
@@ -453,6 +522,13 @@ class TunnelServer:
                     await self.manager.update_heartbeat(token)
                 elif isinstance(message, TunnelResponse):
                     await self.manager.complete_request(message.id, message)
+                # 流式消息处理（SSE 支持）
+                elif isinstance(message, StreamStartMessage):
+                    await self.manager.handle_stream_start(message)
+                elif isinstance(message, StreamChunkMessage):
+                    await self.manager.handle_stream_chunk(message)
+                elif isinstance(message, StreamEndMessage):
+                    await self.manager.handle_stream_end(message)
                 else:
                     logger.warning(f"未知消息类型: {type(message)}")
 
@@ -645,3 +721,110 @@ class TunnelServer:
                 status=500,
                 error=str(e),
             )
+
+    async def forward_stream(
+        self,
+        domain: str,
+        method: str = "POST",
+        path: str = "/",
+        headers: dict[str, str] | None = None,
+        body: Any = None,
+        timeout: float = 300.0,
+    ) -> AsyncIterator[StreamStartMessage | StreamChunkMessage | StreamEndMessage]:
+        """
+        转发请求到隧道并返回流式响应（SSE 支持）
+
+        这个方法用于处理 SSE (Server-Sent Events) 响应。
+        返回一个 AsyncIterator，依次产生：
+        1. StreamStartMessage - 流开始，包含 HTTP 状态码和响应头
+        2. StreamChunkMessage* - 零个或多个数据块
+        3. StreamEndMessage - 流结束，包含统计信息
+
+        如果目标不是 SSE 响应，将收到一个包含完整响应的 StreamChunkMessage，
+        然后立即收到 StreamEndMessage。
+
+        Args:
+            domain: 目标隧道域名
+            method: HTTP 方法
+            path: 请求路径
+            headers: 请求头
+            body: 请求体
+            timeout: 超时时间（秒）
+
+        Yields:
+            StreamStartMessage | StreamChunkMessage | StreamEndMessage
+
+        Example:
+            async for msg in tunnel_server.forward_stream("agent-001", path="/api/chat", body={"message": "hi"}):
+                if isinstance(msg, StreamStartMessage):
+                    print(f"Stream started: status={msg.status}")
+                elif isinstance(msg, StreamChunkMessage):
+                    print(f"Chunk: {msg.data}")
+                elif isinstance(msg, StreamEndMessage):
+                    print(f"Stream ended: {msg.total_chunks} chunks")
+        """
+        conn = self.manager.get_connection_by_domain(domain)
+        if not conn:
+            # 隧道未连接，生成错误响应
+            yield StreamStartMessage(id="error", status=503, headers={})
+            yield StreamEndMessage(id="error", error=f"Tunnel not connected: {domain}")
+            return
+
+        request_id = str(uuid.uuid4())
+        request = TunnelRequest(
+            id=request_id,
+            method=method,
+            path=path,
+            headers=headers or {},
+            body=json.dumps(body) if body else None,
+            timeout=timeout,
+        )
+
+        try:
+            # 创建流式请求
+            pending = await self.manager.create_stream_request(request_id)
+
+            # 发送请求
+            await conn.websocket.send_text(request.model_dump_json())
+
+            # 从队列中读取流式数据
+            start_time = datetime.now()
+            while True:
+                try:
+                    # 使用超时等待
+                    message = await asyncio.wait_for(
+                        pending.queue.get(),
+                        timeout=timeout
+                    )
+                except asyncio.TimeoutError:
+                    # 超时，发送错误结束消息
+                    yield StreamEndMessage(
+                        id=request_id,
+                        error="Stream timeout",
+                    )
+                    break
+
+                if message is None:
+                    # 流结束
+                    break
+
+                yield message
+
+                if isinstance(message, StreamEndMessage):
+                    break
+
+            # 更新统计
+            if self.db and pending.started:
+                async with self.db.session() as session:
+                    repo = TunnelRepository(session)
+                    await repo.increment_requests(conn.token)
+
+        except Exception as e:
+            logger.error(f"Stream forward error: {e}", exc_info=True)
+            yield StreamEndMessage(
+                id=request_id,
+                error=str(e),
+            )
+        finally:
+            # 清理流式请求
+            await self.manager.cleanup_stream_request(request_id)
