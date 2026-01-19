@@ -467,13 +467,17 @@ class ConfigDB:
                 # 统计访问规则数量
                 whitelist = await rule_repo.get_whitelist(bot.id)
                 blacklist = await rule_repo.get_blacklist(bot.id)
+                
+                # 优先使用 target_url，兼容 url_template
+                effective_url = bot.target_url or bot.url_template or ""
 
                 result.append({
                     "id": bot.id,
                     "bot_key": bot.bot_key,
                     "name": bot.name,
                     "description": bot.description or "",
-                    "url_template": bot.url_template,
+                    "url_template": effective_url,  # 前端兼容
+                    "target_url": effective_url,    # 新字段
                     "agent_id": bot.agent_id or "",
                     "api_key": bot.api_key or "",
                     "timeout": bot.timeout,
@@ -511,12 +515,16 @@ class ConfigDB:
             whitelist_rules = await rule_repo.get_by_chatbot(bot.id, "whitelist")
             blacklist_rules = await rule_repo.get_by_chatbot(bot.id, "blacklist")
 
+            # 优先使用 target_url，兼容 url_template
+            effective_url = bot.target_url or bot.url_template or ""
+            
             return {
                 "id": bot.id,
                 "bot_key": bot.bot_key,
                 "name": bot.name,
                 "description": bot.description or "",
-                "url_template": bot.url_template,
+                "url_template": effective_url,  # 前端兼容
+                "target_url": effective_url,    # 新字段
                 "agent_id": bot.agent_id or "",
                 "api_key": bot.api_key or "",
                 "timeout": bot.timeout,
@@ -679,11 +687,13 @@ class ConfigDB:
                     return {"success": False, "error": f"Bot '{bot_key}' 不存在"}
 
                 # 更新 Bot 基本信息
+                # 优先使用 target_url，兼容 url_template
+                target_url = data.get("target_url") or data.get("url_template")
                 await bot_repo.update(
                     bot_id=bot.id,
                     name=data.get("name"),
                     description=data.get("description"),
-                    url_template=data.get("url_template"),
+                    target_url=target_url,
                     api_key=data.get("api_key"),
                     timeout=data.get("timeout"),
                     access_mode=data.get("access_mode"),
