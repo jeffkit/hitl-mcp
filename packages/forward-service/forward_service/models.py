@@ -75,11 +75,18 @@ class Chatbot(Base):
         comment="Bot 描述"
     )
 
-    # 转发配置
-    url_template: Mapped[str] = mapped_column(
+    # 转发配置 - 新字段 target_url (推荐使用)
+    target_url: Mapped[Optional[str]] = mapped_column(
         String(500),
-        nullable=False,
-        comment="转发目标 URL 模板 (支持 {agent_id} 占位符)"
+        nullable=True,
+        comment="转发目标 URL (完整地址，推荐使用)"
+    )
+
+    # 转发配置 - 旧字段 url_template (已废弃，保留兼容)
+    url_template: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="URL 模板 (已废弃，保留用于数据迁移)"
     )
 
     agent_id: Mapped[Optional[str]] = mapped_column(
@@ -178,8 +185,16 @@ class Chatbot(Base):
     # ============== 实例方法 ==============
 
     def get_url(self) -> str:
-        """获取完整的转发 URL (替换占位符)"""
-        return self.url_template.replace("{agent_id}", self.agent_id or "")
+        """获取完整的转发 URL
+        
+        优先使用 target_url，如果没有则回退到 url_template (兼容旧数据)
+        """
+        if self.target_url:
+            return self.target_url
+        # 兼容旧数据：使用 url_template 并替换占位符
+        if self.url_template:
+            return self.url_template.replace("{agent_id}", self.agent_id or "")
+        return ""
 
     def check_access(self, user_id: str) -> tuple[bool, str]:
         """

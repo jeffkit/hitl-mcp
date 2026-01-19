@@ -140,6 +140,7 @@ class ChatbotRepository:
         self,
         bot_id: int,
         name: str | None = None,
+        target_url: str | None = None,
         url_template: str | None = None,
         agent_id: str | None = None,
         api_key: str | None = None,
@@ -154,7 +155,8 @@ class ChatbotRepository:
         Args:
             bot_id: Bot ID
             name: Bot 名称
-            url_template: URL 模板
+            target_url: 转发目标 URL (推荐使用)
+            url_template: URL 模板 (已废弃)
             agent_id: Agent ID
             api_key: API Key
             timeout: 超时时间
@@ -169,6 +171,8 @@ class ChatbotRepository:
         update_data = {}
         if name is not None:
             update_data["name"] = name
+        if target_url is not None:
+            update_data["target_url"] = target_url
         if url_template is not None:
             update_data["url_template"] = url_template
         if agent_id is not None:
