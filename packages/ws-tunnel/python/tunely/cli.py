@@ -63,14 +63,17 @@ def main():
     help="本地目标服务 URL",
 )
 @click.option("--reconnect", "-r", default=5.0, help="重连间隔（秒）")
+@click.option("--force", "-f", is_flag=True, help="强制抢占已有连接")
 @click.option("--verbose", "-v", is_flag=True, help="详细日志")
-def connect(server: str, token: str, target: str, reconnect: float, verbose: bool):
+def connect(server: str, token: str, target: str, reconnect: float, force: bool, verbose: bool):
     """连接到隧道服务器"""
     setup_logging(verbose)
 
     console.print(f"[bold blue]WS-Tunnel Client[/bold blue]")
     console.print(f"  服务端: {server}")
     console.print(f"  目标: {target}")
+    if force:
+        console.print(f"  [yellow]强制模式: 将抢占已有连接[/yellow]")
     console.print()
 
     config = TunnelClientConfig(
@@ -78,6 +81,7 @@ def connect(server: str, token: str, target: str, reconnect: float, verbose: boo
         token=token,
         target_url=target,
         reconnect_interval=reconnect,
+        force=force,
     )
     client = TunnelClient(config=config)
 

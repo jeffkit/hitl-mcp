@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * WS-Tunnel CLI
+ * tunely CLI
  *
  * 命令行工具，用于启动隧道客户端
  */
@@ -12,8 +12,8 @@ import { TunnelClient } from './client.js';
 const program = new Command();
 
 program
-  .name('ws-tunnel')
-  .description('WebSocket Tunnel Client - 透明反向代理隧道客户端')
+  .name('tunely')
+  .description('WebSocket Tunnel Client - 让内网服务可被外网访问')
   .version('0.1.0');
 
 program
@@ -23,10 +23,14 @@ program
   .option('-s, --server <url>', '服务端 WebSocket URL', 'ws://localhost:8000/ws/tunnel')
   .option('-T, --target <url>', '本地目标服务 URL', 'http://localhost:8080')
   .option('-r, --reconnect <seconds>', '重连间隔（秒）', '5')
+  .option('-f, --force', '强制抢占已有连接', false)
   .action(async (options) => {
-    console.log('WS-Tunnel Client');
+    console.log('tunely - WebSocket Tunnel Client');
     console.log(`  服务端: ${options.server}`);
     console.log(`  目标: ${options.target}`);
+    if (options.force) {
+      console.log('  强制模式: 将抢占已有连接');
+    }
     console.log();
 
     const client = new TunnelClient({
@@ -34,6 +38,7 @@ program
       token: options.token,
       targetUrl: options.target,
       reconnectInterval: parseFloat(options.reconnect) * 1000,
+      force: options.force,
     });
 
     client.on('onConnect', (domain) => {

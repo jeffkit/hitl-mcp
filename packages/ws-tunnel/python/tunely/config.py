@@ -59,6 +59,7 @@ class TunnelClientConfig(BaseSettings):
     # 连接配置
     reconnect_interval: float = Field(default=5.0, description="重连间隔（秒）")
     max_reconnect_attempts: int = Field(default=0, description="最大重连次数（0 表示无限）")
+    force: bool = Field(default=False, description="是否强制抢占已有连接")
 
     # 请求配置
     request_timeout: float = Field(default=300.0, description="请求超时（秒）")

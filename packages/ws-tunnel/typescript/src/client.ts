@@ -32,6 +32,8 @@ export interface TunnelClientConfig {
   maxReconnectAttempts?: number;
   /** 请求超时（毫秒） */
   requestTimeout?: number;
+  /** 是否强制抢占已有连接 */
+  force?: boolean;
 }
 
 export interface TunnelClientEvents {
@@ -58,6 +60,7 @@ export class TunnelClient {
       reconnectInterval: config.reconnectInterval ?? 5000,
       maxReconnectAttempts: config.maxReconnectAttempts ?? 0,
       requestTimeout: config.requestTimeout ?? 300000,
+      force: config.force ?? false,
     };
   }
 
@@ -126,7 +129,7 @@ export class TunnelClient {
 
       ws.on('open', () => {
         // 发送认证消息
-        const authMessage = createAuthMessage(this.config.token);
+        const authMessage = createAuthMessage(this.config.token, this.config.force);
         ws.send(JSON.stringify(authMessage));
       });
 

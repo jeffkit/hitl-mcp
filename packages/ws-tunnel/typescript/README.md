@@ -1,30 +1,29 @@
-# WS-Tunnel TypeScript Client
+# tunely
 
-WebSocket 隧道客户端 TypeScript 实现。
+WebSocket 隧道客户端 - 让内网服务可被外网访问。
 
 ## 安装
 
 ```bash
-pnpm install
-pnpm build
+npm install tunely
+# 或
+pnpm add tunely
 ```
 
-## 使用
-
-### 命令行
+## 命令行使用
 
 ```bash
 # 连接到隧道服务器
-node dist/cli.js connect --token tun_xxxxx --target http://localhost:8080
+tunely connect --server ws://your-server/ws/tunnel --token tun_xxxxx --target http://localhost:8080
 
 # 查看帮助
-node dist/cli.js --help
+tunely --help
 ```
 
-### SDK 使用
+## SDK 使用
 
 ```typescript
-import { TunnelClient } from 'ws-tunnel-client';
+import { TunnelClient } from 'tunely';
 
 const client = new TunnelClient({
   serverUrl: 'ws://localhost:8000/ws/tunnel',
