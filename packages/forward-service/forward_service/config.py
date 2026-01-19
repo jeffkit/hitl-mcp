@@ -683,7 +683,7 @@ class ConfigDB:
                     bot_id=bot.id,
                     name=data.get("name"),
                     description=data.get("description"),
-                    url_template=data.get("target_url"),
+                    url_template=data.get("url_template"),
                     api_key=data.get("api_key"),
                     timeout=data.get("timeout"),
                     access_mode=data.get("access_mode"),
