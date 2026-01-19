@@ -45,6 +45,7 @@ class AuthMessage(BaseModel):
     type: MessageType = MessageType.AUTH
     token: str = Field(..., description="隧道令牌")
     client_version: str = Field(default="0.1.0", description="客户端版本")
+    force: bool = Field(default=False, description="是否强制抢占已有连接")
 
 
 class AuthOkMessage(BaseModel):

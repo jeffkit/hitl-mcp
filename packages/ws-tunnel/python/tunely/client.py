@@ -161,7 +161,10 @@ class TunnelClient:
             self._websocket = websocket
 
             # 发送认证
-            auth_message = AuthMessage(token=self.config.token)
+            auth_message = AuthMessage(
+                token=self.config.token,
+                force=self.config.force,
+            )
             await websocket.send(auth_message.model_dump_json())
 
             # 等待认证响应

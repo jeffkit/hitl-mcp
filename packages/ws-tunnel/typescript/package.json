@@ -1,11 +1,19 @@
 {
-  "name": "ws-tunnel-client",
+  "name": "tunely",
   "version": "0.1.0",
-  "description": "WebSocket Tunnel Client - 透明反向代理隧道客户端",
+  "description": "WebSocket Tunnel Client - 透明反向代理隧道，让内网服务可被外网访问",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "ws-tunnel": "./dist/cli.js"
+    "tunely": "./dist/cli.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicepkg/tunely"
+  },
+  "homepage": "https://github.com/nicepkg/tunely",
+  "bugs": {
+    "url": "https://github.com/nicepkg/tunely/issues"
   },
   "scripts": {
     "build": "tsc",

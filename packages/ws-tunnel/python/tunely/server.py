@@ -160,17 +160,45 @@ class TunnelManager:
         tunnel_id: int,
         domain: str,
         token: str,
-    ) -> None:
-        """注册隧道连接"""
+        force: bool = False,
+    ) -> tuple[bool, str | None]:
+        """
+        注册隧道连接
+        
+        Args:
+            websocket: WebSocket 连接
+            tunnel_id: 隧道 ID
+            domain: 隧道域名
+            token: 隧道令牌
+            force: 是否强制抢占已有连接
+            
+        Returns:
+            (success, error_message) - 成功返回 (True, None)，失败返回 (False, error_message)
+        """
         async with self._lock:
-            # 如果已有连接，先关闭旧连接
+            # 检查是否已有连接
             if token in self._connections:
                 old_conn = self._connections[token]
+                
+                # 检查旧连接是否健康（通过检查 WebSocket 状态）
                 try:
-                    await old_conn.websocket.close(code=1000, reason="New connection")
+                    # 尝试 ping 检查连接是否存活
+                    # WebSocket 的 client_state 可以告诉我们连接状态
+                    is_healthy = old_conn.websocket.client_state.name == "CONNECTED"
+                except Exception:
+                    is_healthy = False
+                
+                if is_healthy and not force:
+                    # 旧连接健康且不强制抢占，拒绝新连接
+                    logger.warning(f"拒绝新连接: domain={domain}，已有活跃连接")
+                    return (False, f"已有活跃连接存在，使用 --force 参数可强制抢占")
+                
+                # 关闭旧连接（不健康或强制抢占）
+                try:
+                    await old_conn.websocket.close(code=1000, reason="New connection (force)" if force else "Connection replaced")
                 except Exception:
                     pass
-                logger.info(f"关闭旧连接: domain={domain}")
+                logger.info(f"关闭旧连接: domain={domain}, force={force}")
 
             conn = ActiveConnection(
                 websocket=websocket,
@@ -182,6 +210,7 @@ class TunnelManager:
             self._domain_token_map[domain] = token
 
             logger.info(f"隧道已连接: domain={domain}")
+            return (True, None)
 
     async def unregister(self, token: str) -> None:
         """注销隧道连接"""
@@ -386,20 +415,32 @@ class TunnelServer:
                 # 更新最后连接时间
                 await repo.update_last_connected(token)
 
+                # 尝试注册连接
+                force = getattr(message, 'force', False)
+                success, error = await self.manager.register(
+                    websocket=websocket,
+                    tunnel_id=tunnel.id,
+                    domain=tunnel.domain,
+                    token=token,
+                    force=force,
+                )
+                
+                if not success:
+                    await websocket.send_text(
+                        AuthErrorMessage(
+                            error=error or "Connection rejected",
+                            code="connection_exists",
+                        ).model_dump_json()
+                    )
+                    await websocket.close(code=1008)
+                    return
+
                 # 发送认证成功
                 await websocket.send_text(
                     AuthOkMessage(
                         domain=tunnel.domain,
                         tunnel_id=str(tunnel.id),
                     ).model_dump_json()
-                )
-
-                # 注册连接
-                await self.manager.register(
-                    websocket=websocket,
-                    tunnel_id=tunnel.id,
-                    domain=tunnel.domain,
-                    token=token,
                 )
 
             # 处理消息循环

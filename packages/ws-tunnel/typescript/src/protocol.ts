@@ -25,6 +25,7 @@ export interface AuthMessage {
   type: MessageType.AUTH;
   token: string;
   client_version?: string;
+  force?: boolean;
 }
 
 export interface AuthOkMessage {
@@ -89,11 +90,12 @@ export type Message =
 
 // ============== 辅助函数 ==============
 
-export function createAuthMessage(token: string): AuthMessage {
+export function createAuthMessage(token: string, force: boolean = false): AuthMessage {
   return {
     type: MessageType.AUTH,
     token,
     client_version: '0.1.0',
+    force,
   };
 }
 
