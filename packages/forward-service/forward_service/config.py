@@ -683,7 +683,7 @@ class ConfigDB:
                     bot_id=bot.id,
                     name=data.get("name"),
                     description=data.get("description"),
-                    target_url=data.get("target_url"),
+                    url_template=data.get("url_template"),
                     api_key=data.get("api_key"),
                     timeout=data.get("timeout"),
                     access_mode=data.get("access_mode"),
@@ -713,7 +713,7 @@ class ConfigDB:
                 await self.reload_config()
 
                 # 返回更新后的 Bot 详情
-                updated_bot = await self.get_bot(bot_key)
+                updated_bot = await self.get_bot_detail(bot_key)
                 return {"success": True, "bot": updated_bot}
 
         except Exception as e:
