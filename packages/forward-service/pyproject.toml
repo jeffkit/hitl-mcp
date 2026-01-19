@@ -28,6 +28,9 @@ packages = ["forward_service"]
 [tool.uv]
 extra-index-url = ["http://mirrors.tencent.com/repository/pypi/tencent_pypi/simple"]
 
+[tool.uv.sources]
+tunely = { path = "../ws-tunnel/python", editable = true }
+
 [tool.ruff]
 # E712: SQLAlchemy 需要使用 == True/False 来构建 SQL 查询表达式
 ignore = ["E712"]
