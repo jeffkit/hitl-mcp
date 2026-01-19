@@ -440,6 +440,47 @@ async def update_admin_users(request: Request):
 
 # ============== 用户项目配置 API ==============
 
+@router.get("/user-projects/by-bot")
+async def get_user_projects_by_bot(
+    bot_key: str,
+    enabled_only: bool = False
+):
+    """
+    获取某个 Bot 下的所有用户配置
+
+    Args:
+        bot_key: Bot Key
+        enabled_only: 是否只返回启用的配置
+    """
+    try:
+        db_manager = get_db_manager()
+        async with db_manager.get_session() as session:
+            repo = get_user_project_repository(session)
+            projects = await repo.get_all_by_bot_key(bot_key, enabled_only=enabled_only)
+
+            # 按 chat_id 分组
+            users: dict[str, list[dict]] = {}
+            for p in projects:
+                if p.chat_id not in users:
+                    users[p.chat_id] = []
+                users[p.chat_id].append(p.to_dict())
+
+            return {
+                "success": True,
+                "bot_key": bot_key,
+                "users": users,
+                "total_users": len(users),
+                "total_projects": len(projects)
+            }
+    except Exception as e:
+        logger.error(f"获取 Bot 用户配置失败: {e}")
+        return {
+            "success": False,
+            "error": str(e),
+            "users": {}
+        }
+
+
 @router.get("/user-projects")
 async def get_user_projects(
     bot_key: str,

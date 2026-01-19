@@ -1042,6 +1042,33 @@ class UserProjectConfigRepository:
 
         await self.session.execute(stmt)
 
+    async def get_all_by_bot_key(
+        self,
+        bot_key: str,
+        enabled_only: bool = False
+    ) -> list[UserProjectConfig]:
+        """
+        获取某个 Bot 下的所有用户配置
+
+        Args:
+            bot_key: Bot Key
+            enabled_only: 是否只返回启用的配置
+
+        Returns:
+            用户配置列表
+        """
+        conditions = [UserProjectConfig.bot_key == bot_key]
+
+        if enabled_only:
+            conditions.append(UserProjectConfig.enabled == True)
+
+        stmt = select(UserProjectConfig).where(*conditions).order_by(
+            UserProjectConfig.chat_id,
+            UserProjectConfig.project_id
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
 
 def get_user_project_repository(session: AsyncSession) -> UserProjectConfigRepository:
     """获取 UserProjectConfigRepository 实例"""
