@@ -114,12 +114,37 @@ export interface BotDetailResponse {
   error?: string
 }
 
+export interface UserProjectConfig {
+  id: number
+  bot_key: string
+  chat_id: string
+  project_id: string
+  project_name: string | null
+  url_template: string
+  api_key: string | null
+  timeout: number
+  is_default: boolean
+  enabled: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface UserProjectsByBotResponse {
+  success: boolean
+  bot_key: string
+  users: Record<string, UserProjectConfig[]>
+  total_users: number
+  total_projects: number
+  error?: string
+}
+
 export const botApi = {
   list: () => api.get<BotListResponse>('/forward/proxy/admin/bots'),
   get: (botKey: string) => api.get<BotDetailResponse>(`/forward/proxy/admin/bots/${botKey}`),
   create: (bot: Partial<Bot>) => api.post<{ success: boolean; bot?: Bot; error?: string }>('/forward/proxy/admin/bots', bot),
   update: (botKey: string, bot: Partial<Bot>) => api.put<{ success: boolean; error?: string }>(`/forward/proxy/admin/bots/${botKey}`, bot),
   delete: (botKey: string) => api.delete<{ success: boolean; error?: string }>(`/forward/proxy/admin/bots/${botKey}`),
+  getUserProjects: (botKey: string) => api.get<UserProjectsByBotResponse>(`/forward/proxy/admin/user-projects/by-bot?bot_key=${botKey}`),
 }
 
 // Forward Mode API

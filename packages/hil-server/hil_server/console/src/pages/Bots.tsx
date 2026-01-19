@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pencil, Trash2, RefreshCw, Copy, Check, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, RefreshCw, Copy, Check, X, Users, ChevronDown, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
-import { botApi, type Bot } from '@/api/client'
+import { botApi, type Bot, type UserProjectConfig } from '@/api/client'
 import { generateUUID } from '@/lib/utils'
 
 export function BotsPage() {
@@ -31,6 +31,10 @@ export function BotsPage() {
   })
   const [newListItem, setNewListItem] = useState('')
   const [saving, setSaving] = useState(false)
+  // 用户配置状态
+  const [userProjects, setUserProjects] = useState<Record<string, UserProjectConfig[]>>({})
+  const [loadingUserProjects, setLoadingUserProjects] = useState(false)
+  const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     loadBots()
@@ -95,11 +99,42 @@ export function BotsPage() {
         })
         setNewListItem('')
         setDialogOpen(true)
+        
+        // 加载用户配置
+        loadUserProjects(bot.bot_key)
       }
     } catch (error) {
       console.error('Failed to load bot detail:', error)
       alert('加载 Bot 详情失败')
     }
+  }
+
+  const loadUserProjects = async (botKey: string) => {
+    setLoadingUserProjects(true)
+    setUserProjects({})
+    setExpandedUsers(new Set())
+    try {
+      const data = await botApi.getUserProjects(botKey)
+      if (data.success) {
+        setUserProjects(data.users)
+      }
+    } catch (error) {
+      console.error('Failed to load user projects:', error)
+    } finally {
+      setLoadingUserProjects(false)
+    }
+  }
+
+  const toggleUserExpand = (chatId: string) => {
+    setExpandedUsers(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(chatId)) {
+        newSet.delete(chatId)
+      } else {
+        newSet.add(chatId)
+      }
+      return newSet
+    })
   }
 
   const handleDelete = (bot: Bot) => {
@@ -421,6 +456,77 @@ export function BotsPage() {
                   {formData.access_mode === 'whitelist'
                     ? '只有名单中的 Chat ID 可以使用此 Bot'
                     : '名单中的 Chat ID 将被禁止使用此 Bot'}
+                </p>
+              </div>
+            )}
+
+            {/* 用户配置展示（仅编辑模式） */}
+            {editingBot && (
+              <div className="space-y-3 border border-border rounded-lg p-4">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  <label className="text-sm font-medium">用户绑定配置</label>
+                  {loadingUserProjects && (
+                    <span className="text-xs text-muted-foreground">加载中...</span>
+                  )}
+                </div>
+                
+                {Object.keys(userProjects).length === 0 && !loadingUserProjects ? (
+                  <p className="text-sm text-muted-foreground">暂无用户绑定项目</p>
+                ) : (
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                    {Object.entries(userProjects).map(([chatId, projects]) => (
+                      <div key={chatId} className="border border-border rounded">
+                        <button
+                          type="button"
+                          className="w-full flex items-center gap-2 p-2 hover:bg-muted/50 transition-colors text-left"
+                          onClick={() => toggleUserExpand(chatId)}
+                        >
+                          {expandedUsers.has(chatId) ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                          <span className="font-mono text-xs flex-1 truncate" title={chatId}>
+                            {chatId}
+                          </span>
+                          <Badge variant="secondary" className="text-xs">
+                            {projects.length} 个项目
+                          </Badge>
+                        </button>
+                        
+                        {expandedUsers.has(chatId) && (
+                          <div className="px-2 pb-2 space-y-1">
+                            {projects.map((project) => (
+                              <div
+                                key={project.id}
+                                className="flex items-center gap-2 p-2 bg-muted/30 rounded text-xs"
+                              >
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium">{project.project_name || project.project_id}</span>
+                                    {project.is_default && (
+                                      <Badge variant="outline" className="text-[10px] px-1">默认</Badge>
+                                    )}
+                                    {!project.enabled && (
+                                      <Badge variant="destructive" className="text-[10px] px-1">禁用</Badge>
+                                    )}
+                                  </div>
+                                  <div className="text-muted-foreground truncate" title={project.url_template}>
+                                    {project.url_template}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                <p className="text-xs text-muted-foreground">
+                  用户可通过 /ap 命令绑定项目，通过 /use 命令切换默认项目
                 </p>
               </div>
             )}
