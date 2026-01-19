@@ -21,7 +21,7 @@ export function BotsPage() {
     name: '',
     description: '',
     bot_key: '',
-    url_template: '',  // 继续使用 url_template，但 UI 显示为"目标 URL"
+    target_url: '',  // 使用 target_url 字段名以兼容后端
     api_key: '',
     timeout: 1200,
     access_mode: 'allow_all' as 'allow_all' | 'whitelist' | 'blacklist',
@@ -56,7 +56,7 @@ export function BotsPage() {
       name: '',
       description: '',
       bot_key: generateUUID(),
-      url_template: '',
+      target_url: '',
       api_key: '',
       timeout: 1200,
       access_mode: 'allow_all',
@@ -85,7 +85,7 @@ export function BotsPage() {
           name: detail.bot.name,
           description: detail.bot.description || '',
           bot_key: detail.bot.bot_key,
-          url_template: detail.bot.url_template?.replace('{agent_id}', detail.bot.agent_id || '') || '',
+          target_url: detail.bot.target_url?.replace('{agent_id}', detail.bot.agent_id || '') || '',
           api_key: detail.bot.api_key || '',
           timeout: detail.bot.timeout,
           access_mode: detail.bot.access_mode,
@@ -250,8 +250,8 @@ export function BotsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="max-w-[250px] truncate text-xs text-muted-foreground" title={bot.url_template}>
-                        {bot.url_template}
+                      <div className="max-w-[250px] truncate text-xs text-muted-foreground" title={bot.target_url}>
+                        {bot.target_url}
                       </div>
                     </TableCell>
                     <TableCell>
@@ -325,8 +325,8 @@ export function BotsPage() {
               <label className="text-sm font-medium">目标 URL（可选）</label>
               <Input
                 placeholder="https://example.com/a2a/your-agent-id/messages"
-                value={formData.url_template}
-                onChange={(e) => setFormData({ ...formData, url_template: e.target.value })}
+                value={formData.target_url}
+                onChange={(e) => setFormData({ ...formData, target_url: e.target.value })}
               />
               <p className="text-xs text-muted-foreground">可选：用户可通过绑定项目指定目标 Agent</p>
             </div>
