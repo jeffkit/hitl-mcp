@@ -13,8 +13,11 @@ from tunely import TunnelServer, TunnelServerConfig
 
 logger = logging.getLogger(__name__)
 
-# 全局隧道服务器实例
-tunnel_server: TunnelServer = TunnelServer()
+# 全局隧道服务器实例（配置后才初始化数据库）
+# 使用固定的 ws_path 创建，这样 router 在模块加载时就可以注册
+tunnel_server: TunnelServer = TunnelServer(
+    config=TunnelServerConfig(ws_path="/ws/tunnel")
+)
 
 # 隧道域名后缀（用于识别隧道请求）
 TUNNEL_DOMAIN_SUFFIX = ".tunnel"
@@ -22,21 +25,21 @@ TUNNEL_DOMAIN_SUFFIX = ".tunnel"
 
 async def init_tunnel_server(database_url: str) -> None:
     """
-    初始化隧道服务器
+    初始化隧道服务器的数据库连接
+    
+    注意：tunnel_server 实例在模块加载时已经创建（含 router），
+    这里只是初始化数据库连接。
     
     Args:
         database_url: 数据库连接 URL（与 Forward Service 共用）
     """
-    global tunnel_server
+    # 更新配置中的数据库 URL
+    tunnel_server.config.database_url = database_url
     
-    config = TunnelServerConfig(
-        database_url=database_url,
-        ws_path="/ws/tunnel",  # WebSocket 端点路径
-    )
-    tunnel_server = TunnelServer(config=config)
+    # 初始化数据库
     await tunnel_server.initialize()
     
-    logger.info(f"隧道服务器已初始化: ws_path={config.ws_path}")
+    logger.info(f"隧道服务器已初始化: ws_path={tunnel_server.config.ws_path}")
 
 
 def get_tunnel_server() -> TunnelServer:

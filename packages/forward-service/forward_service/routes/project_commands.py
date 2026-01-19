@@ -94,32 +94,44 @@ async def handle_add_project(
             if existing:
                 return False, f"❌ 项目 `{project_id}` 已存在\n\n💡 使用 `/projects` 或 `/lp` 查看已有项目\n💡 使用 `/rp {project_id}` 可删除后重新添加"
 
-            # 2. 测试连通性
+            # 2. 测试连通性（隧道 URL 可跳过严格测试）
+            from ..tunnel import is_tunnel_url
             test_result = await _test_agent_connectivity(url, api_key)
             
-            # 连接失败时拒绝保存
+            # 连接失败时处理
+            is_tunnel = is_tunnel_url(url)
+            tunnel_warning = None  # 用于隧道模式的警告信息
+            
             if not test_result["success"]:
-                lines = [
-                    "❌ **连接测试失败，项目未保存**",
-                    "",
-                    f"🔗 URL: `{url}`",
-                ]
-                
-                if api_key:
-                    masked_key = api_key[:4] + "***" + api_key[-4:] if len(api_key) > 8 else "***"
-                    lines.append(f"🔐 API Key: `{masked_key}`")
-                
-                lines.append("")
-                lines.append(f"❌ 错误: {test_result['error']}")
-                if test_result.get('response'):
-                    lines.append(f"📋 响应: {test_result['response'][:300]}")
-                lines.append("")
-                lines.append("💡 请检查 URL 和 API Key 是否正确后重试")
-                lines.append("📖 文档: https://agentstudio.woa.com/docs/qywx-bot")
-                
-                return False, "\n".join(lines)
+                # 对于隧道 URL，如果隧道已连接但 Agent 返回非 2xx 响应，仍然保存（用户可能需要调试）
+                if is_tunnel and "隧道未连接" not in test_result.get("error", ""):
+                    # 隧道已连接，Agent 返回错误，仍然保存项目但记录警告
+                    tunnel_warning = f"⚠️ Agent 返回: {test_result['error']}"
+                    if test_result.get('response'):
+                        tunnel_warning += f"\n📋 响应: {str(test_result['response'])[:200]}"
+                else:
+                    # 其他错误（隧道未连接或非隧道 URL 失败），拒绝保存
+                    lines = [
+                        "❌ **连接测试失败，项目未保存**",
+                        "",
+                        f"🔗 URL: `{url}`",
+                    ]
+                    
+                    if api_key:
+                        masked_key = api_key[:4] + "***" + api_key[-4:] if len(api_key) > 8 else "***"
+                        lines.append(f"🔐 API Key: `{masked_key}`")
+                    
+                    lines.append("")
+                    lines.append(f"❌ 错误: {test_result['error']}")
+                    if test_result.get('response'):
+                        lines.append(f"📋 响应: {str(test_result['response'])[:300]}")
+                    lines.append("")
+                    lines.append("💡 请检查 URL 和 API Key 是否正确后重试")
+                    lines.append("📖 文档: https://agentstudio.woa.com/docs/qywx-bot")
+                    
+                    return False, "\n".join(lines)
 
-            # 3. 连接成功，创建项目配置
+            # 3. 创建项目配置（测试成功或隧道模式允许保存）
             _project = await repo.create(
                 bot_key=bot_key,
                 chat_id=chat_id,
@@ -151,9 +163,18 @@ async def handle_add_project(
                 lines.append("⭐ 已设为默认项目")
 
             lines.append("")
-            lines.append("✅ **连接测试成功！**")
-            lines.append("")
-            lines.append("💡 **下一步**：直接发送消息开始对话！")
+            
+            # 根据测试结果显示不同的消息
+            if tunnel_warning:
+                lines.append("⚠️ **隧道已连接，但 Agent 返回错误**")
+                lines.append("")
+                lines.append(tunnel_warning)
+                lines.append("")
+                lines.append("💡 项目已保存，请检查本地 Agent 配置后重试")
+            else:
+                lines.append("✅ **连接测试成功！**")
+                lines.append("")
+                lines.append("💡 **下一步**：直接发送消息开始对话！")
 
             return True, "\n".join(lines)
 
@@ -167,18 +188,59 @@ async def _test_agent_connectivity(url: str, api_key: str | None) -> dict:
     测试 Agent 连通性
     
     发送一个测试消息，检查是否能正常响应
+    支持隧道 URL (.tunnel 后缀)
     
     Returns:
         {"success": bool, "error": str?, "response": str?}
     """
     import httpx
+    from ..tunnel import is_tunnel_url, extract_tunnel_domain, extract_tunnel_path, get_tunnel_server
     
     try:
         headers = {"Content-Type": "application/json"}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         
-        # 发送测试消息
+        # 检查是否是隧道 URL
+        if is_tunnel_url(url):
+            tunnel_domain = extract_tunnel_domain(url)
+            path = extract_tunnel_path(url)
+            
+            if not tunnel_domain:
+                return {"success": False, "error": "隧道 URL 格式错误"}
+            
+            tunnel_server = get_tunnel_server()
+            
+            # 检查隧道是否在线
+            if not tunnel_server.manager.is_connected(tunnel_domain):
+                return {
+                    "success": False, 
+                    "error": f"隧道未连接: {tunnel_domain}.tunnel\n💡 请先运行 `tunely connect` 建立连接"
+                }
+            
+            # 通过隧道转发测试请求
+            response = await tunnel_server.forward(
+                domain=tunnel_domain,
+                method="POST",
+                path=path,
+                headers=headers,
+                body={"message": "ping"},
+                timeout=15.0,
+            )
+            
+            if response.error:
+                return {"success": False, "error": response.error}
+            
+            if response.status == 200:
+                return {"success": True}
+            else:
+                return {
+                    "success": False,
+                    "error": f"HTTP {response.status}",
+                    "response": str(response.body)[:300] if response.body else ""
+                }
+        
+        # 普通 HTTP 请求
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 url,

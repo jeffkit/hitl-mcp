@@ -407,18 +407,30 @@ alembic upgrade head
 - **数据库**: agentstudio
 - **字符集**: utf8mb4
 
-#### 部署命令
+#### 部署流程
+
+**重要**: Pro 服务器使用 **main** 分支代码，必须通过 Git 部署，**禁止使用 rsync 直接同步代码**！
 
 ```bash
-# 同步代码到 Pro 服务器
-rsync -avz --exclude='__pycache__' --exclude='.venv' --exclude='data' \
-  packages/hil-server/ pro:/data/projects/hitl/packages/hil-server/
+# 1. 在本地：确保代码已提交并合并到 main 分支
+git checkout develop
+git add -A && git commit -m "fix: your change description"
+git checkout main
+git merge develop
+git push origin main
 
-rsync -avz --exclude='__pycache__' --exclude='.venv' --exclude='data' \
-  packages/forward-service/ pro:/data/projects/hitl/packages/forward-service/
+# 2. 在 Pro 服务器上：拉取代码并重启服务
+ssh pro
+cd /data/projects/hitl
+git pull origin main
 
-# 重启服务
-ssh pro "sudo systemctl restart hil-service forward-service"
+# 3. 重启服务
+sudo systemctl restart hil-service forward-service
+```
+
+**快捷部署（在 Pro 服务器执行）**:
+```bash
+cd /data/projects/hitl && git pull origin main && sudo systemctl restart forward-service hil-service
 ```
 
 ### 服务管理

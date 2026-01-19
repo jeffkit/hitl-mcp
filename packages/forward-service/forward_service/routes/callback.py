@@ -451,9 +451,11 @@ async def handle_callback(
                 chat_id=chat_id,
                 bot_key=bot.bot_key,
                 session_id=result.session_id,
-                last_message=content or "(image)"
+                last_message=content or "(image)",
+                # 保持当前项目设置，避免切换项目后会话项目丢失
+                current_project_id=current_project_id
             )
-            logger.info(f"会话已记录: session={result.session_id[:8]}...")
+            logger.info(f"会话已记录: session={result.session_id[:8]}, project={current_project_id or 'None'}...")
         
         # 发送结果给用户（使用正确的 bot_key）
         # 在消息头部添加项目名和会话 ID
