@@ -511,6 +511,6 @@ class TestCallbackForwardIntegration:
         )
 
         assert config.project_id == "user_project"
-        assert config.url_template == "https://user.api.com/webhook"
+        assert config.target_url == "https://user.api.com/webhook"
         assert config.api_key == "sk-user"
         assert config.timeout == 120

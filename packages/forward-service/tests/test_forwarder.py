@@ -49,11 +49,11 @@ class TestForwardConfig:
     def test_basic_forward_config(self):
         """测试基本的 ForwardConfig"""
         config = ForwardConfig(
-            url_template="https://api.test.com/webhook",
+            target_url="https://api.test.com/webhook",
             api_key="sk-test",
             timeout=60
         )
-        assert config.url_template == "https://api.test.com/webhook"
+        assert config.target_url == "https://api.test.com/webhook"
         assert config.api_key == "sk-test"
         assert config.timeout == 60
         assert config.project_id is None
@@ -61,7 +61,7 @@ class TestForwardConfig:
     def test_forward_config_get_url(self):
         """测试 ForwardConfig.get_url()"""
         config = ForwardConfig(
-            url_template="https://api.test.com/webhook",
+            target_url="https://api.test.com/webhook",
             api_key=None,
             timeout=60
         )
@@ -96,7 +96,7 @@ class TestGetForwardConfigForUser:
             current_project_id="test"
         )
 
-        assert config.url_template == "https://api.test.com/webhook"
+        assert config.target_url == "https://api.test.com/webhook"
         assert config.api_key == "sk-test"
         assert config.project_id == "test"
 
@@ -125,7 +125,7 @@ class TestGetForwardConfigForUser:
             current_project_id=None
         )
 
-        assert config.url_template == "https://api.default.com/webhook"
+        assert config.target_url == "https://api.default.com/webhook"
         assert config.api_key == "sk-default"
         assert config.project_id == "default_project"
         assert config.timeout == 120
@@ -154,7 +154,7 @@ class TestGetForwardConfigForUser:
                 current_project_id=None
             )
 
-            assert config.url_template == "https://api.bot.com/webhook"
+            assert config.target_url == "https://api.bot.com/webhook"
             assert config.project_id is None
 
 

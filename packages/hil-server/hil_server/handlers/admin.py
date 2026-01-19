@@ -296,9 +296,38 @@ async def forward_proxy(
                 params=request.query_params,
             )
             
-            return response.json()
+            # 检查响应状态码
+            if response.status_code >= 400:
+                logger.error(f"Forward Service 返回错误: {response.status_code}, body: {response.text[:500]}")
+                raise HTTPException(
+                    status_code=response.status_code,
+                    detail=f"Forward Service 返回错误: {response.status_code}"
+                )
+            
+            # 检查响应是否为空
+            if not response.text or not response.text.strip():
+                logger.error(f"Forward Service 返回空响应, status: {response.status_code}")
+                raise HTTPException(
+                    status_code=502,
+                    detail="Forward Service 返回空响应"
+                )
+            
+            # 尝试解析 JSON
+            try:
+                return response.json()
+            except Exception as json_error:
+                logger.error(f"Forward Service 响应非 JSON 格式: {response.text[:200]}")
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Forward Service 响应非 JSON 格式: {str(json_error)}"
+                )
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Forward Service 请求超时")
+    except httpx.ConnectError as e:
+        logger.error(f"无法连接到 Forward Service: {target_url}, error: {e}")
+        raise HTTPException(status_code=503, detail=f"无法连接到 Forward Service: {str(e)}")
+    except HTTPException:
+        raise  # 重新抛出 HTTPException
     except Exception as e:
         logger.error(f"代理请求失败: {e}")
         raise HTTPException(status_code=502, detail=f"Forward Service 请求失败: {str(e)}")
