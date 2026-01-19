@@ -2,8 +2,14 @@
 消息转发服务
 
 将用户消息转发到 Agent 并处理响应
+
+支持两种转发模式：
+1. 直连模式：直接 HTTP POST 到目标 URL
+2. 隧道模式：通过 WebSocket 隧道转发到内网 Agent
 """
+import json as json_module
 import logging
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Tuple
@@ -13,6 +19,7 @@ import httpx
 from ..config import config
 from ..database import get_db_manager
 from ..repository import get_user_project_repository
+from ..tunnel import is_tunnel_url, extract_tunnel_domain, extract_tunnel_path, get_tunnel_server
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +37,7 @@ class AgentResult:
 @dataclass
 class ForwardConfig:
     """转发配置"""
-    url_template: str
+    target_url: str
     api_key: str | None
     timeout: int
     project_id: str | None = None
@@ -38,7 +45,7 @@ class ForwardConfig:
 
     def get_url(self) -> str:
         """获取完整 URL"""
-        return self.url_template
+        return self.target_url
 
 
 async def get_forward_config_for_user(
@@ -68,7 +75,7 @@ async def get_forward_config_for_user(
                 if project and project.enabled:
                     logger.info(f"使用会话项目配置: {current_project_id}")
                     return ForwardConfig(
-                        url_template=project.url_template,
+                        target_url=project.url_template,
                         api_key=project.api_key,
                         timeout=project.timeout,
                         project_id=project.project_id,
@@ -80,7 +87,7 @@ async def get_forward_config_for_user(
             if default_project:
                 logger.info(f"使用用户默认项目: {default_project.project_id}")
                 return ForwardConfig(
-                    url_template=default_project.url_template,
+                    target_url=default_project.url_template,
                     api_key=default_project.api_key,
                     timeout=default_project.timeout,
                     project_id=default_project.project_id,
@@ -98,7 +105,7 @@ async def get_forward_config_for_user(
 
     logger.info(f"使用 Bot 默认配置: {bot.name}")
     return ForwardConfig(
-        url_template=bot.forward_config.target_url,
+        target_url=bot.forward_config.target_url,
         api_key=bot.forward_config.api_key,
         timeout=bot.forward_config.timeout,
         project_id=None,
@@ -133,7 +140,7 @@ async def forward_to_agent_with_bot(
     # 获取目标 URL
     target_url = bot.forward_config.get_url()
     if not target_url:
-        logger.warning(f"Bot {bot.name} 的 forward_config.url_template 未配置")
+        logger.warning(f"Bot {bot.name} 的 forward_config.target_url 未配置")
         return None
     
     # 获取 API Key
@@ -158,7 +165,6 @@ async def forward_to_agent_with_bot(
     start_time = datetime.now()
     
     # 生成请求 ID 用于追踪
-    import uuid
     request_id = str(uuid.uuid4())[:8]
     
     try:
@@ -238,7 +244,6 @@ async def forward_to_agent_with_bot(
                 )
             
             # 默认返回原始响应
-            import json as json_module
             return AgentResult(
                 reply=f"✅ Agent 响应:\n```\n{json_module.dumps(result, ensure_ascii=False, indent=2)[:500]}\n```",
                 msg_type="text",
@@ -316,11 +321,22 @@ async def forward_to_agent_with_user_project(
         request_body["sessionId"] = session_id
 
     start_time = datetime.now()
-
-    # 生成请求 ID 用于追踪
-    import uuid
     request_id = str(uuid.uuid4())[:8]
 
+    # === 检查是否使用隧道转发 ===
+    if is_tunnel_url(target_url):
+        return await _forward_via_tunnel(
+            target_url=target_url,
+            headers=headers,
+            request_body=request_body,
+            request_timeout=request_timeout,
+            session_id=session_id,
+            forward_config=forward_config,
+            request_id=request_id,
+            start_time=start_time,
+        )
+
+    # === 直连模式：HTTP POST ===
     try:
         # 设置超时配置
         timeout_config = httpx.Timeout(
@@ -404,7 +420,6 @@ async def forward_to_agent_with_user_project(
                 )
 
             # 默认返回原始响应
-            import json as json_module
             return AgentResult(
                 reply=f"✅ Agent 响应:\n```\n{json_module.dumps(result, ensure_ascii=False, indent=2)[:500]}\n```",
                 msg_type="text",
@@ -427,6 +442,140 @@ async def forward_to_agent_with_user_project(
         logger.error(f"[{request_id}] 转发请求失败: {e}, 耗时: {duration_ms}ms", exc_info=True)
         return AgentResult(
             reply=f"⚠️ 请求失败: {str(e)}",
+            msg_type="text",
+            project_id=forward_config.project_id,
+            project_name=forward_config.project_name
+        )
+
+
+async def _forward_via_tunnel(
+    target_url: str,
+    headers: dict,
+    request_body: dict,
+    request_timeout: int,
+    session_id: str | None,
+    forward_config: ForwardConfig,
+    request_id: str,
+    start_time: datetime,
+) -> AgentResult | None:
+    """
+    通过隧道转发请求到内网 Agent
+    
+    Args:
+        target_url: 目标 URL（如 http://my-agent.tunnel/api/chat）
+        headers: 请求头
+        request_body: 请求体
+        request_timeout: 超时时间
+        session_id: 会话 ID
+        forward_config: 转发配置
+        request_id: 请求 ID（用于追踪）
+        start_time: 请求开始时间
+        
+    Returns:
+        AgentResult 或 None
+    """
+    tunnel_domain = extract_tunnel_domain(target_url)
+    path = extract_tunnel_path(target_url)
+    
+    if not tunnel_domain:
+        logger.error(f"[{request_id}] 无法解析隧道域名: {target_url}")
+        return AgentResult(
+            reply="⚠️ 隧道 URL 格式错误",
+            msg_type="text",
+            project_id=forward_config.project_id,
+            project_name=forward_config.project_name
+        )
+    
+    logger.info(f"[{request_id}] 使用隧道转发: domain={tunnel_domain}, path={path}")
+    
+    try:
+        tunnel_server = get_tunnel_server()
+        
+        # 检查隧道是否在线
+        if not tunnel_server.manager.is_connected(tunnel_domain):
+            logger.warning(f"[{request_id}] 隧道未连接: {tunnel_domain}")
+            return AgentResult(
+                reply=f"⚠️ 隧道未连接\n\n域名: `{tunnel_domain}.tunnel`\n\n💡 请在本地运行 `tunely connect` 建立连接",
+                msg_type="text",
+                project_id=forward_config.project_id,
+                project_name=forward_config.project_name
+            )
+        
+        # 通过隧道转发请求
+        response = await tunnel_server.forward(
+            domain=tunnel_domain,
+            method="POST",
+            path=path,
+            headers=headers,
+            body=request_body,
+            timeout=float(request_timeout),
+        )
+        
+        duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        
+        # 检查隧道响应状态
+        if response.error:
+            logger.error(f"[{request_id}] 隧道转发错误: {response.error}")
+            return AgentResult(
+                reply=f"⚠️ 隧道转发失败: {response.error}",
+                msg_type="text",
+                project_id=forward_config.project_id,
+                project_name=forward_config.project_name
+            )
+        
+        if response.status != 200:
+            logger.error(f"[{request_id}] Agent 返回错误: status={response.status}")
+            body_text = json_module.dumps(response.body, ensure_ascii=False) if response.body else ""
+            return AgentResult(
+                reply=f"⚠️ Agent 返回错误\n状态码: {response.status}\n响应: {body_text[:200]}",
+                msg_type="text",
+                project_id=forward_config.project_id,
+                project_name=forward_config.project_name
+            )
+        
+        # 解析响应
+        result = response.body if isinstance(response.body, dict) else {}
+        
+        logger.debug(f"[{request_id}] 隧道响应: {result}, 耗时: {duration_ms}ms")
+        
+        # 提取字段（兼容多种格式）
+        reply = result.get("reply") or result.get("response") or result.get("message", "")
+        response_session_id = result.get("sessionId") or result.get("session_id") or session_id
+        
+        if reply:
+            return AgentResult(
+                reply=str(reply)[:2000],
+                msg_type="text",
+                session_id=response_session_id,
+                project_id=forward_config.project_id,
+                project_name=forward_config.project_name
+            )
+        
+        # 兼容其他格式
+        if "data" in result or "json" in result:
+            raw_data = result.get("json") or result.get("data", {})
+            return AgentResult(
+                reply=f"✅ 消息已处理\n\n响应数据:\n```\n{raw_data}\n```",
+                msg_type="text",
+                session_id=response_session_id,
+                project_id=forward_config.project_id,
+                project_name=forward_config.project_name
+            )
+        
+        # 默认返回原始响应
+        return AgentResult(
+            reply=f"✅ Agent 响应:\n```\n{json_module.dumps(result, ensure_ascii=False, indent=2)[:500]}\n```",
+            msg_type="text",
+            session_id=response_session_id,
+            project_id=forward_config.project_id,
+            project_name=forward_config.project_name
+        )
+        
+    except Exception as e:
+        duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
+        logger.error(f"[{request_id}] 隧道转发失败: {e}, 耗时: {duration_ms}ms", exc_info=True)
+        return AgentResult(
+            reply=f"⚠️ 隧道转发失败: {str(e)}",
             msg_type="text",
             project_id=forward_config.project_id,
             project_name=forward_config.project_name
