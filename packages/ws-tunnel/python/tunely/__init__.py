@@ -5,10 +5,11 @@ WS-Tunnel - WebSocket 透明反向代理隧道
 - 服务端嵌入到 FastAPI 应用
 - 客户端独立运行或嵌入应用
 - 预注册隧道 + Token 认证
+- SSE (Server-Sent Events) 流式响应
 - 分布式部署（可选 Redis）
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .protocol import (
     TunnelRequest,
@@ -19,6 +20,10 @@ from .protocol import (
     PingMessage,
     PongMessage,
     MessageType,
+    # 流式响应
+    StreamStartMessage,
+    StreamChunkMessage,
+    StreamEndMessage,
 )
 from .server import TunnelServer, TunnelManager
 from .client import TunnelClient
@@ -36,6 +41,10 @@ __all__ = [
     "PingMessage",
     "PongMessage",
     "MessageType",
+    # 流式响应
+    "StreamStartMessage",
+    "StreamChunkMessage",
+    "StreamEndMessage",
     # 服务端
     "TunnelServer",
     "TunnelManager",

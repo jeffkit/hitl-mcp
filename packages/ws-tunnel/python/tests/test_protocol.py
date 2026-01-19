@@ -12,6 +12,9 @@ from tunely.protocol import (
     TunnelResponse,
     PingMessage,
     PongMessage,
+    StreamStartMessage,
+    StreamChunkMessage,
+    StreamEndMessage,
     parse_message,
 )
 
@@ -75,6 +78,58 @@ class TestMessageTypes:
         assert pong.type == MessageType.PONG
 
 
+class TestStreamMessages:
+    """测试流式响应消息（SSE 支持）"""
+
+    def test_stream_start_message(self):
+        """测试流开始消息"""
+        msg = StreamStartMessage(
+            id="req-001",
+            status=200,
+            headers={"Content-Type": "text/event-stream"},
+        )
+        assert msg.type == MessageType.STREAM_START
+        assert msg.id == "req-001"
+        assert msg.status == 200
+        assert msg.headers["Content-Type"] == "text/event-stream"
+
+    def test_stream_chunk_message(self):
+        """测试流数据块消息"""
+        msg = StreamChunkMessage(
+            id="req-001",
+            data="data: hello world\n\n",
+            sequence=0,
+        )
+        assert msg.type == MessageType.STREAM_CHUNK
+        assert msg.id == "req-001"
+        assert msg.data == "data: hello world\n\n"
+        assert msg.sequence == 0
+
+    def test_stream_end_message(self):
+        """测试流结束消息"""
+        msg = StreamEndMessage(
+            id="req-001",
+            duration_ms=1500,
+            total_chunks=10,
+        )
+        assert msg.type == MessageType.STREAM_END
+        assert msg.id == "req-001"
+        assert msg.duration_ms == 1500
+        assert msg.total_chunks == 10
+        assert msg.error is None
+
+    def test_stream_end_with_error(self):
+        """测试带错误的流结束消息"""
+        msg = StreamEndMessage(
+            id="req-001",
+            error="Connection reset",
+            duration_ms=500,
+            total_chunks=5,
+        )
+        assert msg.type == MessageType.STREAM_END
+        assert msg.error == "Connection reset"
+
+
 class TestParseMessage:
     """测试消息解析"""
 
@@ -115,6 +170,42 @@ class TestParseMessage:
         data = {"type": "unknown"}
         with pytest.raises(ValueError):
             parse_message(data)
+
+    def test_parse_stream_start(self):
+        """解析流开始消息"""
+        data = {
+            "type": "stream_start",
+            "id": "req-001",
+            "status": 200,
+            "headers": {"Content-Type": "text/event-stream"},
+        }
+        msg = parse_message(data)
+        assert isinstance(msg, StreamStartMessage)
+        assert msg.status == 200
+
+    def test_parse_stream_chunk(self):
+        """解析流数据块消息"""
+        data = {
+            "type": "stream_chunk",
+            "id": "req-001",
+            "data": "data: test\n\n",
+            "sequence": 0,
+        }
+        msg = parse_message(data)
+        assert isinstance(msg, StreamChunkMessage)
+        assert msg.data == "data: test\n\n"
+
+    def test_parse_stream_end(self):
+        """解析流结束消息"""
+        data = {
+            "type": "stream_end",
+            "id": "req-001",
+            "duration_ms": 1000,
+            "total_chunks": 5,
+        }
+        msg = parse_message(data)
+        assert isinstance(msg, StreamEndMessage)
+        assert msg.total_chunks == 5
 
 
 class TestMessageSerialization:

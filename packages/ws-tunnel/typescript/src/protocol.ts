@@ -14,6 +14,11 @@ export enum MessageType {
   REQUEST = 'request',
   RESPONSE = 'response',
 
+  // 流式响应（SSE 支持）
+  STREAM_START = 'stream_start',
+  STREAM_CHUNK = 'stream_chunk',
+  STREAM_END = 'stream_end',
+
   // 心跳
   PING = 'ping',
   PONG = 'pong',
@@ -65,6 +70,33 @@ export interface TunnelResponse {
   timestamp?: string;
 }
 
+// ============== 流式响应消息（SSE 支持） ==============
+
+export interface StreamStartMessage {
+  type: MessageType.STREAM_START;
+  id: string;
+  status: number;
+  headers: Record<string, string>;
+  timestamp?: string;
+}
+
+export interface StreamChunkMessage {
+  type: MessageType.STREAM_CHUNK;
+  id: string;
+  data: string;
+  sequence?: number;
+  timestamp?: string;
+}
+
+export interface StreamEndMessage {
+  type: MessageType.STREAM_END;
+  id: string;
+  error?: string | null;
+  duration_ms?: number;
+  total_chunks?: number;
+  timestamp?: string;
+}
+
 // ============== 心跳消息 ==============
 
 export interface PingMessage {
@@ -85,6 +117,9 @@ export type Message =
   | AuthErrorMessage
   | TunnelRequest
   | TunnelResponse
+  | StreamStartMessage
+  | StreamChunkMessage
+  | StreamEndMessage
   | PingMessage
   | PongMessage;
 
