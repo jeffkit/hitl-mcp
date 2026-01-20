@@ -49,6 +49,54 @@ def main():
 
 
 @main.command()
+@click.option("--host", "-h", default="0.0.0.0", help="监听地址")
+@click.option("--port", "-p", default=8000, help="监听端口")
+@click.option("--domain", "-d", default="localhost", help="顶级域名（用于子域名解析）")
+@click.option(
+    "--database",
+    "-D",
+    default="sqlite+aiosqlite:///./data/tunely.db",
+    help="数据库连接 URL",
+)
+@click.option("--api-key", "-k", help="管理 API 密钥")
+@click.option("--ws-path", default="/ws/tunnel", help="WebSocket 路径")
+@click.option("--verbose", "-v", is_flag=True, help="详细日志")
+def serve(
+    host: str,
+    port: int,
+    domain: str,
+    database: str,
+    api_key: str,
+    ws_path: str,
+    verbose: bool,
+):
+    """启动 Tunely Server（独立隧道服务）"""
+    setup_logging(verbose)
+    
+    console.print(f"[bold blue]Tunely Server[/bold blue]")
+    console.print(f"  监听: {host}:{port}")
+    console.print(f"  域名: {domain}")
+    console.print(f"  数据库: {database}")
+    console.print(f"  WebSocket: {ws_path}")
+    console.print()
+    console.print(f"[dim]访问方式:[/dim]")
+    console.print(f"  管理 API: http://{domain}/api/tunnels")
+    console.print(f"  隧道访问: http://{{subdomain}}.{domain}/")
+    console.print()
+    
+    from .app import run_app
+    
+    run_app(
+        host=host,
+        port=port,
+        domain=domain,
+        database_url=database,
+        admin_api_key=api_key,
+        ws_path=ws_path,
+    )
+
+
+@main.command()
 @click.option(
     "--server",
     "-s",
