@@ -9,6 +9,12 @@ from pydantic_settings import BaseSettings
 class TunnelServerConfig(BaseSettings):
     """服务端配置"""
 
+    # 域名配置
+    domain: str = Field(
+        default="localhost",
+        description="顶级域名（用于子域名路由，如 tunely.woa.com）",
+    )
+
     # 数据库
     database_url: str = Field(
         default="sqlite+aiosqlite:///./data/tunnels.db",
