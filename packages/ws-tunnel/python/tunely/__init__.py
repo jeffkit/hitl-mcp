@@ -28,6 +28,7 @@ from .protocol import (
 from .server import TunnelServer, TunnelManager
 from .client import TunnelClient
 from .config import TunnelServerConfig, TunnelClientConfig
+from .app import create_full_app, run_app
 
 __all__ = [
     # 版本
@@ -52,4 +53,7 @@ __all__ = [
     # 客户端
     "TunnelClient",
     "TunnelClientConfig",
+    # 应用
+    "create_full_app",
+    "run_app",
 ]
