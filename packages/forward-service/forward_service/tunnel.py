@@ -19,11 +19,14 @@ import os
 
 # 从环境变量获取域名，默认为 tunnel（内部使用的隧道后缀）
 TUNNEL_DOMAIN = os.getenv("TUNNEL_DOMAIN", "tunnel")
+# WebSocket URL（供客户端连接使用）
+TUNNEL_WS_URL = os.getenv("TUNNEL_WS_URL", "ws://21.6.243.90:80/ws/tunnel")
 
 tunnel_server: TunnelServer = TunnelServer(
     config=TunnelServerConfig(
         ws_path="/ws/tunnel",
         domain=TUNNEL_DOMAIN,
+        ws_url=TUNNEL_WS_URL,
     )
 )
 

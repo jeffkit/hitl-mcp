@@ -23,6 +23,10 @@ class TunnelServerConfig(BaseSettings):
 
     # WebSocket 配置
     ws_path: str = Field(default="/ws/tunnel", description="WebSocket 端点路径")
+    ws_url: str | None = Field(
+        default=None,
+        description="WebSocket 完整 URL（可选，用于覆盖自动生成的 URL）",
+    )
     heartbeat_interval: int = Field(default=30, description="心跳间隔（秒）")
     heartbeat_timeout: int = Field(default=90, description="心跳超时（秒）")
 

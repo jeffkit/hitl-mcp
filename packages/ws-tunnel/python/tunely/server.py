@@ -441,7 +441,8 @@ class TunnelServer:
         @self.router.get("/api/info")
         async def get_server_info():
             """获取服务信息和域名配置规则"""
-            ws_url = f"wss://{self.config.domain}{self.config.ws_path}"
+            # 使用配置的 ws_url，或自动生成
+            ws_url = self.config.ws_url or f"wss://{self.config.domain}{self.config.ws_path}"
             
             return {
                 "name": "Tunely Server",
