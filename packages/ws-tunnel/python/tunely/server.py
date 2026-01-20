@@ -438,6 +438,25 @@ class TunnelServer:
                 timeout=request.timeout,
             )
 
+        @self.router.get("/api/info")
+        async def get_server_info():
+            """获取服务信息和域名配置规则"""
+            ws_url = f"wss://{self.config.domain}{self.config.ws_path}"
+            
+            return {
+                "name": "Tunely Server",
+                "version": "0.2.0",
+                "domain": {
+                    "pattern": f"{{subdomain}}.{self.config.domain}",
+                    "customizable": "subdomain",
+                    "suffix": f".{self.config.domain}",
+                },
+                "websocket": {
+                    "url": ws_url,
+                },
+                "protocols": ["https", "http"],
+            }
+
     def _check_admin_api_key(self, api_key: str | None) -> None:
         """检查管理 API 密钥"""
         if self.config.admin_api_key:

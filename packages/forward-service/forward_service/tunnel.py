@@ -15,8 +15,16 @@ logger = logging.getLogger(__name__)
 
 # 全局隧道服务器实例（配置后才初始化数据库）
 # 使用固定的 ws_path 创建，这样 router 在模块加载时就可以注册
+import os
+
+# 从环境变量获取域名，默认为 hitl.woa.com（Pro 服务器）
+TUNNEL_DOMAIN = os.getenv("TUNNEL_DOMAIN", "hitl.woa.com")
+
 tunnel_server: TunnelServer = TunnelServer(
-    config=TunnelServerConfig(ws_path="/ws/tunnel")
+    config=TunnelServerConfig(
+        ws_path="/ws/tunnel",
+        domain=TUNNEL_DOMAIN,
+    )
 )
 
 # 隧道域名后缀（用于识别隧道请求）
