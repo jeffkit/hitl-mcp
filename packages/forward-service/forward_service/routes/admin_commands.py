@@ -12,7 +12,7 @@ import httpx
 from sqlalchemy import select, func
 
 from ..config import config
-from ..database import get_db_manager
+from ..database import get_db_manager, get_database_url, is_mysql_database
 from ..models import ForwardLog
 from ..repository import get_system_config_repository, get_forward_log_repository, get_chatbot_repository
 
@@ -91,6 +91,10 @@ async def get_system_status() -> str:
         success_rate = (success_count / today_count * 100) if today_count > 0 else 100
         avg_str = f"{avg_duration/1000:.1f}s" if avg_duration > 1000 else f"{int(avg_duration)}ms"
         
+        # 动态检测数据库类型
+        db_url = get_database_url()
+        db_type = "MySQL" if is_mysql_database(db_url) else "SQLite"
+        
         return f"""🟢 Forward Service 状态
 
 📊 版本: 3.0.0
@@ -102,7 +106,7 @@ async def get_system_status() -> str:
 • 平均响应: {avg_str}
 
 🐍 Python: {sys.version.split()[0]}
-💾 数据库: SQLite"""
+💾 数据库: {db_type}"""
 
     except Exception as e:
         return f"⚠️ 获取系统状态失败: {e}"
