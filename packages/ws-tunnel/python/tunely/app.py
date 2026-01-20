@@ -201,6 +201,27 @@ def create_full_app(
         connected_count = len(server.manager.list_connected_domains())
         return {"status": "healthy", "connected_tunnels": connected_count}
     
+    @new_app.get("/api/info")
+    async def get_info():
+        """获取服务信息和域名配置规则"""
+        # 构建 WebSocket URL
+        scheme = "wss" if settings.port == 443 else "ws"
+        ws_url = f"{scheme}://{settings.domain}{settings.ws_path}"
+        
+        return {
+            "name": "Tunely Server",
+            "version": "0.2.0",
+            "domain": {
+                "pattern": f"{{subdomain}}.{settings.domain}",
+                "customizable": "subdomain",
+                "suffix": f".{settings.domain}",
+            },
+            "websocket": {
+                "url": ws_url,
+            },
+            "protocols": ["https", "http"],
+        }
+    
     @new_app.api_route(
         "/{path:path}",
         methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"],
