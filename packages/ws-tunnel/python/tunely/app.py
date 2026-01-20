@@ -160,6 +160,7 @@ def create_full_app(
     # 创建 TunnelServer（路由在此时注册）
     tunnel_srv = TunnelServer(
         config=TunnelServerConfig(
+            domain=domain,
             database_url=database_url,
             ws_path=ws_path,
             admin_api_key=admin_api_key,
