@@ -264,6 +264,72 @@ async def _test_agent_connectivity(url: str, api_key: str | None) -> dict:
         return {"success": False, "error": str(e)}
 
 
+async def _check_project_status(project) -> dict:
+    """
+    检查单个项目的连接状态
+    
+    Returns:
+        {"online": bool, "is_tunnel": bool, "tunnel_domain": str | None, "error": str | None}
+    """
+    from ..tunnel import is_tunnel_url, extract_tunnel_domain, get_tunnel_server
+    
+    url = project.url_template
+    result = {
+        "online": False,
+        "is_tunnel": False,
+        "tunnel_domain": None,
+        "error": None
+    }
+    
+    # 检查是否是隧道 URL
+    if is_tunnel_url(url):
+        result["is_tunnel"] = True
+        tunnel_domain = extract_tunnel_domain(url)
+        result["tunnel_domain"] = tunnel_domain
+        
+        if tunnel_domain:
+            try:
+                tunnel_server = get_tunnel_server()
+                result["online"] = tunnel_server.manager.is_connected(tunnel_domain)
+            except Exception as e:
+                result["error"] = str(e)
+        return result
+    
+    # 普通 HTTP URL - 快速 ping 检测
+    import httpx
+    try:
+        headers = {"Content-Type": "application/json"}
+        if project.api_key:
+            headers["Authorization"] = f"Bearer {project.api_key}"
+        
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            response = await client.post(
+                url,
+                json={"message": "ping"},
+                headers=headers
+            )
+            result["online"] = response.status_code < 500
+    except httpx.TimeoutException:
+        result["error"] = "超时"
+    except httpx.ConnectError:
+        result["error"] = "无法连接"
+    except Exception as e:
+        result["error"] = str(e)[:30]
+    
+    return result
+
+
+def _mask_api_key(api_key: str) -> str:
+    """
+    显示 API Key 尾号
+    
+    例: sk-1234567890abcdef -> sk-...cdef
+    """
+    if not api_key or len(api_key) < 8:
+        return "***"
+    return f"{api_key[:3]}...{api_key[-4:]}"
+
+
 async def handle_list_projects(
     bot_key: str,
     chat_id: str
@@ -271,8 +337,10 @@ async def handle_list_projects(
     """
     处理 /list-projects 或 /projects 命令
 
-    列出用户在当前 Bot 下的所有项目配置
+    列出用户在当前 Bot 下的所有项目配置，并实时检测连接状态
     """
+    import asyncio
+    
     try:
         db_manager = get_db_manager()
         async with db_manager.get_session() as session:
@@ -282,12 +350,29 @@ async def handle_list_projects(
             if not projects:
                 return True, "📭 暂无项目配置\n\n💡 使用 `/add-project <id> <url>` 添加第一个项目"
 
+            # 并发检测所有项目的连接状态
+            status_tasks = [_check_project_status(p) for p in projects]
+            statuses = await asyncio.gather(*status_tasks, return_exceptions=True)
+
             lines = ["📋 **我的项目配置**\n"]
 
-            for p in projects:
+            for i, p in enumerate(projects):
+                # 获取状态信息
+                status = statuses[i] if not isinstance(statuses[i], Exception) else {
+                    "online": False, "is_tunnel": False, "error": str(statuses[i])
+                }
+                
                 # 默认标记
                 default_mark = "⭐" if p.is_default else "📦"
                 enabled_mark = "" if p.enabled else "❌️"
+                
+                # 连接状态标记
+                if status.get("online"):
+                    conn_mark = "✅"
+                elif status.get("error"):
+                    conn_mark = "⚠️"
+                else:
+                    conn_mark = "❌"
 
                 # 项目名称显示
                 name_display = p.project_name if p.project_name else p.project_id
@@ -296,10 +381,25 @@ async def handle_list_projects(
                 lines.append(f"   🔗 {p.url_template}")
 
                 if p.api_key:
-                    lines.append("   🔑 API Key: ***")
+                    lines.append(f"   🔑 API Key: {_mask_api_key(p.api_key)}")
 
                 if p.timeout != 300:
                     lines.append(f"   ⏱️ 超时: {p.timeout}秒")
+                
+                # 连接状态行
+                if status.get("is_tunnel"):
+                    tunnel_domain = status.get("tunnel_domain", "unknown")
+                    if status.get("online"):
+                        lines.append(f"   📡 隧道: {conn_mark} `{tunnel_domain}.tunnel` 在线")
+                    else:
+                        lines.append(f"   📡 隧道: {conn_mark} `{tunnel_domain}.tunnel` 离线")
+                else:
+                    if status.get("online"):
+                        lines.append(f"   📡 状态: {conn_mark} 可连接")
+                    elif status.get("error"):
+                        lines.append(f"   📡 状态: {conn_mark} {status['error']}")
+                    else:
+                        lines.append(f"   📡 状态: {conn_mark} 无法连接")
 
                 lines.append("")  # 空行分隔
 
@@ -426,7 +526,7 @@ async def handle_use_project(
         ]
 
         if project.api_key:
-            lines.append("🔑 API Key: ***")
+            lines.append(f"🔑 API Key: {_mask_api_key(project.api_key)}")
 
         if project.timeout != 300:
             lines.append(f"⏱️ 超时: {project.timeout}秒")
@@ -472,7 +572,7 @@ async def handle_current_project(
             lines.append(f"🔗 URL: `{project.url_template}`")
 
             if project.api_key:
-                lines.append("🔑 API Key: ***")
+                lines.append(f"🔑 API Key: {_mask_api_key(project.api_key)}")
 
             if project.timeout != 300:
                 lines.append(f"⏱️ 超时: {project.timeout}秒")
