@@ -33,7 +33,7 @@ import logging
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect
@@ -132,9 +132,25 @@ class TunnelInfo(BaseModel):
     description: str | None = None
     enabled: bool
     connected: bool
+    token: str | None = None  # 可选，仅在需要时返回
     created_at: str | None = None
     last_connected_at: str | None = None
     total_requests: int = 0
+
+
+class UpdateTunnelRequest(BaseModel):
+    """更新隧道请求"""
+
+    name: str | None = None
+    description: str | None = None
+    enabled: bool | None = None
+
+
+class RegenerateTokenResponse(BaseModel):
+    """重新生成 Token 响应"""
+
+    domain: str
+    token: str
 
 
 class ForwardRequest(BaseModel):
@@ -417,12 +433,29 @@ class TunnelServer:
         ):
             return await self._get_tunnel(domain, x_api_key)
 
+        @self.router.put("/api/tunnels/{domain}", response_model=TunnelInfo)
+        async def update_tunnel(
+            domain: str,
+            request: UpdateTunnelRequest,
+            x_api_key: str | None = Header(None, alias="x-api-key"),
+        ):
+            return await self._update_tunnel(domain, request, x_api_key)
+
         @self.router.delete("/api/tunnels/{domain}")
         async def delete_tunnel(
             domain: str,
             x_api_key: str | None = Header(None, alias="x-api-key"),
         ):
             return await self._delete_tunnel(domain, x_api_key)
+
+        @self.router.post(
+            "/api/tunnels/{domain}/regenerate-token", response_model=RegenerateTokenResponse
+        )
+        async def regenerate_token(
+            domain: str,
+            x_api_key: str | None = Header(None, alias="x-api-key"),
+        ):
+            return await self._regenerate_token(domain, x_api_key)
 
         @self.router.post("/api/tunnels/{domain}/forward", response_model=ForwardResponse)
         async def forward_request(
@@ -638,6 +671,9 @@ class TunnelServer:
                 description=request.description,
             )
 
+            await session.commit()
+            await session.refresh(tunnel)
+
             return CreateTunnelResponse(
                 domain=tunnel.domain,
                 token=tunnel.token,
@@ -697,6 +733,75 @@ class TunnelServer:
                 ),
                 total_requests=tunnel.total_requests,
             )
+
+    async def _update_tunnel(
+        self, domain: str, request: UpdateTunnelRequest, api_key: str | None
+    ) -> TunnelInfo:
+        """更新隧道"""
+        self._check_admin_api_key(api_key)
+
+        if not self.db:
+            raise HTTPException(status_code=500, detail="Database not initialized")
+
+        async with self.db.session() as session:
+            repo = TunnelRepository(session)
+            tunnel = await repo.get_by_domain(domain)
+
+            if not tunnel:
+                raise HTTPException(status_code=404, detail="Tunnel not found")
+
+            # 更新字段
+            update_values = {}
+            if request.name is not None:
+                update_values['name'] = request.name
+            if request.description is not None:
+                update_values['description'] = request.description
+            if request.enabled is not None:
+                update_values['enabled'] = request.enabled
+                update_values['updated_at'] = datetime.now(timezone.utc)
+
+            if update_values:
+                from sqlalchemy import update as sql_update
+                await session.execute(
+                    sql_update(Tunnel)
+                    .where(Tunnel.domain == domain)
+                    .values(**update_values)
+                )
+                await session.commit()
+                await session.refresh(tunnel)
+
+            return TunnelInfo(
+                domain=tunnel.domain,
+                name=tunnel.name,
+                description=tunnel.description,
+                enabled=tunnel.enabled,
+                connected=self.manager.is_connected(tunnel.domain),
+                created_at=tunnel.created_at.isoformat() if tunnel.created_at else None,
+                last_connected_at=(
+                    tunnel.last_connected_at.isoformat() if tunnel.last_connected_at else None
+                ),
+                total_requests=tunnel.total_requests,
+            )
+
+    async def _regenerate_token(
+        self, domain: str, api_key: str | None
+    ) -> RegenerateTokenResponse:
+        """重新生成 Token"""
+        self._check_admin_api_key(api_key)
+
+        if not self.db:
+            raise HTTPException(status_code=500, detail="Database not initialized")
+
+        async with self.db.session() as session:
+            repo = TunnelRepository(session)
+            new_token = await repo.regenerate_token(domain)
+
+            if not new_token:
+                raise HTTPException(status_code=404, detail="Tunnel not found")
+
+            await session.commit()
+
+            return RegenerateTokenResponse(domain=domain, token=new_token)
 
     async def _delete_tunnel(self, domain: str, api_key: str | None) -> dict:
         """删除隧道"""
