@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
+import { message } from 'antd'
 import { TunnelStats } from '../components/TunnelStats'
 import { SystemInfo } from '../components/SystemInfo'
 import { api } from '../api/client'
 import type { ServerInfo } from '../types'
+import { ApiError } from '../types/errors'
 import { useTunnels } from '../hooks/useTunnels'
 
 export function Dashboard() {
@@ -16,8 +18,10 @@ export function Dashboard() {
       try {
         const info = await api.getServerInfo()
         setServerInfo(info)
-      } catch (err: any) {
-        console.error('加载服务器信息失败:', err)
+      } catch (err) {
+        const error = err instanceof ApiError ? err : new ApiError('加载失败', 500, String(err))
+        console.error('加载服务器信息失败:', error.getDetailMessage())
+        message.error(error.getUserMessage())
       } finally {
         setInfoLoading(false)
       }

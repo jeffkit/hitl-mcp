@@ -66,3 +66,6 @@ export interface TunnelLogsResponse {
   total: number
   logs: TunnelRequestLog[]
 }
+
+// 导出错误类型
+export * from './errors'

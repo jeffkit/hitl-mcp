@@ -1,27 +1,21 @@
-import { useEffect, useRef } from 'react'
-import { useTunnels } from './useTunnels'
+import { useEffect } from 'react'
+import { useTunnelStore } from '../store/tunnelStore'
+import { POLLING_CONFIG } from '../constants'
 
 /**
  * 实时更新隧道状态
  * 通过轮询方式获取最新状态
+ * 
+ * 使用全局状态管理，避免多个组件重复轮询。
  */
-export function useRealtime(interval: number = 5000) {
-  const { loadTunnels } = useTunnels()
-  const intervalRef = useRef<number | null>(null)
+export function useRealtime(interval: number = POLLING_CONFIG.DEFAULT_INTERVAL) {
+  const { startPolling, stopPolling } = useTunnelStore()
 
   useEffect(() => {
-    // 立即加载一次
-    loadTunnels()
-
-    // 设置定时轮询
-    intervalRef.current = window.setInterval(() => {
-      loadTunnels()
-    }, interval)
-
+    startPolling(interval)
+    
     return () => {
-      if (intervalRef.current !== null) {
-        clearInterval(intervalRef.current)
-      }
+      stopPolling()
     }
-  }, [loadTunnels, interval])
+  }, [interval, startPolling, stopPolling])
 }
