@@ -253,7 +253,14 @@ class TunnelClient:
                     body = request.body
 
             # 使用 stream 模式发送请求，以便检测 SSE
-            async with httpx.AsyncClient(timeout=request.timeout) as client:
+            # 配置超时：connect 30秒，read 使用请求的超时时间，write 30秒
+            timeout_config = httpx.Timeout(
+                connect=30.0,
+                read=float(request.timeout),
+                write=30.0,
+                pool=30.0,
+            )
+            async with httpx.AsyncClient(timeout=timeout_config) as client:
                 async with client.stream(
                     method=request.method,
                     url=url,

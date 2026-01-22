@@ -60,22 +60,6 @@ function App() {
     }
   }, [])
 
-  const handleSetApiKey = () => {
-    if (!apiKeyInput.trim()) {
-      message.warning('请输入 API Key')
-      return
-    }
-    setApiKey(apiKeyInput.trim())
-    setApiKeyState(apiKeyInput.trim())
-    setApiKeyInput('')
-    message.success('API Key 已设置')
-  }
-
-  const handleClearApiKey = () => {
-    setApiKey(null)
-    setApiKeyState(null)
-    message.success('API Key 已清除')
-  }
 
   const handleSaveConfig = () => {
     if (apiBaseUrlInput.trim()) {
