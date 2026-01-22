@@ -73,10 +73,13 @@ let client = createClient()
 
 // 导出函数用于更新 API Base URL
 export function updateApiBaseUrl(newBaseUrl: string) {
-  localStorage.setItem('tunely_api_base_url', newBaseUrl)
+  if (newBaseUrl.trim()) {
+    localStorage.setItem('tunely_api_base_url', newBaseUrl.trim())
+  } else {
+    localStorage.removeItem('tunely_api_base_url')
+  }
+  // 重新创建 client（但不会立即生效，需要刷新页面）
   client = createClient()
-  // 触发页面刷新以使用新的 client
-  window.location.reload()
 }
 
 export const api = {

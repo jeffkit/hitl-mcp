@@ -33,7 +33,7 @@ export interface TunnelClientConfig {
   reconnectInterval?: number;
   /** 最大重连次数（0 表示无限） */
   maxReconnectAttempts?: number;
-  /** 请求超时（毫秒） */
+  /** 请求超时（毫秒，默认 300000 = 5 分钟） */
   requestTimeout?: number;
   /** 是否强制抢占已有连接 */
   force?: boolean;
@@ -227,9 +227,12 @@ export class TunnelClient {
         body: body,
       };
 
-      const timeout = request.timeout ?? this.config.requestTimeout;
+      // request.timeout 单位是秒，this.config.requestTimeout 单位是毫秒
+      // 统一转换为秒：如果 request.timeout 存在则使用（秒），否则使用 config（毫秒转秒）
+      const timeoutSeconds = request.timeout ?? (this.config.requestTimeout / 1000);
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      // setTimeout 需要毫秒，所以乘以 1000
+      const timeoutId = setTimeout(() => controller.abort(), timeoutSeconds * 1000);
 
       try {
         const fetchResponse = await fetch(url, {

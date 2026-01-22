@@ -62,16 +62,29 @@ function App() {
 
 
   const handleSaveConfig = () => {
-    if (apiBaseUrlInput.trim()) {
+    let hasChanges = false
+    
+    if (apiBaseUrlInput.trim() !== apiBaseUrl) {
       updateApiBaseUrl(apiBaseUrlInput.trim())
       setApiBaseUrl(apiBaseUrlInput.trim())
-      message.success('后端服务地址已更新，请刷新页面')
+      hasChanges = true
     }
-    if (apiKeyInput.trim()) {
+    
+    if (apiKeyInput.trim() && apiKeyInput.trim() !== apiKey) {
       setApiKey(apiKeyInput.trim())
       setApiKeyState(apiKeyInput.trim())
-      message.success('API Key 已设置')
+      hasChanges = true
     }
+    
+    if (hasChanges) {
+      message.success('配置已保存，页面将刷新以应用更改')
+      setTimeout(() => {
+        window.location.reload()
+      }, 1000)
+    } else {
+      message.info('没有更改')
+    }
+    
     setConfigModalVisible(false)
     setApiBaseUrlInput('')
     setApiKeyInput('')
@@ -153,6 +166,7 @@ function App() {
         }}
         okText="保存"
         cancelText="取消"
+        width={600}
       >
         <Form layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item label="后端服务地址（API Base URL）">
@@ -160,17 +174,22 @@ function App() {
               placeholder="例如: http://21.6.243.90:8083/api 或 /tun-console/api"
               value={apiBaseUrlInput}
               onChange={(e) => setApiBaseUrlInput(e.target.value)}
+              onPressEnter={handleSaveConfig}
             />
             <div style={{ marginTop: 4, fontSize: 12, color: '#999' }}>
-              留空则使用默认值（相对路径）
+              留空则使用默认值（相对路径）。保存后页面会自动刷新。
             </div>
           </Form.Item>
           <Form.Item label="API Key">
             <Input.Password
-              placeholder="输入 API Key"
+              placeholder="输入 API Key（用于访问受保护的 API）"
               value={apiKeyInput}
               onChange={(e) => setApiKeyInput(e.target.value)}
+              onPressEnter={handleSaveConfig}
             />
+            <div style={{ marginTop: 4, fontSize: 12, color: '#999' }}>
+              当前配置的 Key: {apiKey ? `${apiKey.substring(0, 10)}...` : '未设置'}
+            </div>
           </Form.Item>
         </Form>
       </Modal>
