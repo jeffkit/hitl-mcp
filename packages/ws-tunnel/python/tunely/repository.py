@@ -8,7 +8,7 @@ import secrets
 from datetime import datetime, timezone
 
 from typing import List, Optional
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Tunnel, TunnelRequestLog
@@ -114,12 +114,10 @@ class TunnelRepository:
         return result.rowcount > 0
 
     async def delete(self, domain: str) -> bool:
-        """删除隧道"""
-        tunnel = await self.get_by_domain(domain)
-        if tunnel:
-            self.session.delete(tunnel)  # session.delete() 是同步方法，不需要 await
-            return True
-        return False
+        """删除隧道 - 使用 SQL DELETE 语句"""
+        stmt = delete(Tunnel).where(Tunnel.domain == domain)
+        result = await self.session.execute(stmt)
+        return result.rowcount > 0
 
     async def regenerate_token(self, domain: str) -> str | None:
         """重新生成令牌"""
