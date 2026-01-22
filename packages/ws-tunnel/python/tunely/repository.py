@@ -7,10 +7,11 @@ WS-Tunnel 数据仓库
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from typing import List, Optional
+from sqlalchemy import select, update, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Tunnel
+from .models import Tunnel, TunnelRequestLog
 
 
 class TunnelRepository:
@@ -131,3 +132,70 @@ class TunnelRepository:
         if result.rowcount > 0:
             return new_token
         return None
+
+
+class TunnelRequestLogRepository:
+    """隧道请求日志数据仓库"""
+    
+    def __init__(self, session: AsyncSession):
+        self.session = session
+    
+    async def create(
+        self,
+        tunnel_domain: str,
+        method: str,
+        path: str,
+        request_headers: dict | None = None,
+        request_body: str | None = None,
+        status_code: int | None = None,
+        response_headers: dict | None = None,
+        response_body: str | None = None,
+        error: str | None = None,
+        duration_ms: int = 0,
+    ) -> TunnelRequestLog:
+        """创建请求日志记录"""
+        import json
+        
+        log = TunnelRequestLog(
+            tunnel_domain=tunnel_domain,
+            method=method,
+            path=path[:1000],  # 限制路径长度
+            request_headers=json.dumps(request_headers) if request_headers else None,
+            request_body=request_body[:10000] if request_body else None,  # 限制请求体长度
+            status_code=status_code,
+            response_headers=json.dumps(response_headers) if response_headers else None,
+            response_body=response_body[:10000] if response_body else None,  # 限制响应体长度
+            error=error[:2000] if error else None,  # 限制错误信息长度
+            duration_ms=duration_ms,
+        )
+        self.session.add(log)
+        await self.session.flush()
+        await self.session.refresh(log)
+        return log
+    
+    async def get_recent(
+        self,
+        tunnel_domain: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[TunnelRequestLog]:
+        """获取最近的请求日志"""
+        query = select(TunnelRequestLog).order_by(TunnelRequestLog.timestamp.desc())
+        
+        if tunnel_domain:
+            query = query.where(TunnelRequestLog.tunnel_domain == tunnel_domain)
+        
+        query = query.limit(limit).offset(offset)
+        
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+    
+    async def count(self, tunnel_domain: str | None = None) -> int:
+        """统计请求日志数量"""
+        query = select(func.count(TunnelRequestLog.id))
+        
+        if tunnel_domain:
+            query = query.where(TunnelRequestLog.tunnel_domain == tunnel_domain)
+        
+        result = await self.session.execute(query)
+        return result.scalar_one() or 0

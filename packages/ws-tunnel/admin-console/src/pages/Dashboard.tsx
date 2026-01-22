@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { Card, Spin, Alert } from 'antd'
 import { TunnelStats } from '../components/TunnelStats'
 import { SystemInfo } from '../components/SystemInfo'
 import { api } from '../api/client'
@@ -7,7 +6,7 @@ import type { ServerInfo } from '../types'
 import { useTunnels } from '../hooks/useTunnels'
 
 export function Dashboard() {
-  const { tunnels, loading } = useTunnels()
+  const { tunnels } = useTunnels()
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null)
   const [infoLoading, setInfoLoading] = useState(false)
 

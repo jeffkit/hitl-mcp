@@ -6,12 +6,15 @@ import type {
   ServerInfo,
   CheckAvailabilityResponse,
   RegenerateTokenResponse,
+  TunnelLogsResponse,
 } from '../types'
 
 // 支持环境变量配置 API 地址
 // VITE_API_BASE_URL: 完整的 API 基础 URL（如 https://tunely.example.com/api）
-// 如果未设置，则使用相对路径 /api（通过 Vite 代理）
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api'
+// 如果未设置，则使用相对路径（通过 Vite 代理或 Nginx）
+// 如果设置了 base path，需要包含在路径中
+const BASE_PATH = import.meta.env.BASE_URL || ''
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${BASE_PATH}/api`
 
 const client = axios.create({
   baseURL: API_BASE_URL,
@@ -95,6 +98,18 @@ export const api = {
   async checkAvailability(name: string): Promise<CheckAvailabilityResponse> {
     const response = await client.get('/tunnels/check-availability', {
       params: { name },
+    })
+    return response.data
+  },
+
+  // 请求历史
+  async getTunnelLogs(
+    domain: string,
+    limit: number = 100,
+    offset: number = 0
+  ): Promise<TunnelLogsResponse> {
+    const response = await client.get(`/tunnels/${domain}/logs`, {
+      params: { limit, offset },
     })
     return response.data
   },

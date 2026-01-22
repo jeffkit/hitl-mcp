@@ -36,7 +36,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
-from fastapi import APIRouter, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from .config import TunnelServerConfig
@@ -55,7 +55,7 @@ from .protocol import (
     StreamEndMessage,
     parse_message,
 )
-from .repository import TunnelRepository
+from .repository import TunnelRepository, TunnelRequestLogRepository
 
 logger = logging.getLogger(__name__)
 
@@ -471,6 +471,16 @@ class TunnelServer:
                 timeout=request.timeout,
             )
 
+        @self.router.get("/api/tunnels/{domain}/logs")
+        async def get_tunnel_logs(
+            domain: str,
+            limit: int = Query(100, ge=1, le=1000),
+            offset: int = Query(0, ge=0),
+            x_api_key: str | None = Header(None, alias="x-api-key"),
+        ):
+            """获取隧道请求历史日志"""
+            return await self._get_tunnel_logs(domain, limit, offset, x_api_key)
+
         @self.router.get("/api/info")
         async def get_server_info():
             """获取服务信息和域名配置规则"""
@@ -803,6 +813,25 @@ class TunnelServer:
 
             return RegenerateTokenResponse(domain=domain, token=new_token)
 
+    async def _get_tunnel_logs(
+        self, domain: str, limit: int, offset: int, api_key: str | None
+    ) -> dict:
+        """获取隧道请求历史日志"""
+        self._check_admin_api_key(api_key)
+
+        if not self.db:
+            raise HTTPException(status_code=500, detail="Database not initialized")
+
+        async with self.db.session() as session:
+            log_repo = TunnelRequestLogRepository(session)
+            logs = await log_repo.get_recent(tunnel_domain=domain, limit=limit, offset=offset)
+            total = await log_repo.count(tunnel_domain=domain)
+
+            return {
+                "total": total,
+                "logs": [log.to_dict() for log in logs],
+            }
+
     async def _delete_tunnel(self, domain: str, api_key: str | None) -> dict:
         """删除隧道"""
         self._check_admin_api_key(api_key)
@@ -867,33 +896,128 @@ class TunnelServer:
             await conn.websocket.send_text(request.model_dump_json())
 
             # 等待响应
+            start_time = asyncio.get_event_loop().time()
             response = await asyncio.wait_for(future, timeout=timeout)
+            duration_ms = int((asyncio.get_event_loop().time() - start_time) * 1000)
 
-            # 更新统计
+            # 更新统计和记录日志
             if self.db:
                 async with self.db.session() as session:
-                    repo = TunnelRepository(session)
-                    await repo.increment_requests(conn.token)
+                    tunnel_repo = TunnelRepository(session)
+                    await tunnel_repo.increment_requests(conn.token)
+                    
+                    # 记录请求日志
+                    log_repo = TunnelRequestLogRepository(session)
+                    try:
+                        response_body_str = None
+                        if response.body:
+                            try:
+                                response_body_str = json.dumps(json.loads(response.body))
+                            except:
+                                response_body_str = str(response.body)[:10000]
+                        
+                        request_body_str = None
+                        if body:
+                            try:
+                                request_body_str = json.dumps(body)
+                            except:
+                                request_body_str = str(body)[:10000]
+                        
+                        await log_repo.create(
+                            tunnel_domain=domain,
+                            method=method,
+                            path=path,
+                            request_headers=headers,
+                            request_body=request_body_str,
+                            status_code=response.status,
+                            response_headers=response.headers,
+                            response_body=response_body_str,
+                            error=response.error,
+                            duration_ms=duration_ms,
+                        )
+                        await session.commit()
+                    except Exception as e:
+                        # 日志记录失败不应该影响请求处理
+                        logger.warning(f"记录请求日志失败: {e}")
+                        await session.rollback()
 
             return ForwardResponse(
                 status=response.status,
                 headers=response.headers,
                 body=json.loads(response.body) if response.body else None,
-                duration_ms=response.duration_ms,
+                duration_ms=duration_ms,
                 error=response.error,
             )
 
         except asyncio.TimeoutError:
-            await self.manager.fail_request(request_id, "Request timeout")
+            error_msg = "Request timeout"
+            await self.manager.fail_request(request_id, error_msg)
+            
+            # 记录错误日志
+            if self.db:
+                async with self.db.session() as session:
+                    log_repo = TunnelRequestLogRepository(session)
+                    try:
+                        request_body_str = None
+                        if body:
+                            try:
+                                request_body_str = json.dumps(body)
+                            except:
+                                request_body_str = str(body)[:10000]
+                        
+                        await log_repo.create(
+                            tunnel_domain=domain,
+                            method=method,
+                            path=path,
+                            request_headers=headers,
+                            request_body=request_body_str,
+                            status_code=504,
+                            error=error_msg,
+                            duration_ms=int(timeout * 1000),
+                        )
+                        await session.commit()
+                    except Exception as e:
+                        logger.warning(f"记录请求日志失败: {e}")
+                        await session.rollback()
+            
             return ForwardResponse(
                 status=504,
-                error="Request timeout",
+                error=error_msg,
             )
         except Exception as e:
-            await self.manager.fail_request(request_id, str(e))
+            error_msg = str(e)
+            await self.manager.fail_request(request_id, error_msg)
+            
+            # 记录错误日志
+            if self.db:
+                async with self.db.session() as session:
+                    log_repo = TunnelRequestLogRepository(session)
+                    try:
+                        request_body_str = None
+                        if body:
+                            try:
+                                request_body_str = json.dumps(body)
+                            except:
+                                request_body_str = str(body)[:10000]
+                        
+                        await log_repo.create(
+                            tunnel_domain=domain,
+                            method=method,
+                            path=path,
+                            request_headers=headers,
+                            request_body=request_body_str,
+                            status_code=500,
+                            error=error_msg,
+                            duration_ms=0,
+                        )
+                        await session.commit()
+                    except Exception as e:
+                        logger.warning(f"记录请求日志失败: {e}")
+                        await session.rollback()
+            
             return ForwardResponse(
                 status=500,
-                error=str(e),
+                error=error_msg,
             )
 
     async def forward_stream(

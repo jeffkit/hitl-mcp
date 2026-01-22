@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react'
-import { Layout, Menu, Card, Input, Button, message } from 'antd'
+import { Layout, Menu, Input, Button, message } from 'antd'
 import {
   DashboardOutlined,
   CloudServerOutlined,
-  SettingOutlined,
 } from '@ant-design/icons'
 import { Dashboard } from './pages/Dashboard'
 import { Tunnels } from './pages/Tunnels'

@@ -1,4 +1,4 @@
-import { Modal, Form, Input, Switch, message } from 'antd'
+import { Modal, Form, Input, Switch } from 'antd'
 import { useEffect } from 'react'
 import type { Tunnel, CreateTunnelRequest, UpdateTunnelRequest } from '../types'
 
@@ -34,7 +34,7 @@ export function TunnelForm({ open, tunnel, onCancel, onSuccess, onSubmit }: Tunn
       await onSubmit(values)
       form.resetFields()
       onSuccess()
-    } catch (err) {
+    } catch (err: any) {
       // 表单验证错误或提交错误
       if (err?.errorFields) {
         // 表单验证错误，不需要处理
