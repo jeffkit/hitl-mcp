@@ -6,30 +6,75 @@
 - 通过隧道转发 HTTP 请求到内网 Agent
 - 企微命令管理隧道
 """
+import json
 import logging
+import os
+from pathlib import Path
 from typing import Optional
 
 from tunely import TunnelServer, TunnelServerConfig
 
 logger = logging.getLogger(__name__)
 
+
+def load_tunnel_config() -> dict:
+    """
+    加载隧道服务器配置
+    
+    优先级（从高到低）：
+    1. 环境变量
+    2. JSON 配置文件 (TUNNEL_CONFIG_FILE 指定的路径，或默认 data/tunnel_config.json)
+    3. 默认值
+    
+    Returns:
+        配置字典
+    """
+    config = {
+        "ws_path": "/ws/tunnel",
+        "domain": "tunnel",
+        "ws_url": "ws://21.6.243.90:80/ws/tunnel",
+        "admin_api_key": None,
+        "instruction": None,
+    }
+    
+    # 1. 尝试从 JSON 文件加载
+    config_file = os.getenv("TUNNEL_CONFIG_FILE", "data/tunnel_config.json")
+    config_path = Path(config_file)
+    
+    if config_path.exists():
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                json_config = json.load(f)
+                config.update(json_config)
+                logger.info(f"已从 JSON 文件加载隧道配置: {config_path}")
+        except Exception as e:
+            logger.warning(f"加载隧道配置文件失败: {e}")
+    
+    # 2. 环境变量覆盖（优先级最高）
+    if domain := os.getenv("TUNNEL_DOMAIN"):
+        config["domain"] = domain
+    if ws_url := os.getenv("TUNNEL_WS_URL"):
+        config["ws_url"] = ws_url
+    if admin_api_key := os.getenv("TUNNEL_ADMIN_API_KEY") or os.getenv("WS_TUNNEL_ADMIN_API_KEY"):
+        config["admin_api_key"] = admin_api_key
+    if instruction := os.getenv("WS_TUNNEL_INSTRUCTION"):
+        config["instruction"] = instruction
+    
+    return config
+
+
+# 加载配置
+tunnel_config = load_tunnel_config()
+
 # 全局隧道服务器实例（配置后才初始化数据库）
 # 使用固定的 ws_path 创建，这样 router 在模块加载时就可以注册
-import os
-
-# 从环境变量获取域名，默认为 tunnel（内部使用的隧道后缀）
-TUNNEL_DOMAIN = os.getenv("TUNNEL_DOMAIN", "tunnel")
-# WebSocket URL（供客户端连接使用）
-TUNNEL_WS_URL = os.getenv("TUNNEL_WS_URL", "ws://21.6.243.90:80/ws/tunnel")
-# 管理 API Key（用于管理台访问）
-TUNNEL_ADMIN_API_KEY = os.getenv("TUNNEL_ADMIN_API_KEY", os.getenv("WS_TUNNEL_ADMIN_API_KEY"))
-
 tunnel_server: TunnelServer = TunnelServer(
     config=TunnelServerConfig(
-        ws_path="/ws/tunnel",
-        domain=TUNNEL_DOMAIN,
-        ws_url=TUNNEL_WS_URL,
-        admin_api_key=TUNNEL_ADMIN_API_KEY,
+        ws_path=tunnel_config["ws_path"],
+        domain=tunnel_config["domain"],
+        ws_url=tunnel_config["ws_url"],
+        admin_api_key=tunnel_config["admin_api_key"],
+        instruction=tunnel_config["instruction"],
     )
 )
 
