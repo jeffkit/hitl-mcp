@@ -13,15 +13,14 @@ import type {
 // VITE_API_BASE_URL: 完整的 API 基础 URL（如 https://tunely.example.com/api）
 // 如果未设置，则使用相对路径（通过 Vite 代理或 Nginx）
 // 如果设置了 base path，需要包含在路径中
+// 优先使用 localStorage 中配置的 API Base URL
 const BASE_PATH = import.meta.env.BASE_URL || ''
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || `${BASE_PATH}/api`
-
-const client = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
+const getStoredApiBaseUrl = () => {
+  const stored = localStorage.getItem('tunely_api_base_url')
+  if (stored) return stored
+  return import.meta.env.VITE_API_BASE_URL || `${BASE_PATH.replace(/\/$/, '')}/api`
+}
+const API_BASE_URL = getStoredApiBaseUrl()
 
 // 从 localStorage 获取 API Key
 function getApiKey(): string | null {
@@ -37,26 +36,49 @@ export function setApiKey(apiKey: string | null) {
   }
 }
 
-// 请求拦截器：添加 API Key
-client.interceptors.request.use((config) => {
-  const apiKey = getApiKey()
-  if (apiKey) {
-    config.headers['x-api-key'] = apiKey
-  }
-  return config
-})
+// 动态创建 client，支持运行时更新 baseURL
+function createClient() {
+  const baseURL = getStoredApiBaseUrl()
+  const newClient = axios.create({
+    baseURL: baseURL,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
 
-// 响应拦截器：处理错误
-client.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      // API Key 无效，清除
-      setApiKey(null)
+  // 请求拦截器：添加 API Key
+  newClient.interceptors.request.use((config) => {
+    const apiKey = getApiKey()
+    if (apiKey) {
+      config.headers['x-api-key'] = apiKey
     }
-    return Promise.reject(error)
-  }
-)
+    return config
+  })
+
+  // 响应拦截器：处理错误
+  newClient.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response?.status === 401) {
+        // API Key 无效，清除
+        setApiKey(null)
+      }
+      return Promise.reject(error)
+    }
+  )
+
+  return newClient
+}
+
+let client = createClient()
+
+// 导出函数用于更新 API Base URL
+export function updateApiBaseUrl(newBaseUrl: string) {
+  localStorage.setItem('tunely_api_base_url', newBaseUrl)
+  client = createClient()
+  // 触发页面刷新以使用新的 client
+  window.location.reload()
+}
 
 export const api = {
   // 服务器信息

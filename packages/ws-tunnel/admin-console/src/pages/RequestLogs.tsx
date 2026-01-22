@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Table, Card, Tag, Button, Space, Descriptions, Modal, message, Select } from 'antd'
 import { ReloadOutlined, EyeOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
-import type { TunnelRequestLog, Tunnel } from '../types'
+import type { TunnelRequestLog } from '../types'
 import { formatDateTime, formatDuration } from '../utils/format'
 import { useTunnels } from '../hooks/useTunnels'
 
