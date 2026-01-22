@@ -3,9 +3,11 @@ import { Layout, Menu, Input, Button, message } from 'antd'
 import {
   DashboardOutlined,
   CloudServerOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons'
 import { Dashboard } from './pages/Dashboard'
 import { Tunnels } from './pages/Tunnels'
+import { RequestLogs } from './pages/RequestLogs'
 import { setApiKey } from './api/client'
 import type { MenuProps } from 'antd'
 
@@ -24,10 +26,16 @@ const menuItems: MenuItem[] = [
     icon: <CloudServerOutlined />,
     label: '隧道管理',
   },
+  {
+    key: 'logs',
+    icon: <HistoryOutlined />,
+    label: '请求历史',
+  },
 ]
 
 function App() {
   const [selectedKey, setSelectedKey] = useState('dashboard')
+  const [selectedTunnelDomain, setSelectedTunnelDomain] = useState<string | null>(null)
   const [apiKey, setApiKeyState] = useState<string | null>(
     localStorage.getItem('tunely_api_key')
   )
@@ -113,7 +121,13 @@ function App() {
             }}
           >
             {selectedKey === 'dashboard' && <Dashboard />}
-            {selectedKey === 'tunnels' && <Tunnels />}
+            {selectedKey === 'tunnels' && (
+              <Tunnels onViewLogs={(domain) => {
+                setSelectedTunnelDomain(domain)
+                setSelectedKey('logs')
+              }} />
+            )}
+            {selectedKey === 'logs' && <RequestLogs tunnelDomain={selectedTunnelDomain} />}
           </Content>
         </Layout>
       </Layout>

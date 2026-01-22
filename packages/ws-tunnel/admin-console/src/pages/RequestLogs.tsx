@@ -1,21 +1,28 @@
 import { useState, useEffect } from 'react'
-import { Table, Card, Tag, Button, Space, Descriptions, Modal, Spin, message } from 'antd'
+import { Table, Card, Tag, Button, Space, Descriptions, Modal, message, Select } from 'antd'
 import { ReloadOutlined, EyeOutlined } from '@ant-design/icons'
 import { api } from '../api/client'
-import type { TunnelRequestLog } from '../types'
+import type { TunnelRequestLog, Tunnel } from '../types'
 import { formatDateTime, formatDuration } from '../utils/format'
+import { useTunnels } from '../hooks/useTunnels'
 
 interface RequestLogsProps {
   tunnelDomain: string | null
 }
 
-export function RequestLogs({ tunnelDomain }: RequestLogsProps) {
+export function RequestLogs({ tunnelDomain: initialTunnelDomain }: RequestLogsProps) {
+  const { tunnels } = useTunnels()
+  const [tunnelDomain, setTunnelDomain] = useState<string | null>(initialTunnelDomain)
   const [logs, setLogs] = useState<TunnelRequestLog[]>([])
   const [loading, setLoading] = useState(false)
   const [total, setTotal] = useState(0)
   const [selectedLog, setSelectedLog] = useState<TunnelRequestLog | null>(null)
   const [detailVisible, setDetailVisible] = useState(false)
   const [pagination, setPagination] = useState({ current: 1, pageSize: 50 })
+
+  useEffect(() => {
+    setTunnelDomain(initialTunnelDomain)
+  }, [initialTunnelDomain])
 
   const loadLogs = async () => {
     if (!tunnelDomain) {
@@ -147,22 +154,41 @@ export function RequestLogs({ tunnelDomain }: RequestLogsProps) {
         title={
           <Space>
             <span>请求历史</span>
+            <Select
+              placeholder="选择隧道"
+              value={tunnelDomain}
+              onChange={(value) => {
+                setTunnelDomain(value)
+                setPagination({ current: 1, pageSize: 50 })
+              }}
+              style={{ width: 200 }}
+              showSearch
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              options={tunnels.map(t => ({
+                label: t.name || t.domain,
+                value: t.domain,
+              }))}
+            />
             {tunnelDomain && (
-              <Tag color="blue">{tunnelDomain}</Tag>
+              <>
+                <Tag color="blue">{tunnelDomain}</Tag>
+                <Button
+                  icon={<ReloadOutlined />}
+                  onClick={loadLogs}
+                  loading={loading}
+                >
+                  刷新
+                </Button>
+              </>
             )}
-            <Button
-              icon={<ReloadOutlined />}
-              onClick={loadLogs}
-              loading={loading}
-            >
-              刷新
-            </Button>
           </Space>
         }
       >
         {!tunnelDomain ? (
           <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-            请先选择一个隧道查看请求历史
+            请在上方选择一个隧道查看请求历史
           </div>
         ) : (
           <Table

@@ -6,7 +6,11 @@ import { useTunnels } from '../hooks/useTunnels'
 import { useRealtime } from '../hooks/useRealtime'
 import type { Tunnel, CreateTunnelRequest, UpdateTunnelRequest } from '../types'
 
-export function Tunnels() {
+interface TunnelsProps {
+  onViewLogs?: (domain: string) => void
+}
+
+export function Tunnels({ onViewLogs }: TunnelsProps = {}) {
   const {
     tunnels,
     loading,
@@ -69,6 +73,7 @@ export function Tunnels() {
         onEdit={handleEdit}
         onDelete={deleteTunnel}
         onRegenerateToken={regenerateToken}
+        onViewLogs={onViewLogs}
       />
       <TunnelForm
         open={formOpen}
