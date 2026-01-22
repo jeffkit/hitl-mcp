@@ -45,6 +45,11 @@ class TunnelServerConfig(BaseSettings):
         default=None, description="管理 API 密钥（用于创建/删除隧道）"
     )
 
+    # 用户提示信息
+    instruction: str | None = Field(
+        default=None, description="接入用户须知说明（在 /api/info 接口中返回）"
+    )
+
     model_config = {
         "env_prefix": "WS_TUNNEL_",
         "env_file": ".env",

@@ -487,7 +487,7 @@ class TunnelServer:
             # 使用配置的 ws_url，或自动生成
             ws_url = self.config.ws_url or f"wss://{self.config.domain}{self.config.ws_path}"
             
-            return {
+            result = {
                 "name": "Tunely Server",
                 "version": "0.2.0",
                 "domain": {
@@ -500,6 +500,12 @@ class TunnelServer:
                 },
                 "protocols": ["https", "http"],
             }
+            
+            # 添加 instruction 字段（如果配置了）
+            if self.config.instruction:
+                result["instruction"] = self.config.instruction
+            
+            return result
 
     def _check_admin_api_key(self, api_key: str | None) -> None:
         """检查管理 API 密钥"""
