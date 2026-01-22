@@ -141,7 +141,7 @@ requires-dist = [
     { name = "pymysql", specifier = ">=1.1.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "sqlalchemy", specifier = ">=2.0.0" },
-    { name = "tunely", specifier = ">=0.1.2" },
+    { name = "tunely", editable = "../ws-tunnel/python" },
     { name = "uvicorn", specifier = ">=0.32.0" },
 ]
 
@@ -512,8 +512,8 @@ wheels = [
 
 [[package]]
 name = "tunely"
-version = "0.1.2"
-source = { registry = "https://pypi.org/simple" }
+version = "0.2.0"
+source = { editable = "../ws-tunnel/python" }
 dependencies = [
     { name = "aiosqlite" },
     { name = "click" },
@@ -526,10 +526,29 @@ dependencies = [
     { name = "uvicorn" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/d3/14/809840f7aa9abca861bc857201d7b6c478c784005cd460b806f9b16afdeb/tunely-0.1.2.tar.gz", hash = "sha256:117b91c80ab1f4e7647ed5cf1fb6d730cc92d1e027374a6cac96a99f9a047cbd", size = 32521, upload-time = "2026-01-19T14:21:43.493Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/74/5f/9154ed065d18bc1daaa15e69dbf0a24835c25938fe116819eabc3a3e6c24/tunely-0.1.2-py3-none-any.whl", hash = "sha256:93100f8e53c5af435476fff09eeca3c8400510299c6f9adf4c4b863424b59b5b", size = 20396, upload-time = "2026-01-19T14:21:41.017Z" },
+
+[package.metadata]
+requires-dist = [
+    { name = "aiomysql", marker = "extra == 'mysql'", specifier = ">=0.2.0" },
+    { name = "aiosqlite", specifier = ">=0.19.0" },
+    { name = "asyncpg", marker = "extra == 'postgres'", specifier = ">=0.29.0" },
+    { name = "click", specifier = ">=8.1.0" },
+    { name = "fastapi", specifier = ">=0.109.0" },
+    { name = "httpx", specifier = ">=0.26.0" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.26.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic-settings", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.1.0" },
+    { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.0" },
+    { name = "rich", specifier = ">=13.0.0" },
+    { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
+    { name = "tunely", extras = ["mysql", "postgres", "redis", "dev"], marker = "extra == 'all'" },
+    { name = "uvicorn", specifier = ">=0.27.0" },
+    { name = "websockets", specifier = ">=12.0" },
 ]
+provides-extras = ["mysql", "postgres", "redis", "dev", "all"]
 
 [[package]]
 name = "typing-extensions"

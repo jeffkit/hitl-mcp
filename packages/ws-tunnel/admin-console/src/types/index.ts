@@ -46,3 +46,23 @@ export interface RegenerateTokenResponse {
   domain: string
   token: string
 }
+
+export interface TunnelRequestLog {
+  id: number
+  timestamp: string
+  tunnel_domain: string
+  method: string
+  path: string
+  request_headers: Record<string, string> | null
+  request_body: string | null
+  status_code: number | null
+  response_headers: Record<string, string> | null
+  response_body: string | null
+  error: string | null
+  duration_ms: number
+}
+
+export interface TunnelLogsResponse {
+  total: number
+  logs: TunnelRequestLog[]
+}

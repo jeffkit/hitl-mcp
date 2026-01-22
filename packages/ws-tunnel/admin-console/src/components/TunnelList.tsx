@@ -1,9 +1,9 @@
+import { useState } from 'react'
 import {
   Table,
   Button,
   Space,
   Popconfirm,
-  message,
   Tooltip,
   Modal,
 } from 'antd'
@@ -12,11 +12,13 @@ import {
   DeleteOutlined,
   ReloadOutlined,
   PlusOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import type { Tunnel } from '../types'
 import { StatusBadge } from './StatusBadge'
 import { formatDate, formatRelativeTime, formatNumber } from '../utils/format'
+import { RequestLogs } from '../pages/RequestLogs'
 
 interface TunnelListProps {
   tunnels: Tunnel[]
@@ -35,6 +37,9 @@ export function TunnelList({
   onDelete,
   onRegenerateToken,
 }: TunnelListProps) {
+  const [logsModalVisible, setLogsModalVisible] = useState(false)
+  const [selectedTunnelDomain, setSelectedTunnelDomain] = useState<string | null>(null)
+
   const handleRegenerateToken = async (domain: string) => {
     try {
       const result = await onRegenerateToken(domain)
@@ -118,6 +123,17 @@ export function TunnelList({
           <Button
             type="link"
             size="small"
+            icon={<HistoryOutlined />}
+            onClick={() => {
+              setSelectedTunnelDomain(record.domain)
+              setLogsModalVisible(true)
+            }}
+          >
+            日志
+          </Button>
+          <Button
+            type="link"
+            size="small"
             icon={<EditOutlined />}
             onClick={() => onEdit(record)}
           >
@@ -167,6 +183,20 @@ export function TunnelList({
           showTotal: (total) => `共 ${total} 条`,
         }}
       />
+      
+      <Modal
+        title={`请求历史 - ${selectedTunnelDomain}`}
+        open={logsModalVisible}
+        onCancel={() => {
+          setLogsModalVisible(false)
+          setSelectedTunnelDomain(null)
+        }}
+        footer={null}
+        width="90%"
+        style={{ top: 20 }}
+      >
+        <RequestLogs tunnelDomain={selectedTunnelDomain} />
+      </Modal>
     </div>
   )
 }
