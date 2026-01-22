@@ -27,6 +27,7 @@ interface TunnelListProps {
   onEdit: (tunnel: Tunnel) => void
   onDelete: (domain: string) => void
   onRegenerateToken: (domain: string) => Promise<{ domain: string; token: string } | void>
+  onViewLogs?: (domain: string) => void
 }
 
 export function TunnelList({
@@ -36,6 +37,7 @@ export function TunnelList({
   onEdit,
   onDelete,
   onRegenerateToken,
+  onViewLogs,
 }: TunnelListProps) {
   const [logsModalVisible, setLogsModalVisible] = useState(false)
   const [selectedTunnelDomain, setSelectedTunnelDomain] = useState<string | null>(null)
@@ -125,8 +127,12 @@ export function TunnelList({
             size="small"
             icon={<HistoryOutlined />}
             onClick={() => {
-              setSelectedTunnelDomain(record.domain)
-              setLogsModalVisible(true)
+              if (onViewLogs) {
+                onViewLogs(record.domain)
+              } else {
+                setSelectedTunnelDomain(record.domain)
+                setLogsModalVisible(true)
+              }
             }}
           >
             日志
