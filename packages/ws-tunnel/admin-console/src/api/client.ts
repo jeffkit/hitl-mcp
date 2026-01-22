@@ -20,7 +20,6 @@ const getStoredApiBaseUrl = () => {
   if (stored) return stored
   return import.meta.env.VITE_API_BASE_URL || `${BASE_PATH.replace(/\/$/, '')}/api`
 }
-const API_BASE_URL = getStoredApiBaseUrl()
 
 // 从 localStorage 获取 API Key
 function getApiKey(): string | null {
