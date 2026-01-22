@@ -21,12 +21,15 @@ import os
 TUNNEL_DOMAIN = os.getenv("TUNNEL_DOMAIN", "tunnel")
 # WebSocket URL（供客户端连接使用）
 TUNNEL_WS_URL = os.getenv("TUNNEL_WS_URL", "ws://21.6.243.90:80/ws/tunnel")
+# 管理 API Key（用于管理台访问）
+TUNNEL_ADMIN_API_KEY = os.getenv("TUNNEL_ADMIN_API_KEY", os.getenv("WS_TUNNEL_ADMIN_API_KEY"))
 
 tunnel_server: TunnelServer = TunnelServer(
     config=TunnelServerConfig(
         ws_path="/ws/tunnel",
         domain=TUNNEL_DOMAIN,
         ws_url=TUNNEL_WS_URL,
+        admin_api_key=TUNNEL_ADMIN_API_KEY,
     )
 )
 

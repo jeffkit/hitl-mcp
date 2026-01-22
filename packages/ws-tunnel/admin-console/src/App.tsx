@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react'
-import { Layout, Menu, Input, Button, message } from 'antd'
+import { Layout, Menu, Input, Button, message, Modal, Form } from 'antd'
 import {
   DashboardOutlined,
   CloudServerOutlined,
   HistoryOutlined,
+  SettingOutlined,
 } from '@ant-design/icons'
 import { Dashboard } from './pages/Dashboard'
 import { Tunnels } from './pages/Tunnels'
 import { RequestLogs } from './pages/RequestLogs'
-import { setApiKey } from './api/client'
+import { setApiKey, updateApiBaseUrl } from './api/client'
 import type { MenuProps } from 'antd'
 
 const { Header, Content, Sider } = Layout
@@ -40,12 +41,22 @@ function App() {
     localStorage.getItem('tunely_api_key')
   )
   const [apiKeyInput, setApiKeyInput] = useState('')
+  const [apiBaseUrl, setApiBaseUrl] = useState<string>(
+    localStorage.getItem('tunely_api_base_url') || ''
+  )
+  const [apiBaseUrlInput, setApiBaseUrlInput] = useState('')
+  const [configModalVisible, setConfigModalVisible] = useState(false)
 
   useEffect(() => {
     // 检查是否有 API Key
     const stored = localStorage.getItem('tunely_api_key')
     if (stored) {
       setApiKeyState(stored)
+    }
+    // 检查是否有 API Base URL
+    const storedBaseUrl = localStorage.getItem('tunely_api_base_url')
+    if (storedBaseUrl) {
+      setApiBaseUrl(storedBaseUrl)
     }
   }, [])
 
@@ -66,6 +77,22 @@ function App() {
     message.success('API Key 已清除')
   }
 
+  const handleSaveConfig = () => {
+    if (apiBaseUrlInput.trim()) {
+      updateApiBaseUrl(apiBaseUrlInput.trim())
+      setApiBaseUrl(apiBaseUrlInput.trim())
+      message.success('后端服务地址已更新，请刷新页面')
+    }
+    if (apiKeyInput.trim()) {
+      setApiKey(apiKeyInput.trim())
+      setApiKeyState(apiKeyInput.trim())
+      message.success('API Key 已设置')
+    }
+    setConfigModalVisible(false)
+    setApiBaseUrlInput('')
+    setApiKeyInput('')
+  }
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header style={{ background: '#001529', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -73,32 +100,31 @@ function App() {
           Tunely Server - 管理台
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {apiKey ? (
-            <>
-              <span style={{ color: '#fff', marginRight: 8 }}>
-                API Key: <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 2 }}>
-                  {apiKey.substring(0, 10)}...
-                </code>
-              </span>
-              <Button size="small" onClick={handleClearApiKey}>
-                清除
-              </Button>
-            </>
-          ) : (
-            <>
-              <Input
-                placeholder="输入 API Key"
-                value={apiKeyInput}
-                onChange={(e) => setApiKeyInput(e.target.value)}
-                onPressEnter={handleSetApiKey}
-                style={{ width: 200 }}
-                size="small"
-              />
-              <Button type="primary" size="small" onClick={handleSetApiKey}>
-                设置
-              </Button>
-            </>
+          {apiBaseUrl && (
+            <span style={{ color: '#fff', marginRight: 8, fontSize: 12 }}>
+              后端: <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 2 }}>
+                {apiBaseUrl.length > 30 ? apiBaseUrl.substring(0, 30) + '...' : apiBaseUrl}
+              </code>
+            </span>
           )}
+          {apiKey && (
+            <span style={{ color: '#fff', marginRight: 8, fontSize: 12 }}>
+              Key: <code style={{ background: 'rgba(255,255,255,0.1)', padding: '2px 6px', borderRadius: 2 }}>
+                {apiKey.substring(0, 10)}...
+              </code>
+            </span>
+          )}
+          <Button
+            size="small"
+            icon={<SettingOutlined />}
+            onClick={() => {
+              setApiBaseUrlInput(apiBaseUrl)
+              setApiKeyInput(apiKey || '')
+              setConfigModalVisible(true)
+            }}
+          >
+            配置
+          </Button>
         </div>
       </Header>
       <Layout>
@@ -131,6 +157,39 @@ function App() {
           </Content>
         </Layout>
       </Layout>
+
+      <Modal
+        title="配置后端服务"
+        open={configModalVisible}
+        onOk={handleSaveConfig}
+        onCancel={() => {
+          setConfigModalVisible(false)
+          setApiBaseUrlInput('')
+          setApiKeyInput('')
+        }}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Form layout="vertical" style={{ marginTop: 16 }}>
+          <Form.Item label="后端服务地址（API Base URL）">
+            <Input
+              placeholder="例如: http://21.6.243.90:8083/api 或 /tun-console/api"
+              value={apiBaseUrlInput}
+              onChange={(e) => setApiBaseUrlInput(e.target.value)}
+            />
+            <div style={{ marginTop: 4, fontSize: 12, color: '#999' }}>
+              留空则使用默认值（相对路径）
+            </div>
+          </Form.Item>
+          <Form.Item label="API Key">
+            <Input.Password
+              placeholder="输入 API Key"
+              value={apiKeyInput}
+              onChange={(e) => setApiKeyInput(e.target.value)}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </Layout>
   )
 }
