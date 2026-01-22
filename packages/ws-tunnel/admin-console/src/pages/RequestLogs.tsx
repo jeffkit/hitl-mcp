@@ -1,10 +1,15 @@
 import { useState, useEffect } from 'react'
 import { Table, Card, Tag, Button, Space, Descriptions, Modal, message, Select } from 'antd'
 import { ReloadOutlined, EyeOutlined } from '@ant-design/icons'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneLight } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { api } from '../api/client'
 import type { TunnelRequestLog } from '../types'
+import { ApiError } from '../types/errors'
 import { formatDateTime, formatDuration } from '../utils/format'
+import { formatJsonString, isJsonString } from '../utils/json'
 import { useTunnels } from '../hooks/useTunnels'
+import { PAGINATION_CONFIG, UI_CONFIG } from '../constants'
 
 interface RequestLogsProps {
   tunnelDomain: string | null
@@ -18,7 +23,10 @@ export function RequestLogs({ tunnelDomain: initialTunnelDomain }: RequestLogsPr
   const [total, setTotal] = useState(0)
   const [selectedLog, setSelectedLog] = useState<TunnelRequestLog | null>(null)
   const [detailVisible, setDetailVisible] = useState(false)
-  const [pagination, setPagination] = useState({ current: 1, pageSize: 50 })
+  const [pagination, setPagination] = useState({
+    current: 1,
+    pageSize: PAGINATION_CONFIG.DEFAULT_PAGE_SIZE,
+  })
 
   useEffect(() => {
     setTunnelDomain(initialTunnelDomain)
@@ -41,8 +49,9 @@ export function RequestLogs({ tunnelDomain: initialTunnelDomain }: RequestLogsPr
       )
       setLogs(response.logs)
       setTotal(response.total)
-    } catch (err: any) {
-      message.error(`加载请求历史失败: ${err.message}`)
+    } catch (err) {
+      const error = err instanceof ApiError ? err : new ApiError('加载失败', 500, String(err))
+      message.error(error.getUserMessage())
       setLogs([])
       setTotal(0)
     } finally {
@@ -159,7 +168,7 @@ export function RequestLogs({ tunnelDomain: initialTunnelDomain }: RequestLogsPr
               value={tunnelDomain}
               onChange={(value) => {
                 setTunnelDomain(value)
-                setPagination({ current: 1, pageSize: 50 })
+                setPagination({ current: 1, pageSize: PAGINATION_CONFIG.DEFAULT_PAGE_SIZE })
               }}
               style={{ width: 200 }}
               showSearch
@@ -203,7 +212,10 @@ export function RequestLogs({ tunnelDomain: initialTunnelDomain }: RequestLogsPr
               showSizeChanger: true,
               showTotal: (total) => `共 ${total} 条记录`,
               onChange: (page, pageSize) => {
-                setPagination({ current: page, pageSize: pageSize || 50 })
+                setPagination({
+                  current: page,
+                  pageSize: pageSize || PAGINATION_CONFIG.DEFAULT_PAGE_SIZE,
+                })
               },
             }}
           />
@@ -215,70 +227,172 @@ export function RequestLogs({ tunnelDomain: initialTunnelDomain }: RequestLogsPr
         open={detailVisible}
         onCancel={() => setDetailVisible(false)}
         footer={null}
-        width={800}
+        width={UI_CONFIG.MODAL_MAX_WIDTH}
       >
         {selectedLog && (
-          <Descriptions column={1} bordered>
-            <Descriptions.Item label="时间">
-              {formatDateTime(selectedLog.timestamp)}
-            </Descriptions.Item>
-            <Descriptions.Item label="隧道域名">
-              {selectedLog.tunnel_domain}
-            </Descriptions.Item>
-            <Descriptions.Item label="方法">
-              <Tag color={getMethodColor(selectedLog.method)}>
-                {selectedLog.method}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="路径">
-              <code>{selectedLog.path}</code>
-            </Descriptions.Item>
-            <Descriptions.Item label="状态码">
-              {selectedLog.status_code ? (
-                <Tag color={getStatusColor(selectedLog.status_code)}>
-                  {selectedLog.status_code}
+          <>
+            {/* 紧凑的基础信息区域 */}
+            <Descriptions column={2} bordered size="small" style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="时间" span={1}>
+                {formatDateTime(selectedLog.timestamp)}
+              </Descriptions.Item>
+              <Descriptions.Item label="隧道域名" span={1}>
+                {selectedLog.tunnel_domain}
+              </Descriptions.Item>
+              <Descriptions.Item label="方法" span={1}>
+                <Tag color={getMethodColor(selectedLog.method)}>
+                  {selectedLog.method}
                 </Tag>
-              ) : (
-                '-'
+              </Descriptions.Item>
+              <Descriptions.Item label="路径" span={1}>
+                <code style={{ fontSize: '12px' }}>{selectedLog.path}</code>
+              </Descriptions.Item>
+              <Descriptions.Item label="状态码" span={1}>
+                {selectedLog.status_code ? (
+                  <Tag color={getStatusColor(selectedLog.status_code)}>
+                    {selectedLog.status_code}
+                  </Tag>
+                ) : (
+                  '-'
+                )}
+              </Descriptions.Item>
+              <Descriptions.Item label="耗时" span={1}>
+                {formatDuration(selectedLog.duration_ms)}
+              </Descriptions.Item>
+              {selectedLog.error && (
+                <Descriptions.Item label="错误信息" span={2}>
+                  <Tag color="error">{selectedLog.error}</Tag>
+                </Descriptions.Item>
               )}
-            </Descriptions.Item>
-            <Descriptions.Item label="耗时">
-              {formatDuration(selectedLog.duration_ms)}
-            </Descriptions.Item>
-            {selectedLog.error && (
-              <Descriptions.Item label="错误信息">
-                <Tag color="error">{selectedLog.error}</Tag>
-              </Descriptions.Item>
-            )}
+            </Descriptions>
+
+            {/* 请求头 - 代码块显示 */}
             {selectedLog.request_headers && (
-              <Descriptions.Item label="请求头">
-                <pre style={{ maxHeight: '200px', overflow: 'auto' }}>
-                  {JSON.stringify(selectedLog.request_headers, null, 2)}
-                </pre>
-              </Descriptions.Item>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ marginBottom: 8, fontWeight: 500 }}>请求头</div>
+                <div style={{ border: '1px solid #d9d9d9', borderRadius: '4px', overflow: 'hidden' }}>
+                  <SyntaxHighlighter
+                    language="json"
+                    style={oneLight}
+                    wrapLines={true}
+                    wrapLongLines={true}
+                    customStyle={{
+                      margin: 0,
+                      maxHeight: '500px',
+                      overflow: 'auto',
+                      fontSize: '13px',
+                      padding: '12px',
+                      backgroundColor: '#fafafa',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      overflowWrap: 'break-word',
+                    }}
+                  >
+                    {JSON.stringify(selectedLog.request_headers, null, 2)}
+                  </SyntaxHighlighter>
+                </div>
+              </div>
             )}
+
+            {/* 请求体 - 代码块显示 */}
             {selectedLog.request_body && (
-              <Descriptions.Item label="请求体">
-                <pre style={{ maxHeight: '200px', overflow: 'auto' }}>
-                  {selectedLog.request_body}
-                </pre>
-              </Descriptions.Item>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ marginBottom: 8, fontWeight: 500 }}>请求体</div>
+                <div style={{ border: '1px solid #d9d9d9', borderRadius: '4px', overflow: 'hidden' }}>
+                  <SyntaxHighlighter
+                    language={isJsonString(selectedLog.request_body) ? 'json' : 'text'}
+                    style={oneLight}
+                    wrapLines={true}
+                    wrapLongLines={true}
+                    customStyle={{
+                      margin: 0,
+                      maxHeight: '500px',
+                      overflow: 'auto',
+                      fontSize: '13px',
+                      padding: '12px',
+                      backgroundColor: '#fafafa',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      overflowWrap: 'break-word',
+                    }}
+                  >
+                    {formatJsonString(selectedLog.request_body)}
+                  </SyntaxHighlighter>
+                </div>
+              </div>
             )}
+
+            {/* 响应头 - 代码块显示 */}
             {selectedLog.response_headers && (
-              <Descriptions.Item label="响应头">
-                <pre style={{ maxHeight: '200px', overflow: 'auto' }}>
-                  {JSON.stringify(selectedLog.response_headers, null, 2)}
-                </pre>
-              </Descriptions.Item>
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ marginBottom: 8, fontWeight: 500 }}>响应头</div>
+                <div style={{ border: '1px solid #d9d9d9', borderRadius: '4px', overflow: 'hidden' }}>
+                  <SyntaxHighlighter
+                    language="json"
+                    style={oneLight}
+                    wrapLines={true}
+                    wrapLongLines={true}
+                    customStyle={{
+                      margin: 0,
+                      maxHeight: '500px',
+                      overflow: 'auto',
+                      fontSize: '13px',
+                      padding: '12px',
+                      backgroundColor: '#fafafa',
+                      whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word',
+                      overflowWrap: 'break-word',
+                    }}
+                  >
+                    {JSON.stringify(selectedLog.response_headers, null, 2)}
+                  </SyntaxHighlighter>
+                </div>
+              </div>
             )}
-            {selectedLog.response_body && (
-              <Descriptions.Item label="响应体">
-                <pre style={{ maxHeight: '200px', overflow: 'auto' }}>
-                  {selectedLog.response_body}
-                </pre>
-              </Descriptions.Item>
-            )}
-          </Descriptions>
+
+            {/* 响应体 - 代码块显示 */}
+            {selectedLog.response_body && (() => {
+              // 先尝试格式化，如果失败则使用原始内容
+              let formattedBody: string
+              let bodyIsJson: boolean
+              
+              try {
+                formattedBody = formatJsonString(selectedLog.response_body)
+                bodyIsJson = isJsonString(selectedLog.response_body) || 
+                           (formattedBody.trim().startsWith('{') || formattedBody.trim().startsWith('['))
+              } catch {
+                formattedBody = selectedLog.response_body
+                bodyIsJson = false
+              }
+              
+              return (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ marginBottom: 8, fontWeight: 500 }}>响应体</div>
+                  <div style={{ border: '1px solid #d9d9d9', borderRadius: '4px', overflow: 'hidden' }}>
+                    <SyntaxHighlighter
+                      language={bodyIsJson ? 'json' : 'text'}
+                      style={oneLight}
+                      wrapLines={true}
+                      wrapLongLines={true}
+                      customStyle={{
+                        margin: 0,
+                        maxHeight: '500px',
+                        overflow: 'auto',
+                        fontSize: '13px',
+                        padding: '12px',
+                        backgroundColor: '#fafafa',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        overflowWrap: 'break-word',
+                      }}
+                    >
+                      {formattedBody}
+                    </SyntaxHighlighter>
+                  </div>
+                </div>
+              )
+            })()}
+          </>
         )}
       </Modal>
     </div>

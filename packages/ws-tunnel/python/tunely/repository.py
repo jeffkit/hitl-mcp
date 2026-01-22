@@ -117,7 +117,7 @@ class TunnelRepository:
         """删除隧道"""
         tunnel = await self.get_by_domain(domain)
         if tunnel:
-            await self.session.delete(tunnel)
+            self.session.delete(tunnel)  # session.delete() 是同步方法，不需要 await
             return True
         return False
 

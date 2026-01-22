@@ -3,7 +3,6 @@ import { Modal } from 'antd'
 import { TunnelList } from '../components/TunnelList'
 import { TunnelForm } from '../components/TunnelForm'
 import { useTunnels } from '../hooks/useTunnels'
-import { useRealtime } from '../hooks/useRealtime'
 import type { Tunnel, CreateTunnelRequest, UpdateTunnelRequest } from '../types'
 
 interface TunnelsProps {
@@ -19,9 +18,6 @@ export function Tunnels({ onViewLogs }: TunnelsProps = {}) {
     deleteTunnel,
     regenerateToken,
   } = useTunnels()
-
-  // 实时更新
-  useRealtime(5000)
 
   const [formOpen, setFormOpen] = useState(false)
   const [editingTunnel, setEditingTunnel] = useState<Tunnel | null>(null)
