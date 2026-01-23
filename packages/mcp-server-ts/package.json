@@ -1,5 +1,5 @@
 {
-  "name": "@hitl/mcp-server",
+  "name": "hitl-mcp",
   "version": "0.2.1",
   "description": "Human-in-the-Loop MCP Server for WeCom (企业微信) - TypeScript Implementation",
   "type": "module",
@@ -37,12 +37,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/user/hil-mcp.git",
-    "directory": "mcp_server_ts"
+    "url": "git+ssh://git@github.com/jeffkit/tunely.git",
+    "directory": "packages/mcp-server-ts"
   },
-  "homepage": "https://github.com/user/hil-mcp#readme",
+  "homepage": "https://github.com/jeffkit/tunely#readme",
   "bugs": {
-    "url": "https://github.com/user/hil-mcp/issues"
+    "url": "https://github.com/jeffkit/tunely/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
