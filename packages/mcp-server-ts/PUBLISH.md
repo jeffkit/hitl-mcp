@@ -1,6 +1,6 @@
 # 发布到 npm 指南
 
-本文档说明如何将 TypeScript 版 hitl-mcp 发布到 npm。
+本文档说明如何将 `hitl-mcp` (TypeScript 版) 发布到 npm。
 
 ## 前置准备
 
@@ -27,7 +27,7 @@ npm whoami
 ### 步骤 1：确保代码已构建
 
 ```bash
-cd /Users/kongjie/projects/hil-mcp/mcp_server_ts
+cd /Users/kongjie/projects/hil-mcp/packages/mcp-server-ts
 pnpm run build
 ```
 
@@ -48,27 +48,25 @@ npm pack --dry-run
 ```bash
 # 在临时目录测试
 npm pack
-npm install -g ./hitl-mcp-server-0.2.1.tgz
+npm install -g ./hitl-mcp-0.2.1.tgz
 hitl-mcp --help
-npm uninstall -g @hitl/mcp-server
+npm uninstall -g hitl-mcp
 ```
 
 ### 步骤 4：发布到 npm
 
 ```bash
-npm publish --access public
+npm publish
 ```
-
-> **注意**：由于包名带 `@` scope（`@hitl/mcp-server`），需要使用 `--access public` 参数。
 
 ### 步骤 5：验证发布
 
 ```bash
 # 查看 npm 上的包信息
-npm view @hitl/mcp-server
+npm view hitl-mcp
 
 # 测试安装
-npx -y @hitl/mcp-server --help
+npx -y hitl-mcp --help
 ```
 
 ## 版本管理
@@ -109,7 +107,7 @@ git push --tags
 如果发布后发现问题，可以在 72 小时内撤销：
 
 ```bash
-npm unpublish @hitl/mcp-server@0.2.1
+npm unpublish hitl-mcp@0.2.1
 ```
 
 > **警告**：撤销发布会影响已经使用该版本的用户。建议直接发布修复版本。
@@ -118,7 +116,7 @@ npm unpublish @hitl/mcp-server@0.2.1
 
 ### Q: 包名已被占用
 
-如果 `@hitl/mcp-server` 已被占用，可以更改为：
+如果 `hitl-mcp` 已被占用，可以更改为：
 - `@your-username/hitl-mcp`
 - `hitl-mcp-ts`
 - `wecom-hitl-mcp`
@@ -127,19 +125,18 @@ npm unpublish @hitl/mcp-server@0.2.1
 
 确保：
 1. 已登录 npm（`npm whoami`）
-2. 使用了 `--access public` 参数
-3. 有权限发布该 scope 下的包
+2. 有权限发布该包
 
 ### Q: 如何测试未发布的包？
 
 使用 `npm link`：
 
 ```bash
-cd /Users/kongjie/projects/hil-mcp/mcp_server_ts
+cd /Users/kongjie/projects/hil-mcp/packages/mcp-server-ts
 npm link
 
 # 在其他项目中
-npm link @hitl/mcp-server
+npm link hitl-mcp
 ```
 
 ## 发布检查清单
@@ -152,7 +149,7 @@ npm link @hitl/mcp-server
 - [ ] 包内容正确（`npm pack --dry-run`）
 - [ ] 已登录 npm（`npm whoami`）
 - [ ] Git 已提交所有更改
-- [ ] 准备好发布（`npm publish --access public`）
+- [ ] 准备好发布（`npm publish`）
 
 ## 自动化发布（可选）
 
@@ -179,7 +176,7 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
       - run: pnpm install
       - run: pnpm run build
-      - run: npm publish --access public
+      - run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 ```

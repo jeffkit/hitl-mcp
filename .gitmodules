@@ -1,0 +1,3 @@
+[submodule "packages/ws-tunnel"]
+	path = packages/ws-tunnel
+	url = git@github.com:jeffkit/tunely.git

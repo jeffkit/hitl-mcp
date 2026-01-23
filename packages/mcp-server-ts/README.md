@@ -1,4 +1,4 @@
-# Human-in-the-Loop MCP for WeCom (企业微信) - TypeScript
+# hitl-mcp - Human-in-the-Loop MCP for WeCom (企业微信)
 
 让 AI Agent 能够发送消息到企业微信并等待用户回复的 MCP 服务（TypeScript 实现）。
 
@@ -28,7 +28,7 @@
       "command": "npx",
       "args": [
         "-y",
-        "@hitl/mcp-server",
+        "hitl-mcp",
         "--service-url", "http://hitl.woa.com/api",
         "--chat-id", "your-chat-id",
         "--project-name", "my-project"
@@ -47,10 +47,10 @@
 
 ```bash
 # 使用 pnpm（推荐）
-pnpm add -g @hitl/mcp-server
+pnpm add -g hitl-mcp
 
 # 或使用 npm
-npm install -g @hitl/mcp-server
+npm install -g hitl-mcp
 ```
 
 然后在 MCP 配置中：
@@ -79,8 +79,8 @@ npm install -g @hitl/mcp-server
 
 ```bash
 # 克隆仓库
-git clone https://github.com/user/hil-mcp.git
-cd hil-mcp/mcp_server_ts
+git clone git@github.com:jeffkit/tunely.git
+cd tunely/packages/mcp-server-ts
 
 # 安装依赖
 pnpm install
@@ -100,7 +100,7 @@ node dist/index.js --service-url http://hitl.woa.com/api --chat-id your-chat-id
     "wecom-hil": {
       "command": "node",
       "args": [
-        "/path/to/hil-mcp/mcp_server_ts/dist/index.js",
+        "/path/to/tunely/packages/mcp-server-ts/dist/index.js",
         "--service-url", "http://hitl.woa.com/api",
         "--chat-id", "your-chat-id"
       ],
@@ -152,7 +152,7 @@ node dist/index.js --service-url http://hitl.woa.com/api --chat-id your-chat-id
   "mcpServers": {
     "wecom-hil": {
       "command": "npx",
-      "args": ["-y", "@hitl/mcp-server"],
+      "args": ["-y", "hitl-mcp"],
       "env": {
         "SERVICE_URL": "http://hitl.woa.com/api",
         "DEFAULT_CHAT_ID": "your-chat-id",
@@ -299,7 +299,7 @@ npm publish --access public
 使用 `-y` 参数可以跳过确认，或者全局安装：
 
 ```bash
-pnpm add -g @hitl/mcp-server
+pnpm add -g hitl-mcp
 ```
 
 然后在 MCP 配置中直接使用 `hitl-mcp` 命令。
