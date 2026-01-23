@@ -7,18 +7,12 @@
 ```
 hil-mcp/
 ├── packages/               # 核心服务（Monorepo）
-│   ├── forward-service/    # 消息转发服务
 │   ├── hil-server/         # HIL 服务器
+│   ├── devcloud-worker/    # DevCloud Worker
 │   ├── mcp-server-py/      # MCP Server (Python)
-│   ├── mcp-server-ts/      # MCP Server (TypeScript)
-│   └── devcloud-worker/    # DevCloud Worker
-├── website/                # 静态网站（首页/文档）
+│   └── mcp-server-ts/      # MCP Server (TypeScript)
 ├── docs/                   # 项目文档
-├── scripts/                # 部署和工具脚本
-│   ├── deploy/             # 部署脚本
-│   ├── migrations/         # 数据迁移脚本
-│   └── tools/              # 工具脚本
-└── tests/                  # 集成测试
+└── scripts/                # 部署和工具脚本
 ```
 
 ## 功能特性
@@ -32,7 +26,6 @@ hil-mcp/
 - ⚙️ **空闲提示配置** - JSON 配置文件 + 热更新 + 管理台可视化配置
 - ⚡ **一键安装** - 通过 `uvx` 或 `pipx` 无需预先安装
 - 🌐 **双模式支持** - Relay 中转模式（公网）和 Direct 直连模式（内网）
-- 🔄 **消息转发服务** - 支持用户主动发消息触发外部服务（Forward Service）
 
 ---
 
