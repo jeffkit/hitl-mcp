@@ -222,6 +222,57 @@ class TestRelayStorageMemory:
         assert updated.status == "timeout"
     
     @pytest.mark.asyncio
+    async def test_update_chat_type(self, storage):
+        """测试更新 chat_type"""
+        # 创建会话时使用默认的 chat_type="group"
+        session = await storage.create_session(
+            chat_id="chat-single-123",
+            chat_type="group",  # MCP Client 默认值
+            message="测试消息"
+        )
+        
+        assert session.chat_type == "group"
+        
+        # 模拟企微回调返回真实的 chat_type="single"
+        result = await storage.update_chat_type(session.session_id, "single")
+        assert result is True
+        
+        # 验证已更新
+        updated = await storage.get_session(session.session_id)
+        assert updated.chat_type == "single"
+    
+    @pytest.mark.asyncio
+    async def test_handle_callback_updates_chat_type(self, storage):
+        """测试回调处理时自动更新 chat_type"""
+        # 创建会话时使用默认的 chat_type="group"
+        session = await storage.create_session(
+            chat_id="wokSFfCgAAimChUpCX7QnUR8_mlwkU3A",
+            chat_type="group",
+            message="测试消息"
+        )
+        
+        assert session.chat_type == "group"
+        
+        # 模拟企微回调（单聊）
+        callback_data = {
+            "chatid": "wokSFfCgAAimChUpCX7QnUR8_mlwkU3A",
+            "chattype": "single",  # 真实的 chat_type
+            "msgtype": "text",
+            "text": {"content": f"@机器人 收到"},
+            "from": {"userid": "testuser", "name": "测试用户"}
+        }
+        
+        result = await storage.handle_callback(callback_data)
+        
+        # 验证回调成功
+        assert result["success"] is True
+        
+        # 验证 chat_type 已更新为 "single"
+        updated = await storage.get_session(session.session_id)
+        assert updated.chat_type == "single"
+        assert updated.status == "replied"
+    
+    @pytest.mark.asyncio
     async def test_cleanup_expired(self, storage):
         """测试清理过期会话"""
         # 创建一个已过期的会话
