@@ -472,6 +472,36 @@ class RelayStorage:
             
             return True
     
+    async def update_chat_type(self, session_id: str, chat_type: str) -> bool:
+        """
+        更新会话的 chat_type
+        
+        当企微回调返回真实的 chattype 时，更新会话中的 chat_type
+        """
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            
+            # 如果 chat_type 没有变化，跳过更新
+            if session.chat_type == chat_type:
+                return True
+            
+            logger.info(f"更新会话 chat_type: {session_id[:8]} {session.chat_type} -> {chat_type}")
+            session.chat_type = chat_type
+            
+            # 更新数据库（如果启用）
+            if self._db_manager:
+                from .models import HILSession
+                async with self._db_manager.session() as db:
+                    await db.execute(
+                        update(HILSession)
+                        .where(HILSession.session_id == session_id)
+                        .values(chat_type=chat_type, updated_at=datetime.now())
+                    )
+            
+            return True
+    
     # ========== 回调处理 ==========
     
     async def handle_callback(self, data: dict) -> dict:
@@ -483,6 +513,7 @@ class RelayStorage:
         """
         chat_id = data.get("chatid", "")
         msg_type = data.get("msgtype", "")
+        chat_type = data.get("chattype", "group")  # 从回调中获取真实的 chat_type
         
         # 忽略某些事件类型
         if msg_type in ("event", "enter_chat"):
@@ -516,6 +547,9 @@ class RelayStorage:
                 }
         
         if session:
+            # 更新 chat_type（使用回调中的真实值）
+            await self.update_chat_type(session.session_id, chat_type)
+            # 添加回复
             await self.add_reply(session.session_id, reply)
             return {
                 "success": True,
