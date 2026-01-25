@@ -246,9 +246,9 @@ class TestSendMessageDirect:
     
     @pytest.mark.asyncio
     async def test_split_message_page_numbers(self):
-        """分拆消息的分页号"""
+        """分拆消息的分页号（群聊）"""
         # 创建需要分拆的消息
-        long_message = "x" * 5000  # 超过 4K
+        long_message = "x" * 5000  # 超过限制
         
         with patch('hil_server.sender.send_to_wecom') as mock_send:
             mock_send.return_value = {"errcode": 0, "errmsg": "ok"}
@@ -258,7 +258,8 @@ class TestSendMessageDirect:
                 message=long_message,
                 chat_id="chat123",
                 project_name="Test",
-                wait_reply=True
+                wait_reply=True,
+                chat_type="group"  # 明确指定为群聊
             )
             
             total_parts = result["parts_sent"]
@@ -269,6 +270,49 @@ class TestSendMessageDirect:
                 sent_message = call.kwargs["message"]
                 expected_page = f"({i+1}/{total_parts})"
                 assert expected_page in sent_message
+    
+    @pytest.mark.asyncio
+    async def test_single_chat_with_file_link(self):
+        """单聊场景：超长消息生成文件链接"""
+        # 创建需要截断的超长消息
+        long_message = "测试内容\n" * 500  # 约 3.5KB
+        
+        with patch('hil_server.sender.send_to_wecom') as mock_send, \
+             patch('hil_server.sender.get_file_storage') as mock_storage:
+            mock_send.return_value = {"errcode": 0, "errmsg": "ok"}
+            
+            # Mock 文件存储
+            mock_file_storage = MagicMock()
+            mock_file_storage.save_message.return_value = (
+                "message_abc123.md",
+                "http://example.com/files/message_abc123.md"
+            )
+            mock_storage.return_value = mock_file_storage
+            
+            result = await send_message_direct(
+                short_id="abc123",
+                message=long_message,
+                chat_id="chat456",
+                project_name="TestProject",
+                wait_reply=True,
+                chat_type="single"  # 单聊场景
+            )
+            
+            # 验证结果
+            assert result["success"] is True
+            assert result["parts_sent"] == 1  # 单聊只发送一条
+            assert "file_url" in result  # 包含文件链接
+            assert result["file_url"] == "http://example.com/files/message_abc123.md"
+            
+            # 验证文件存储被调用
+            mock_file_storage.save_message.assert_called_once()
+            
+            # 验证发送的消息包含文件链接
+            mock_send.assert_called_once()
+            sent_message = mock_send.call_args.kwargs["message"]
+            assert "完整内容" in sent_message
+            assert "http://example.com/files/message_abc123.md" in sent_message
+            assert "请回复" in sent_message
 
 
 class TestSendToWecom:
