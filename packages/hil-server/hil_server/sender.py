@@ -98,15 +98,26 @@ def send_to_wecom(
         # 详细记录 fly-pigeon 响应
         logger.info(f"[Direct] fly-pigeon 响应: {result}")
         
-        # 检查是否有错误码
-        if result and isinstance(result, dict):
-            errcode = result.get("errcode", 0)
-            errmsg = result.get("errmsg", "")
-            
-            if errcode != 0:
-                logger.error(f"[Direct] ⚠️  fly-pigeon 返回错误: errcode={errcode}, errmsg={errmsg}, chat_id={chat_id}")
+        # 提取响应内容（fly-pigeon 返回的是 Response 对象）
+        response_data = {}
+        if hasattr(result, 'json'):
+            try:
+                response_data = result.json() if callable(result.json) else result.json
+            except Exception:
+                response_data = {"errcode": 0, "errmsg": "ok"}
+        elif isinstance(result, dict):
+            response_data = result
+        else:
+            response_data = {"errcode": 0, "errmsg": "ok"}
         
-        return result or {"errcode": 0, "errmsg": "ok"}
+        # 检查是否有错误码
+        errcode = response_data.get("errcode", 0)
+        errmsg = response_data.get("errmsg", "")
+        
+        if errcode != 0:
+            logger.error(f"[Direct] ⚠️  fly-pigeon 返回错误: errcode={errcode}, errmsg={errmsg}, chat_id={chat_id}")
+        
+        return response_data
         
     except Exception as e:
         logger.error(f"[Direct] fly-pigeon 发送失败: {e}", exc_info=True)
