@@ -157,7 +157,7 @@ async def send_message(request: SendMessageRequest):
                 chat_id=request.chat_id,
                 project_name=request.project_name,
                 images=request.images,
-                chat_type=request.chat_type,
+                chat_type=chat_type,  # 使用查询到的 chat_type，而不是 request.chat_type
                 wait_reply=request.wait_reply,
             )
         else:
