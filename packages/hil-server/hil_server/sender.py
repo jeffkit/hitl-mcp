@@ -132,26 +132,16 @@ async def send_message_direct(
         { success: bool, error?: str, parts_sent?: int, file_url?: str }
     """
     try:
-        # 检查是否需要特殊处理（消息超过 4K）
+        # 检查是否需要分拆（消息超过限制）
         if needs_split(message, short_id, project_name, wait_reply):
-            if chat_type == "single":
-                # 单聊：截断消息并生成文件链接
-                result = await _send_single_chat_with_file(
-                    message=message,
-                    short_id=short_id,
-                    project_name=project_name,
-                    chat_id=chat_id,
-                    wait_reply=wait_reply
-                )
-            else:
-                # 群聊：分拆成多条消息
-                result = await _send_group_chat_split(
-                    message=message,
-                    short_id=short_id,
-                    project_name=project_name,
-                    chat_id=chat_id,
-                    wait_reply=wait_reply
-                )
+            # 无论单聊还是群聊，都使用分拆策略
+            result = await _send_group_chat_split(
+                message=message,
+                short_id=short_id,
+                project_name=project_name,
+                chat_id=chat_id,
+                wait_reply=wait_reply
+            )
         else:
             # 不需要分拆，使用原有逻辑
             formatted_message = format_message_with_header(message, short_id, project_name, wait_reply)
