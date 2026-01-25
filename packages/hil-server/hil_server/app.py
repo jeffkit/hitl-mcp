@@ -8,6 +8,7 @@ HIL Server 主应用 (Human-in-the-Loop Server)
 """
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -133,6 +134,14 @@ if website_dir.exists():
     static_dir = website_dir / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# 挂载文件存储目录（用于单聊超长消息文件链接）
+file_storage_dir = Path(os.getenv("FILE_STORAGE_DIR", "/data/projects/hitl/static/files"))
+if file_storage_dir.exists():
+    app.mount("/files", StaticFiles(directory=str(file_storage_dir)), name="files")
+    logger.info(f"挂载文件存储目录: /files -> {file_storage_dir}")
+else:
+    logger.warning(f"文件存储目录不存在: {file_storage_dir}")
 
 # 挂载新版管理台（React）
 console_dir = Path(__file__).parent / "console" / "dist"
