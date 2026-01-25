@@ -1,7 +1,8 @@
 """
 消息分拆器
 
-企业微信单条消息最大 4096 字节（约 4K），当消息过长时需要分拆。
+企业微信单条消息有字节限制，当消息过长时需要分拆。
+实际限制可能因企微后端/fly-pigeon而异，建议设置为 2048 字节。
 分拆后的每条消息都需要添加头部标识，方便用户回复。
 """
 import logging
@@ -9,8 +10,22 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# 企微消息最大字节数
-MAX_MESSAGE_BYTES = 4096
+def get_max_message_bytes() -> int:
+    """
+    获取消息最大字节数配置
+    
+    从配置中读取，默认 2048 字节（2KB）
+    这个值小于企微官方 4096 字节限制，
+    因为实践发现 fly-pigeon 或企微后端可能在 2048 字节处分拆
+    """
+    try:
+        from .config import config
+        return config.max_message_bytes
+    except:
+        return 2048  # 默认 2KB
+
+# 企微消息最大字节数（从配置读取）
+MAX_MESSAGE_BYTES = get_max_message_bytes()
 
 # 预留字节数（用于头部和分页信息）
 HEADER_RESERVE_BYTES = 150
@@ -77,13 +92,9 @@ def split_message_content(
             
             # 按字符分拆超长行
             split_lines = _split_long_line(line, max_bytes)
-            for i, split_line in enumerate(split_lines):
-                if i < len(split_lines) - 1:
-                    parts.append(split_line)
-                else:
-                    # 最后一段加入当前累积
-                    current_part.append(split_line)
-                    current_bytes = get_string_bytes(split_line)
+            # 将所有分拆的段落都添加到 parts 中
+            for split_line in split_lines:
+                parts.append(split_line)
             continue
         
         # 检查添加这行后是否超过限制

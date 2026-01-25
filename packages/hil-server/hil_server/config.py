@@ -60,6 +60,13 @@ class HILConfig(BaseSettings):
         description="心跳超时时间（秒），应大于 heartbeat_interval * 2"
     )
     
+    # ========== 消息分拆配置 ==========
+    max_message_bytes: int = Field(
+        default=2048,
+        alias="MAX_MESSAGE_BYTES",
+        description="单条消息最大字节数（建议2048，企微后端可能在此限制分拆）"
+    )
+    
     # ========== Forward Service 配置（用于统一管理台）==========
     forward_service_url: str = Field(
         default="",
