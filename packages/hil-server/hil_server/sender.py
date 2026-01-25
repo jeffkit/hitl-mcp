@@ -67,7 +67,7 @@ def send_to_wecom(
     
     bot = Bot(bot_key=bot_key)
     
-    logger.info(f"[Direct] 发送消息到企微: chat_id={chat_id}, msg_type={msg_type}")
+    logger.info(f"[Direct] 发送消息到企微: chat_id={chat_id}, msg_type={msg_type}, message_len={len(message)}")
     
     try:
         if msg_type == "text":
@@ -95,7 +95,17 @@ def send_to_wecom(
                 msg_content=message,
             )
         
+        # 详细记录 fly-pigeon 响应
         logger.info(f"[Direct] fly-pigeon 响应: {result}")
+        
+        # 检查是否有错误码
+        if result and isinstance(result, dict):
+            errcode = result.get("errcode", 0)
+            errmsg = result.get("errmsg", "")
+            
+            if errcode != 0:
+                logger.error(f"[Direct] ⚠️  fly-pigeon 返回错误: errcode={errcode}, errmsg={errmsg}, chat_id={chat_id}")
+        
         return result or {"errcode": 0, "errmsg": "ok"}
         
     except Exception as e:
@@ -191,14 +201,36 @@ async def _send_group_chat_split(
     
     logger.info(f"[群聊] 消息过长，分拆为 {len(split_messages)} 条")
     
-    # 逐条发送
-    for split_msg in split_messages:
-        send_to_wecom(
+    # 逐条发送，记录每条的发送结果
+    success_count = 0
+    fail_count = 0
+    
+    for i, split_msg in enumerate(split_messages, 1):
+        logger.info(f"[群聊] 发送第 {i}/{len(split_messages)} 条，长度：{len(split_msg.content)} 字节")
+        
+        result = send_to_wecom(
             message=split_msg.content,
             chat_id=chat_id
         )
+        
+        # 检查发送结果
+        if result and isinstance(result, dict):
+            errcode = result.get("errcode", 0)
+            if errcode == 0:
+                success_count += 1
+                logger.info(f"[群聊] 第 {i}/{len(split_messages)} 条发送成功")
+            else:
+                fail_count += 1
+                logger.error(f"[群聊] ❌ 第 {i}/{len(split_messages)} 条发送失败: {result}")
     
-    return {"success": True, "parts_sent": len(split_messages)}
+    logger.info(f"[群聊] 分拆发送完成: 总共 {len(split_messages)} 条, 成功 {success_count} 条, 失败 {fail_count} 条")
+    
+    return {
+        "success": fail_count == 0,
+        "parts_sent": len(split_messages),
+        "success_count": success_count,
+        "fail_count": fail_count
+    }
 
 
 async def _send_single_chat_with_file(
