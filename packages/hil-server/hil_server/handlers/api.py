@@ -116,11 +116,27 @@ async def send_message(request: SendMessageRequest):
         session = None
         short_id = ""
         
+        # 查询 chat_type（从数据库）
+        chat_type = request.chat_type  # 默认使用请求中的值
+        if storage._use_database and storage._db_manager:
+            try:
+                from ..chat_info_repo import get_chat_info_repository
+                async with storage._db_manager.session() as db:
+                    chat_info_repo = get_chat_info_repository(db)
+                    chat_info = await chat_info_repo.get_by_chat_id(request.chat_id)
+                    if chat_info:
+                        chat_type = chat_info.chat_type
+                        logger.info(f"从数据库查询到 chat_type: {chat_type} for chat_id={request.chat_id[:20]}...")
+                    else:
+                        logger.info(f"数据库中未找到 chat_id={request.chat_id[:20]}..., 使用默认 chat_type={chat_type}")
+            except Exception as e:
+                logger.warning(f"查询 chat_type 失败，使用默认值: {e}")
+        
         # 1. 只有需要等待回复时才创建会话
         if request.wait_reply:
             session = await storage.create_session(
                 chat_id=request.chat_id,
-                chat_type=request.chat_type,
+                chat_type=chat_type,  # 使用查询到的 chat_type
                 message=request.message,
                 project_name=request.project_name or "",
                 images=request.images,
@@ -276,6 +292,24 @@ async def handle_callback(
         
         # 使用 storage 的回调处理逻辑
         result = await storage.handle_callback(data)
+        
+        # 记录 Chat 信息（chat_id -> chat_type 映射）
+        # 无论回调是否成功匹配到会话，都记录 chat_type
+        if storage._use_database and storage._db_manager:
+            try:
+                from ..chat_info_repo import get_chat_info_repository
+                async with storage._db_manager.session() as db:
+                    chat_info_repo = get_chat_info_repository(db)
+                    await chat_info_repo.record_chat(
+                        chat_id=chat_id,
+                        chat_type=chat_type,
+                        chat_name=None,  # 企微回调暂不提供群名
+                        bot_key=None  # HIL Server 不管理多 Bot
+                    )
+                    await db.commit()
+            except Exception as e:
+                # 记录失败不影响主流程
+                logger.warning(f"记录 chat_type 失败: {e}")
         
         if result.get("success"):
             logger.info(f"回调处理成功: session_id={result.get('session_id')}")
