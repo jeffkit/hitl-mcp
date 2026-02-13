@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**HIL-MCP** (Human-in-the-Loop MCP for WeCom) is an enterprise WeChat middleware system that enables AI Agents to send messages to WeChat and wait for user replies. The project is a **Monorepo** containing 5 independent but coordinated services.
+**HIL-MCP** (Human-in-the-Loop MCP for WeCom) is an enterprise WeChat middleware system that enables AI Agents to send messages to WeChat and wait for user replies. The project is a **Monorepo** containing coordinated services.
 
 **Core Value**: Provides real-time bidirectional communication for AI automation workflows requiring human confirmation, review, or input.
 
@@ -23,7 +23,7 @@ hil-mcp/
 │   ├── mcp-server-py/      # MCP client (Python version)
 │   └── mcp-server-ts/      # MCP client (TypeScript version)
 ├── data/                   # Data storage (SQLite/JSON)
-├── tests/                  # Test suite (21 unit tests, all passing)
+├── tests/                  # Test suite
 └── scripts/                # Deployment scripts
 ```
 
@@ -77,12 +77,12 @@ pnpm run typecheck
 ### Running Tests
 
 ```bash
-# Forward Service database tests (21 tests)
-cd packages/forward-service
-uv run pytest tests/test_database.py -v
+# HIL Server tests
+cd packages/hil-server
+uv run pytest tests/ -v
 
 # Run single test
-uv run pytest tests/test_database.py::TestChatbotRepository::test_create_bot -v
+uv run pytest tests/test_storage.py::test_create_session -v
 ```
 
 ### Deployment
@@ -92,6 +92,14 @@ uv run pytest tests/test_database.py::TestChatbotRepository::test_create_bot -v
 ./scripts/sync_to_pro.sh          # 同步所有服务
 ./scripts/sync_to_pro.sh forward  # 只同步 forward-service
 ./scripts/sync_to_pro.sh hil      # 只同步 hil-server
+```
+
+**⚠️ 重要**: Pro 服务器使用 **main** 分支代码，必须通过 Git 部署，**禁止使用 rsync 直接同步代码**！
+
+正确的部署流程：
+```bash
+# 在 Pro 服务器上执行
+cd /data/projects/hitl && git pull origin main && sudo systemctl restart hil-service as-dispatch
 ```
 
 ---
@@ -145,25 +153,6 @@ await config.update_from_dict(data)  # Async in database mode
 await config.reload_config()  # Async in database mode
 ```
 
-### Repository Pattern (Database Layer)
-
-Forward Service uses the Repository pattern for data access:
-
-```
-models.py (ORM models)
-    ↓
-repository.py (data access layer)
-    ↓
-config_db.py (business logic)
-    ↓
-app.py (API endpoints)
-```
-
-**Key files**:
-- `models.py` - SQLAlchemy ORM models (Chatbot, ChatAccessRule)
-- `repository.py` - Data access with CRUD operations
-- `config_db.py` - Business logic wrapper
-
 ---
 
 ## Key Technical Details
@@ -171,12 +160,12 @@ app.py (API endpoints)
 ### Dependency Management
 
 **Critical Dependencies**:
-- `fly-pigeon>=2.0.0` - Tencent fly-pigeon API (internal mirror required)
+- `fly-pigeon>=1.0.9` - Tencent fly-pigeon API (internal mirror required)
 - `greenlet>=3.0.0,<3.1.0` - Version locked to avoid compilation failures
 - `mcp>=1.0.0` - Model Context Protocol
 - `alembic>=1.13.0` - Database migration tool (hil-server, forward-service)
 
-**Tencent Mirror Configuration** (.uvrc):
+**Tencent Mirror Configuration** (.uvrc or pyproject.toml):
 ```toml
 extra-index-url = ["http://mirrors.tencent.com/repository/pypi/tencent_pypi/simple"]
 ```
@@ -218,6 +207,9 @@ id, session_key (unique), user_id, chat_id, bot_key, message, started_at
 
 -- system_config: 系统配置表（key-value 存储）
 id, key (unique), value (JSON), description, created_at, updated_at
+
+-- tunnels: 隧道配置表（Tunely WebSocket 隧道）
+id, tunnel_id (unique), name, target_url, status, connected_at
 ```
 
 ### Session Management (HIL Server)
@@ -245,8 +237,8 @@ Supported variables: `{user_name}`, `{chat_id}`, `{chat_type}`, `{timestamp}`
 - `HIL_MODE` - Operation mode: auto/relay/direct (default: auto)
 - `BOT_KEY` - fly-pigeon bot key (required for direct mode)
 - `HIL_WORKER_TOKEN` - Worker authentication token (optional)
-- `USE_DATABASE` - Enable database mode (true/false)
-- `DATABASE_URL` - Database connection string
+- `HIL_USE_DATABASE` - Enable database mode (true/false)
+- `HIL_DATABASE_URL` - Database connection string
 
 ### Forward Service
 - `FORWARD_PORT` - Service port (default: 8083)
@@ -261,24 +253,7 @@ Supported variables: `{user_name}`, `{chat_id}`, `{chat_type}`, `{timestamp}`
 
 ---
 
-## Testing
-
-### Forward Service Database Tests
-
-**Test Coverage**: 21 unit tests (all passing ✅)
-- Chatbot model: 6 tests
-- ChatAccessRule model: 1 test
-- ChatbotRepository: 7 tests
-- ChatAccessRuleRepository: 7 tests
-
-**Running tests**:
-```bash
-cd packages/forward-service
-uv run pytest tests/test_database.py -v
-# ========================= 21 passed in 0.31s =========================
-```
-
-### Database Migration
+## Database Migration
 
 **数据迁移 (JSON → Database)**:
 ```bash
@@ -298,7 +273,7 @@ python migrate_to_database.py --force
 
 **支持的服务**:
 - `hil-server` - 2 张表 (hil_sessions, hil_replies)
-- `forward-service` - 7 张表 (chatbots, chat_access_rules, user_sessions, forward_logs, processing_sessions, system_config)
+- `forward-service` - 7 张表 (chatbots, chat_access_rules, user_sessions, forward_logs, processing_sessions, system_config, tunnels)
 
 **常用命令**:
 ```bash
@@ -367,7 +342,7 @@ alembic upgrade head
 
 **详细文档**:
 - `packages/hil-server/ALEMBIC_GUIDE.md`
-- `packages/forward-service/ALEMBIC_GUIDE.md`
+- `packages/forward-service/ALEMBIC_GUIDE.md` (if exists)
 
 ---
 
@@ -381,24 +356,15 @@ alembic upgrade head
 | **IP 地址** | 21.6.243.90 |
 | **域名** | hitl.woa.com |
 | **SSH 别名** | pro |
-
-#### 目录结构
-
-```
-/data/projects/hitl/
-├── .env                        # 环境变量配置
-├── packages/
-│   ├── hil-server/             # HIL 服务 (端口 8081)
-│   └── forward-service/        # 转发服务 (端口 8083)
-└── website/                    # 静态网站
-```
+| **Git 仓库** | git.woa.com/kongjie/tmp |
+| **分支** | main |
 
 #### 服务配置
 
 | 服务 | Systemd 单元 | 端口 |
 |------|-------------|------|
 | HIL Server | `hil-service.service` | 8081 |
-| Forward Service | `forward-service.service` | 8083 |
+| AS-Dispatch | `as-dispatch.service` | 8083 |
 
 #### 数据库
 
@@ -407,14 +373,12 @@ alembic upgrade head
 - **数据库**: agentstudio
 - **字符集**: utf8mb4
 
-#### 部署流程
-
-**重要**: Pro 服务器使用 **main** 分支代码，必须通过 Git 部署，**禁止使用 rsync 直接同步代码**！
+#### 部署流程（重要）
 
 ```bash
 # 1. 在本地：确保代码已提交并合并到 main 分支
 git checkout develop
-git add -A && git commit -m "fix: your change description"
+git add -A && git commit -m "your change description"
 git checkout main
 git merge develop
 git push origin main
@@ -425,29 +389,29 @@ cd /data/projects/hitl
 git pull origin main
 
 # 3. 重启服务
-sudo systemctl restart hil-service forward-service
+sudo systemctl restart hil-service as-dispatch
 ```
 
 **快捷部署（在 Pro 服务器执行）**:
 ```bash
-cd /data/projects/hitl && git pull origin main && sudo systemctl restart forward-service hil-service
+cd /data/projects/hitl && git pull origin main && sudo systemctl restart hil-service as-dispatch
 ```
 
 ### 服务管理
 
 ```bash
 # 查看状态
-sudo systemctl status hil-service forward-service
+sudo systemctl status hil-service as-dispatch
 
 # 查看日志
 sudo journalctl -u hil-service -f
-sudo journalctl -u forward-service -f
+sudo journalctl -u as-dispatch -f
 
 # 重启服务
-sudo systemctl restart hil-service forward-service
+sudo systemctl restart hil-service as-dispatch
 ```
 
-**详细部署文档**: 参见 `docs/PRO_DEPLOYMENT.md`
+**详细部署文档**: 参见 `docs/PRO_DEPLOYMENT_V2.md`
 
 ---
 
@@ -552,13 +516,13 @@ USE_DATABASE=true python -m <service>.app
 ## Related Documentation
 
 - `README.md` - Main project documentation
-- `docs/PRO_DEPLOYMENT.md` - Pro 服务器部署文档 ⭐
+- `docs/PRO_DEPLOYMENT_V2.md` - Pro 服务器部署文档（最新）⭐
+- `docs/PRO_DEPLOYMENT.md` - Pro 服务器部署文档（旧版）
 - `docs/DATABASE_SUMMARY.md` - Database implementation summary
 - `docs/API.md` - API 接口文档
-- `DATABASE_MIGRATION.md` - Data migration guide (JSON → Database)
+- `docs/DATABASE_MIGRATION.md` - Data migration guide (JSON → Database)
 - `DEPLOY_BOT_MANAGEMENT.md` - Bot management deployment
 - `packages/hil-server/ALEMBIC_GUIDE.md` - HIL Server 数据库迁移指南
-- `packages/forward-service/ALEMBIC_GUIDE.md` - Forward Service 数据库迁移指南
 
 ---
 
