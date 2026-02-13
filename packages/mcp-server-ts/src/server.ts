@@ -12,14 +12,118 @@ import {
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { existsSync } from 'fs';
+import { extname } from 'path';
 import { getConfig } from './config.js';
 import { WeComClient } from './wecom-client.js';
+
+/**
+ * 根据文件扩展名推断 MIME 类型
+ */
+function guessImageMime(urlPath: string): string {
+  const ext = extname(urlPath).toLowerCase();
+  const mimeMap: Record<string, string> = {
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.png': 'image/png',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.bmp': 'image/bmp',
+    '.svg': 'image/svg+xml',
+  };
+  return mimeMap[ext] || 'image/png';
+}
 
 /**
  * 等待指定时间
  */
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * 下载图片并返回 base64 数据和 MIME 类型
+ * 
+ * 支持:
+ * - data: URL (直接提取 base64)
+ * - http/https URL (下载并编码)
+ */
+async function downloadImage(url: string): Promise<{ data: string; mimeType: string } | null> {
+  try {
+    // 处理 data URL: data:image/jpeg;base64,xxxxx
+    if (url.startsWith('data:')) {
+      const commaIdx = url.indexOf(',');
+      if (commaIdx === -1) {
+        console.error(`[Image] 无效的 data URL: ${url.substring(0, 100)}`);
+        return null;
+      }
+      const header = url.substring(0, commaIdx);
+      const data = url.substring(commaIdx + 1);
+      // 提取 mime type: "data:image/jpeg;base64" -> "image/jpeg"
+      const mimeMatch = header.match(/^data:([^;,]+)/);
+      const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
+      return { data, mimeType };
+    }
+
+    // 处理 HTTP(S) URL
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
+      if (!response.ok) {
+        console.error(`[Image] 下载失败: HTTP ${response.status} for ${url.substring(0, 80)}`);
+        return null;
+      }
+
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const contentType = response.headers.get('content-type') || '';
+      let mimeType = contentType.split(';')[0].trim();
+
+      // 如果 Content-Type 不是图片类型，尝试从 URL 推断
+      if (!mimeType.startsWith('image/')) {
+        const urlPath = new URL(url).pathname;
+        mimeType = guessImageMime(urlPath);
+      }
+
+      const data = buffer.toString('base64');
+      console.error(`[Image] 图片下载成功: ${url.substring(0, 80)}..., size=${buffer.length}, type=${mimeType}`);
+      return { data, mimeType };
+    }
+
+    console.error(`[Image] 不支持的图片 URL scheme: ${url.substring(0, 50)}`);
+    return null;
+  } catch (error) {
+    console.error(`[Image] 下载图片失败: ${url.substring(0, 80)}..., error=${error}`);
+    return null;
+  }
+}
+
+/**
+ * 处理回复中的图片：下载并转换为 MCP ImageContent
+ */
+async function processRepliesWithImages(
+  resultJson: string,
+  replies: any[]
+): Promise<{ content: any[] }> {
+  const contentBlocks: any[] = [{ type: 'text', text: resultJson }];
+
+  for (const reply of replies) {
+    const imageUrl = reply?.image_url;
+    if (!imageUrl) continue;
+
+    const downloaded = await downloadImage(imageUrl);
+    if (downloaded) {
+      contentBlocks.push({
+        type: 'image',
+        data: downloaded.data,
+        mimeType: downloaded.mimeType,
+      });
+      console.error(`[Image] 图片已编码为 MCP ImageContent: mime=${downloaded.mimeType}`);
+    }
+  }
+
+  if (contentBlocks.length > 1) {
+    console.error(`[Image] 返回 MCP 响应: ${contentBlocks.length} 个内容块 (1 text + ${contentBlocks.length - 1} images)`);
+  }
+
+  return { content: contentBlocks };
 }
 
 /**
@@ -278,18 +382,16 @@ async function handleSendAndWaitReply(
         if (result.has_reply) {
           const replies = result.replies || [];
           console.error(`[Tool] 收到用户回复: ${replies.length} 条`);
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  status: 'success',
-                  replies,
-                  message: `收到 ${replies.length} 条回复`,
-                }),
-              },
-            ],
+          const replyResult = {
+            status: 'success',
+            replies,
+            message: `收到 ${replies.length} 条回复`,
           };
+          // 自动下载图片并作为 MCP ImageContent 返回
+          return await processRepliesWithImages(
+            JSON.stringify(replyResult),
+            replies
+          );
         }
 
         if (result.status === 'not_found') {

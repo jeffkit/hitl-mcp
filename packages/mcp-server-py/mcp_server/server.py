@@ -8,12 +8,18 @@ Human-in-the-Loop MCP Server
 """
 import argparse
 import asyncio
+import base64
+import json
 import logging
+import mimetypes
 import time
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import urlparse
 
+import httpx
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ImageContent, TextContent
 from pydantic import Field
 
 from .config import config
@@ -36,13 +42,103 @@ mcp = FastMCP(
 client = WeComClient()
 
 
+async def download_image(url: str) -> tuple[str, str] | None:
+    """
+    下载图片并返回 (base64_data, mime_type)。
+    
+    支持:
+    - data: URL (直接提取 base64)
+    - http/https URL (下载并编码)
+    
+    Returns:
+        (base64_data, mime_type) 或 None（下载失败时）
+    """
+    try:
+        parsed = urlparse(url)
+        
+        # 处理 data URL: data:image/jpeg;base64,xxxxx
+        if parsed.scheme == "data":
+            # 格式: data:[<mediatype>][;base64],<data>
+            header, _, data = url.partition(",")
+            if not data:
+                logger.warning(f"无效的 data URL: {url[:100]}")
+                return None
+            # 提取 mime type: "data:image/jpeg;base64" -> "image/jpeg"
+            mime_type = header.split(":")[1].split(";")[0] if ":" in header else "image/png"
+            return data, mime_type
+        
+        # 处理 HTTP(S) URL
+        if parsed.scheme in ("http", "https"):
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0)) as http_client:
+                response = await http_client.get(url)
+                response.raise_for_status()
+                
+                # 从 Content-Type 获取 mime type
+                content_type = response.headers.get("content-type", "")
+                mime_type = content_type.split(";")[0].strip()
+                
+                # 如果 Content-Type 不是图片类型，尝试从 URL 推断
+                if not mime_type.startswith("image/"):
+                    guessed, _ = mimetypes.guess_type(parsed.path)
+                    mime_type = guessed or "image/png"
+                
+                # 编码为 base64
+                b64_data = base64.b64encode(response.content).decode("utf-8")
+                logger.info(f"图片下载成功: {url[:80]}..., size={len(response.content)}, type={mime_type}")
+                return b64_data, mime_type
+        
+        logger.warning(f"不支持的图片 URL scheme: {parsed.scheme}")
+        return None
+        
+    except Exception as e:
+        logger.warning(f"下载图片失败: {url[:80]}..., error={e}")
+        return None
+
+
+async def process_replies_with_images(result: dict) -> list | dict:
+    """
+    处理回复中的图片：下载图片并转换为 MCP ImageContent。
+    
+    如果回复包含图片，返回 [TextContent, ImageContent, ...] 列表。
+    如果没有图片，返回原始 dict（保持向后兼容）。
+    """
+    replies = result.get("replies", [])
+    image_contents: list[ImageContent] = []
+    
+    for reply in replies:
+        image_url = reply.get("image_url")
+        if not image_url:
+            continue
+        
+        downloaded = await download_image(image_url)
+        if downloaded:
+            b64_data, mime_type = downloaded
+            image_contents.append(
+                ImageContent(type="image", data=b64_data, mimeType=mime_type)
+            )
+            logger.info(f"图片已编码为 MCP ImageContent: mime={mime_type}")
+    
+    if not image_contents:
+        return result
+    
+    # 有图片时，返回 [TextContent(JSON), ImageContent, ...] 列表
+    # 文本部分仍包含完整的回复信息（含 image_url），确保向后兼容
+    content: list[TextContent | ImageContent] = [
+        TextContent(type="text", text=json.dumps(result, ensure_ascii=False))
+    ]
+    content.extend(image_contents)
+    
+    logger.info(f"返回 MCP 响应: {len(content)} 个内容块 (1 text + {len(image_contents)} images)")
+    return content
+
+
 @mcp.tool()
 async def send_and_wait_reply(
     message: Annotated[str, Field(description="要发送给用户的消息内容")],
     chat_id: Annotated[str | None, Field(description="目标群 ID 或个人会话 ID。如果不指定，使用默认配置")] = None,
     image_paths: Annotated[list[str] | None, Field(description="要发送的本地图片文件路径列表")] = None,
     project_name: Annotated[str | None, Field(description="项目名称，用于标识消息来源。如果不指定，使用默认配置")] = None,
-) -> dict:
+) -> dict | list:
     """
     发送消息到企业微信并等待用户回复。
     
@@ -50,27 +146,18 @@ async def send_and_wait_reply(
     1. 将消息发送到指定的企微群或个人会话
     2. 如果提供了图片路径，也会上传并发送图片
     3. 等待用户回复（需要用户在企微中 @机器人 回复）
-    4. 返回用户的回复内容
+    4. 返回用户的回复内容（如果回复包含图片，会自动下载并作为图片内容返回）
     
     注意：
     - 用户需要 @机器人 才能触发回调
     - 超时后会返回超时状态
     - 私聊场景下用户直接回复即可
     - 当多个项目同时发送消息时，用户可以使用「引用回复」来精确回复特定消息
+    - 用户回复中包含的图片会被自动下载并嵌入到响应中，AI 可以直接看到图片内容
     
     返回格式：
-    {
-        "status": "success" | "timeout" | "error",
-        "replies": [
-            {
-                "msg_type": "text",
-                "content": "用户回复的文本",
-                "from_user": {"name": "张三", "alias": "zhangsan"},
-                "timestamp": "2024-01-01T10:30:00"
-            }
-        ],
-        "message": "描述信息"
-    }
+    - 纯文本回复: {"status": "success", "replies": [...], "message": "..."}
+    - 含图片回复: [TextContent(JSON), ImageContent(图片1), ImageContent(图片2), ...]
     """
     # 使用配置中的超时时间（由 MCP 统一管理，不受 AI 控制）
     timeout = config.default_timeout
@@ -136,11 +223,13 @@ async def send_and_wait_reply(
                     if result.get("has_reply"):
                         replies = result.get("replies", [])
                         logger.info(f"收到用户回复: {len(replies)} 条")
-                        return {
+                        reply_result = {
                             "status": "success",
                             "replies": replies,
                             "message": f"收到 {len(replies)} 条回复"
                         }
+                        # 自动下载图片并作为 MCP ImageContent 返回
+                        return await process_replies_with_images(reply_result)
                     
                     if result.get("status") == "not_found":
                         return {
