@@ -54,6 +54,7 @@ def send_to_wecom(
     bot_key: str | None = None,
     msg_type: str = "text",
     images: list[str] | None = None,
+    mention_list: list[str] | None = None,
 ) -> dict:
     """
     使用 fly-pigeon 库发送消息到企业微信
@@ -83,10 +84,10 @@ def send_to_wecom(
     
     try:
         if msg_type == "text":
-            result = bot.text(
-                chat_id=chat_id,
-                msg_content=message,
-            )
+            kwargs = {"chat_id": chat_id, "msg_content": message}
+            if mention_list:
+                kwargs["mentioned_list"] = mention_list
+            result = bot.text(**kwargs)
         elif msg_type == "markdown":
             result = bot.markdown(
                 chat_id=chat_id,
@@ -144,6 +145,7 @@ async def send_message_direct(
     images: list[str] | None = None,
     wait_reply: bool = True,
     chat_type: str = "group",
+    mention_list: list[str] | None = None,
 ) -> dict:
     """
     直接发送消息（Direct 模式）
@@ -173,15 +175,17 @@ async def send_message_direct(
                 short_id=short_id,
                 project_name=project_name,
                 chat_id=chat_id,
-                wait_reply=wait_reply
+                wait_reply=wait_reply,
+                mention_list=mention_list
             )
         else:
             # 不需要分拆，使用原有逻辑
             formatted_message = format_message_with_header(message, short_id, project_name, wait_reply)
-            
+
             send_to_wecom(
                 message=formatted_message,
-                chat_id=chat_id
+                chat_id=chat_id,
+                mention_list=mention_list
             )
             result = {"success": True, "parts_sent": 1}
         
@@ -210,7 +214,8 @@ async def _send_group_chat_split(
     short_id: str,
     project_name: str | None,
     chat_id: str,
-    wait_reply: bool
+    wait_reply: bool,
+    mention_list: list[str] | None = None,
 ) -> dict:
     """
     群聊处理：分拆消息成多条发送
@@ -230,10 +235,11 @@ async def _send_group_chat_split(
     
     for i, split_msg in enumerate(split_messages, 1):
         logger.info(f"[群聊] 发送第 {i}/{len(split_messages)} 条，长度：{len(split_msg.content)} 字节")
-        
+
         result = send_to_wecom(
             message=split_msg.content,
-            chat_id=chat_id
+            chat_id=chat_id,
+            mention_list=mention_list
         )
         
         # 检查发送结果

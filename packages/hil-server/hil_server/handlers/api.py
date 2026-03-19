@@ -163,6 +163,7 @@ async def send_message(request: SendMessageRequest):
                 images=request.images,
                 chat_type=chat_type,  # 使用查询到的 chat_type，而不是 request.chat_type
                 wait_reply=request.wait_reply,
+                mention_list=request.mention_list,
             )
         else:
             # Relay 模式：通过 WebSocket 转发给 Worker
