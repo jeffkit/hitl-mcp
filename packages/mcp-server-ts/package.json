@@ -37,12 +37,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/jeffkit/tunely.git",
-    "directory": "packages/mcp-server-ts"
+    "url": "git+https://github.com/jeffkit/hitl-mcp.git"
   },
-  "homepage": "https://github.com/jeffkit/tunely#readme",
+  "homepage": "https://github.com/jeffkit/hitl-mcp#readme",
   "bugs": {
-    "url": "https://github.com/jeffkit/tunely/issues"
+    "url": "https://github.com/jeffkit/hitl-mcp/issues"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
