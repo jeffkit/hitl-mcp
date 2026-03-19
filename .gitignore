@@ -16,9 +16,27 @@ parts/
 sdist/
 var/
 wheels/
+pip-wheel-metadata/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
+*.manifest
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.mypy_cache
+.pytest_cache
+.hypothesis
 
 # Virtual environments
 .env
@@ -26,20 +44,53 @@ wheels/
 env/
 venv/
 ENV/
+env.bak/
+venv.bak/
+.uv/
 
-# IDE
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+package-lock.json
+
+# Build outputs
+*.tsbuildinfo
+
+# IDEs
 .idea/
 .vscode/
 *.swp
 *.swo
 *~
 
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Testing
+htmlcov/
+
 # Project specific
 data/
-*.log
 check_quote.py
 .a2a/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Alembic
+alembic/versions/__pycache__/
