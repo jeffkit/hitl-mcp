@@ -157,7 +157,7 @@ export DATABASE_URL="sqlite+aiosqlite:///./data/forward_service.db"
 export DATABASE_ECHO="false"  # 是否打印 SQL (用于调试)
 
 # Bot 配置
-export DEFAULT_BOT_KEY="18c6cb5d-611c-4829-ad86-e5b9d46729c0"
+export DEFAULT_BOT_KEY="<YOUR_BOT_KEY>"
 
 # 服务配置
 export FORWARD_PORT="8083"

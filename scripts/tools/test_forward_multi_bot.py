@@ -20,10 +20,10 @@ def test_bot_key_extraction():
     """测试 Bot Key 提取"""
     print("🧪 测试 1: Bot Key 提取")
     
-    webhook_url = "http://in.qyapi.weixin.qq.com/cgi-bin/webhook/send?key=18c6cb5d-611c-4829-ad86-e5b9d46729c0"
+    webhook_url = "http://in.qyapi.weixin.qq.com/cgi-bin/webhook/send?key=<YOUR_BOT_KEY>"
     bot_key = config_v2.extract_bot_key_from_webhook_url(webhook_url)
     
-    assert bot_key == "18c6cb5d-611c-4829-ad86-e5b9d46729c0", f"提取失败: {bot_key}"
+    assert bot_key == "<YOUR_BOT_KEY>", f"提取失败: {bot_key}"
     print(f"  ✅ 提取成功: {bot_key}")
     print("")
 
@@ -32,7 +32,7 @@ def test_bot_lookup():
     print("🧪 测试 2: Bot 配置查找")
     
     # 查找存在的 Bot
-    bot = config_v2.get_bot("18c6cb5d-611c-4829-ad86-e5b9d46729c0")
+    bot = config_v2.get_bot("<YOUR_BOT_KEY>")
     assert bot is not None, "应该找到 Bot"
     assert bot.name == "默认测试机器人", f"Bot 名称错误: {bot.name}"
     print(f"  ✅ 找到 Bot: {bot.name}")
@@ -59,7 +59,7 @@ def test_access_control():
     print("🧪 测试 4: 访问控制")
     
     # 测试 allow_all 模式
-    bot = config_v2.get_bot("18c6cb5d-611c-4829-ad86-e5b9d46729c0")
+    bot = config_v2.get_bot("<YOUR_BOT_KEY>")
     allowed, reason = config_v2.check_access(bot, "any_user")
     assert allowed, "allow_all 模式应该允许所有用户"
     print(f"  ✅ allow_all 模式: 允许访问")
@@ -83,7 +83,7 @@ def test_forward_config():
     """测试转发配置"""
     print("🧪 测试 5: 转发配置")
     
-    bot = config_v2.get_bot("18c6cb5d-611c-4829-ad86-e5b9d46729c0")
+    bot = config_v2.get_bot("<YOUR_BOT_KEY>")
     url = bot.forward_config.get_url()
     assert url == "https://httpbin.org/post", f"URL 错误: {url}"
     print(f"  ✅ URL 生成正确: {url}")

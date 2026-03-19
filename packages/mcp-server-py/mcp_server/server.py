@@ -167,6 +167,18 @@ async def send_and_wait_reply(
         logger.info(f"原始 chat_id={chat_id}, config.default_chat_id={config.default_chat_id}")
         effective_chat_id = chat_id or config.default_chat_id or None
         logger.info(f"开始发送消息: message={message[:50]}..., effective_chat_id={effective_chat_id}, timeout={timeout}, project_name={project_name}")
+
+        # 安全防护：禁止在未指定 chat_id 的情况下发送
+        if not effective_chat_id:
+            logger.error(
+                f"[安全拦截] send_and_wait_reply 未指定 chat_id 且未配置 default_chat_id，已拦截 | "
+                f"message_preview={message[:80]!r}"
+            )
+            return {
+                "status": "error",
+                "replies": [],
+                "message": "必须指定 chat_id：未提供 chat_id 且未配置默认值，禁止群发。请在调用时传入 chat_id 参数，或在 MCP 配置中设置 default_chat_id。"
+            }
         
         # 处理图片上传
         image_urls = []
@@ -301,6 +313,17 @@ async def send_message_only(
         # 如果没有指定 chat_id，使用配置中的默认值
         effective_chat_id = chat_id or config.default_chat_id or None
         logger.info(f"发送消息（不等待回复）: message={message[:50]}..., chat_id={effective_chat_id}")
+
+        # 安全防护：禁止在未指定 chat_id 的情况下发送
+        if not effective_chat_id:
+            logger.error(
+                f"[安全拦截] send_message_only 未指定 chat_id 且未配置 default_chat_id，已拦截 | "
+                f"message_preview={message[:80]!r}"
+            )
+            return {
+                "status": "error",
+                "message": "必须指定 chat_id：未提供 chat_id 且未配置默认值，禁止群发。请在调用时传入 chat_id 参数，或在 MCP 配置中设置 default_chat_id。"
+            }
         
         # 处理图片上传
         image_urls = []

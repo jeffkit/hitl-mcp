@@ -123,9 +123,9 @@ python migrate_to_database.py --force
 开始迁移配置到数据库
 ============================================================
 已加载配置文件: /path/to/data/forward_bots.json
-默认 Bot Key: 18c6cb5d-611c-4829-ad86-e5b9d46729c0
+默认 Bot Key: <YOUR_BOT_KEY>
 Bot 数量: 2
-  创建 Bot: 18c6cb5d-611c-4829-ad86-e5b9d46729c0 - 默认测试机器人
+  创建 Bot: <YOUR_BOT_KEY> - 默认测试机器人
     迁移白名单: 0 条
     迁移黑名单: 0 条
   创建 Bot: test_bot_key_2 - 白名单测试 Bot
