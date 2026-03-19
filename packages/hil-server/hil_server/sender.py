@@ -59,7 +59,19 @@ def send_to_wecom(
     使用 fly-pigeon 库发送消息到企业微信
     """
     from pigeon import Bot
-    
+
+    # 安全防护：禁止在未指定 chat_id 的情况下发送
+    # fly-pigeon 在没有 chat_id 时会将消息群发至该 bot_key 下的所有群！
+    if not chat_id:
+        logger.error(
+            f"[安全拦截] 禁止发送：未指定 chat_id，否则将导致消息群发至所有群 | "
+            f"msg_type={msg_type}, message_preview={message[:80]!r}"
+        )
+        raise ValueError(
+            "禁止发送消息：未指定 chat_id。"
+            "fly-pigeon 在没有 chat_id 时会将消息群发至 bot_key 下的所有群，已被拦截。"
+        )
+
     bot_key = bot_key or config.bot_key
     
     if not bot_key:

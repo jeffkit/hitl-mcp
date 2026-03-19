@@ -99,9 +99,13 @@ async def send_message(request: SendMessageRequest):
     - relay: 通过 WebSocket 转发给 Worker
     """
     if not request.chat_id:
+        logger.warning(
+            f"[安全拦截] /api/send 被拒绝：未指定 chat_id（防止群发）| "
+            f"message_preview={request.message[:80]!r}"
+        )
         return SendMessageResponse(
             success=False,
-            error="未指定 chat_id"
+            error="禁止发送：未指定 chat_id，fly-pigeon 在没有 chat_id 时会群发至所有群"
         )
     
     # Relay 模式检查 Worker 连接
@@ -251,11 +255,28 @@ async def handle_callback(
     """
     try:
         data = await request.json()
-        logger.info(f"收到飞鸽回调: chatid={data.get('chatid')}, msgtype={data.get('msgtype')}")
         
         chat_id = data.get("chatid", "")
         chat_type = data.get("chattype", "group")
         from_user = data.get("from", {})
+        msg_type = data.get("msgtype", "")
+        user_name = from_user.get("name", "unknown")
+        user_alias = from_user.get("alias", "")
+        
+        # 提取消息内容摘要（用于调试）
+        content_preview = ""
+        if msg_type == "text":
+            raw_content = data.get("text", {}).get("content", "")
+            content_preview = raw_content[:80].replace('\n', '\\n')
+        elif msg_type == "mixed":
+            items = data.get("mixed_message", {}).get("msg_item", [])
+            text_items = [i.get("text", {}).get("content", "")[:40] for i in items if i.get("msg_type") == "text"]
+            content_preview = " | ".join(text_items)[:80]
+        
+        logger.info(
+            f"收到飞鸽回调: chatid={chat_id[:20]}..., msgtype={msg_type}, "
+            f"from={user_name}({user_alias}), content={content_preview!r}"
+        )
         
         # 检查是否是 slash 命令
         if data.get("msgtype") == "text":
@@ -315,7 +336,12 @@ async def handle_callback(
                 logger.warning(f"记录 chat_type 失败: {e}", exc_info=True)
         
         if result.get("success"):
-            logger.info(f"回调处理成功: session_id={result.get('session_id')}")
+            matched_sid = result.get('session_id', '')
+            match_method = result.get('match_method', 'unknown')
+            logger.info(
+                f"回调处理成功: session_id={matched_sid}, "
+                f"match_method={match_method}, from={user_name}"
+            )
         else:
             error = result.get("error", "unknown")
             

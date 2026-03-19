@@ -116,6 +116,36 @@ def parse_quoted_message(content: str) -> tuple[str | None, str]:
     return short_id, reply_part
 
 
+def _extract_short_id_from_quote(data: dict) -> str | None:
+    """
+    从回调数据的 quote 字段中提取 short_id。
+    
+    企业微信在引用回复时，会在回调数据中附带 quote 字段，
+    包含被引用消息的内容。mixed 类型消息的引用信息不会嵌入
+    到 text 内容中，而是放在这个独立的 quote 字段里。
+    """
+    quote = data.get("quote", {})
+    if not quote:
+        return None
+    
+    quote_type = quote.get("msgtype", "")
+    quote_text = ""
+    
+    if quote_type == "text":
+        quote_text = quote.get("text", {}).get("content", "")
+    elif quote_type == "mixed":
+        for qi in quote.get("mixed", {}).get("msg_item", []):
+            if qi.get("msgtype") == "text":
+                quote_text += qi.get("text", {}).get("content", "")
+    
+    if quote_text:
+        match = SESSION_ID_PATTERN.search(quote_text)
+        if match:
+            return match.group(1)
+    
+    return None
+
+
 def extract_reply_from_callback(data: dict) -> tuple[Reply, str | None]:
     """
     从飞鸽回调数据中提取回复信息
@@ -144,17 +174,17 @@ def extract_reply_from_callback(data: dict) -> tuple[Reply, str | None]:
     
     elif msg_type == "image":
         image_data = data.get("image", {})
-        image_url = image_data.get("image_url", "")
+        image_url = image_data.get("image_url", "") or image_data.get("url", "")
     
     elif msg_type == "mixed":
-        mixed = data.get("mixed_message", {})
+        mixed = data.get("mixed_message", {}) or data.get("mixed", {})
         msg_items = mixed.get("msg_item", [])
         
         contents = []
         images = []
         
         for item in msg_items:
-            item_type = item.get("msg_type", "")
+            item_type = item.get("msg_type", "") or item.get("msgtype", "")
             if item_type == "text":
                 text = item.get("text", {}).get("content", "")
                 item_short_id, parsed_text = parse_quoted_message(text)
@@ -168,12 +198,18 @@ def extract_reply_from_callback(data: dict) -> tuple[Reply, str | None]:
                 if text:
                     contents.append(text)
             elif item_type == "image":
-                img_url = item.get("image", {}).get("image_url", "")
+                img = item.get("image", {})
+                img_url = img.get("image_url", "") or img.get("url", "")
                 if img_url:
                     images.append(img_url)
         
         content = "\n".join(contents) if contents else None
         image_url = images[0] if images else None
+    
+    if short_id is None:
+        short_id = _extract_short_id_from_quote(data)
+        if short_id:
+            logger.info(f"从 quote 字段提取到 short_id={short_id}")
     
     reply = Reply(
         msg_type=msg_type,
@@ -522,6 +558,14 @@ class RelayStorage:
         # 提取回复
         reply, short_id = extract_reply_from_callback(data)
         
+        # 详细记录提取结果，便于排查消息匹配问题
+        reply_preview = (reply.content or "")[:60] if reply else ""
+        logger.info(
+            f"回调提取结果: chat_id={chat_id[:16]}..., short_id={short_id}, "
+            f"reply_type={reply.msg_type if reply else 'N/A'}, "
+            f"reply_preview={reply_preview!r}"
+        )
+        
         session = None
         match_method = None
         
@@ -530,6 +574,8 @@ class RelayStorage:
             session = await self.get_session_by_short_id(short_id)
             if session:
                 match_method = f"short_id={short_id}"
+            else:
+                logger.warning(f"short_id={short_id} 未匹配到等待中的会话")
         
         # 回退到 chat_id 匹配
         if not session:
@@ -539,6 +585,11 @@ class RelayStorage:
                 match_method = f"chat_id={chat_id}"
             elif len(waiting_sessions) > 1:
                 # 多个等待中的会话
+                session_ids = [s.short_id for s in waiting_sessions]
+                logger.warning(
+                    f"多个等待中的会话: chat_id={chat_id[:16]}..., "
+                    f"count={len(waiting_sessions)}, short_ids={session_ids}"
+                )
                 return {
                     "success": False,
                     "session_id": None,
@@ -557,6 +608,10 @@ class RelayStorage:
                 "match_method": match_method
             }
         else:
+            logger.warning(
+                f"未找到匹配的会话: chat_id={chat_id[:16]}..., "
+                f"short_id={short_id}, reply_preview={reply_preview!r}"
+            )
             return {
                 "success": False,
                 "session_id": None,

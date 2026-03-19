@@ -232,6 +232,11 @@ export async function startServer(): Promise<void> {
             type: 'string',
             description: '项目名称，用于标识消息来源。如果不指定，使用默认配置',
           },
+          mentioned_list: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '@提醒的用户 ID 列表（仅 text 消息支持，用于群聊场景下 @ 成员）',
+          },
         },
         required: ['message'],
       },
@@ -460,6 +465,7 @@ async function handleSendMessageOnly(
   const chatId: string | undefined = args.chat_id;
   const imagePaths: string[] | undefined = args.image_paths;
   const projectName: string | undefined = args.project_name;
+  const mentionedList: string[] | undefined = args.mentioned_list;
 
   // 如果没有指定 chat_id，使用配置中的默认值
   const effectiveChatId = chatId || config.defaultChatId || undefined;
@@ -487,6 +493,7 @@ async function handleSendMessageOnly(
     chat_id: effectiveChatId,
     images: imageUrls.length > 0 ? imageUrls : undefined,
     project_name: projectName,
+    mention_list: mentionedList,
     wait_reply: false,
   });
 
