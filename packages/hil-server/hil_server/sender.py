@@ -52,7 +52,7 @@ def send_to_wecom(
     message: str,
     chat_id: str | None = None,
     bot_key: str | None = None,
-    msg_type: str = "text",
+    msg_type: str = "markdown_v2",
     images: list[str] | None = None,
     mention_list: list[str] | None = None,
 ) -> dict:
@@ -73,6 +73,11 @@ def send_to_wecom(
             "fly-pigeon 在没有 chat_id 时会将消息群发至 bot_key 下的所有群，已被拦截。"
         )
 
+    # 企微 markdown/markdown_v2 不支持 mention_list，有 @人 需求时自动回退到 text
+    if mention_list and msg_type in ("markdown", "markdown_v2"):
+        msg_type = "text"
+        logger.info(f"[Direct] mention_list 不兼容 markdown，自动回退到 text")
+
     bot_key = bot_key or config.bot_key
     
     if not bot_key:
@@ -90,6 +95,11 @@ def send_to_wecom(
             result = bot.text(**kwargs)
         elif msg_type == "markdown":
             result = bot.markdown(
+                chat_id=chat_id,
+                msg_content=message,
+            )
+        elif msg_type == "markdown_v2":
+            result = bot.markdown_v2(
                 chat_id=chat_id,
                 msg_content=message,
             )

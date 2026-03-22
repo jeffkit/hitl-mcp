@@ -43,7 +43,7 @@ def send_to_wecom(
     message: str,
     chat_id: str | None = None,
     bot_key: str | None = None,
-    msg_type: str = "text",
+    msg_type: str = "markdown_v2",
     images: list[str] | None = None,
 ) -> dict:
     """
@@ -66,6 +66,11 @@ def send_to_wecom(
             )
         elif msg_type == "markdown":
             result = bot.markdown(
+                chat_id=chat_id,
+                msg_content=message,
+            )
+        elif msg_type == "markdown_v2":
+            result = bot.markdown_v2(
                 chat_id=chat_id,
                 msg_content=message,
             )
