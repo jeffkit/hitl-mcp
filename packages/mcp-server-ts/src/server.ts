@@ -1,11 +1,10 @@
 /**
  * 统一 MCP Server
  *
- * 工具：
- *   send_and_wait_reply  — 发消息并等待用户回复（所有引擎）
- *   send_message_only    — 仅发消息（所有引擎）
- *   wait_for_login       — 等待扫码完成（ilink 引擎，仅在等待扫码时动态出现）
- *   list_activated_users — 列出已激活用户（ilink 引擎，始终可用）
+ * 工具（按引擎）：
+ *   hil         — send_and_wait_reply, send_message_only
+ *   wecom-aibot — send_and_wait_reply, send_message_only
+ *   ilink       — send_and_wait_reply, send_message_only, wait_for_login, list_activated_users
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -73,57 +72,70 @@ function resultToContent(result: SendResult) {
 
 // ── 工具定义（静态部分，引擎启动后不变） ──────────────────────────────────────
 
-function buildBaseTools(cfg: ReturnType<typeof getConfig>): Tool[] {
-  const recipientDesc =
-    cfg.engine === 'ilink'
-      ? '目标微信用户 ID。通常留空——有且仅有一个激活用户时自动选择'
-      : '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值';
+function buildTools(cfg: ReturnType<typeof getConfig>): Tool[] {
+  switch (cfg.engine) {
+    case 'ilink':
+      return [
+        makeSendAndWaitTool('ilink', '目标微信用户 ID。通常留空——有且仅有一个激活用户时自动选择'),
+        makeSendOnlyTool('ilink', '目标微信用户 ID。通常留空——有且仅有一个激活用户时自动选择'),
+        WAIT_FOR_LOGIN_TOOL,
+        LIST_ACTIVATED_USERS_TOOL,
+      ];
 
-  const tools: Tool[] = [
-    {
-      name: 'send_and_wait_reply',
-      description: `发送消息并等待用户回复（引擎: ${cfg.engine}）。
+    case 'wecom-aibot':
+      return [
+        makeSendAndWaitTool('wecom-aibot', '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值'),
+        makeSendOnlyTool('wecom-aibot', '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值'),
+      ];
+
+    default: // hil
+      return [
+        makeSendAndWaitTool('hil', '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值'),
+        makeSendOnlyTool('hil', '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值'),
+      ];
+  }
+}
+
+function makeSendAndWaitTool(engine: EngineType, recipientDesc: string): Tool {
+  const ilinkNote = engine === 'ilink'
+    ? '\n若未登录，本工具会立即返回 login_required（含 qr_url），随后 Agent 应调用 wait_for_login 等待扫码，成功后重试。'
+    : '';
+  return {
+    name: 'send_and_wait_reply',
+    description: `发送消息并等待用户回复（引擎: ${engine}）。
 发出带 [#id] 标识的消息，等待用户回复后返回内容。支持引用回复精确匹配，也支持直接回复（FIFO）。
-超时后返回 timeout 状态。${
-        cfg.engine === 'ilink'
-          ? '\n若未登录，本工具会立即返回 login_required（含 qr_url），随后 Agent 应调用 wait_for_login 等待扫码，成功后重试。'
-          : ''
-      }`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          message:      { type: 'string', description: '要发送给用户的消息内容' },
-          recipient:    { type: 'string', description: recipientDesc },
-          project_name: { type: 'string', description: '项目名称，显示在消息头中' },
-        },
-        required: ['message'],
+超时后返回 timeout 状态。${ilinkNote}`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message:      { type: 'string', description: '要发送给用户的消息内容' },
+        recipient:    { type: 'string', description: recipientDesc },
+        project_name: { type: 'string', description: '项目名称，显示在消息头中' },
       },
+      required: ['message'],
     },
-    {
-      name: 'send_message_only',
-      description: cfg.engine === 'ilink'
-        ? `仅发送消息，不等待回复（引擎: ilink）。
+  };
+}
+
+function makeSendOnlyTool(engine: EngineType, recipientDesc: string): Tool {
+  const description = engine === 'ilink'
+    ? `仅发送消息，不等待回复（引擎: ilink）。
 若未登录，本工具会立即返回 login_required（含扫码链接 qr_url 和二维码图片），工具调用随即结束。
 收到 login_required 后，Agent 必须：1) 向用户展示扫码链接；2) 立即调用 wait_for_login 等待扫码；3) 登录成功后重试本工具。`
-        : `仅发送消息，不等待回复（引擎: ${cfg.engine}）。适用于通知场景。`,
-      inputSchema: {
-        type: 'object',
-        properties: {
-          message:      { type: 'string', description: '要发送给用户的消息内容' },
-          recipient:    { type: 'string', description: recipientDesc },
-          project_name: { type: 'string', description: '项目名称' },
-        },
-        required: ['message'],
+    : `仅发送消息，不等待回复（引擎: ${engine}）。适用于通知场景。`;
+  return {
+    name: 'send_message_only',
+    description,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        message:      { type: 'string', description: '要发送给用户的消息内容' },
+        recipient:    { type: 'string', description: recipientDesc },
+        project_name: { type: 'string', description: '项目名称' },
       },
+      required: ['message'],
     },
-  ];
-
-  // ilink 专用工具始终注册（避免 Cursor 无法发现动态工具）
-  if (cfg.engine === 'ilink') {
-    tools.push(WAIT_FOR_LOGIN_TOOL, LIST_ACTIVATED_USERS_TOOL);
-  }
-
-  return tools;
+  };
 }
 
 const WAIT_FOR_LOGIN_TOOL: Tool = {
@@ -164,7 +176,7 @@ export async function startServer(): Promise<void> {
   // 每次客户端 list_tools 时重新计算，以反映最新的登录状态
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({
-    tools: buildBaseTools(cfg),
+    tools: buildTools(cfg),
   }));
 
   // ── 工具调用处理器 ────────────────────────────────────────────────────────
