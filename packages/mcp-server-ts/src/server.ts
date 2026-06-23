@@ -1,7 +1,11 @@
 /**
- * Human-in-the-Loop MCP Server
- * 
- * 让 AI 能够发送消息到企业微信并等待用户回复
+ * 统一 MCP Server
+ *
+ * 工具：
+ *   send_and_wait_reply  — 发消息并等待用户回复（所有引擎）
+ *   send_message_only    — 仅发消息（所有引擎）
+ *   wait_for_login       — 等待扫码完成（ilink 引擎，仅在等待扫码时动态出现）
+ *   list_activated_users — 列出已激活用户（ilink 引擎，始终可用）
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -9,517 +13,220 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  Tool,
+  type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import { existsSync } from 'fs';
-import { extname } from 'path';
-import { getConfig } from './config.js';
-import { WeComClient } from './wecom-client.js';
+import { getConfig, type EngineType } from './config.js';
+import { HilEngine } from './engines/hil.js';
+import { WecomAibotEngine } from './engines/wecom-aibot.js';
+import { ILinkEngine } from './engines/ilink.js';
+import type { Engine, SendResult } from './engines/base.js';
 
-/**
- * 根据文件扩展名推断 MIME 类型
- */
-function guessImageMime(urlPath: string): string {
-  const ext = extname(urlPath).toLowerCase();
-  const mimeMap: Record<string, string> = {
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
-    '.bmp': 'image/bmp',
-    '.svg': 'image/svg+xml',
-  };
-  return mimeMap[ext] || 'image/png';
+function genShortId(): string {
+  return Math.random().toString(16).slice(2, 8);
 }
 
-/**
- * 等待指定时间
- */
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+function formatMessage(text: string, shortId: string, projectName?: string): string {
+  const headerParts = [`[#${shortId}]`];
+  if (projectName) headerParts.push(`[${projectName}]`);
+  return `${headerParts.join(' ')}\n${text}\n\n> 请引用回复此消息`;
 }
 
-/**
- * 下载图片并返回 base64 数据和 MIME 类型
- * 
- * 支持:
- * - data: URL (直接提取 base64)
- * - http/https URL (下载并编码)
- */
-async function downloadImage(url: string): Promise<{ data: string; mimeType: string } | null> {
-  try {
-    // 处理 data URL: data:image/jpeg;base64,xxxxx
-    if (url.startsWith('data:')) {
-      const commaIdx = url.indexOf(',');
-      if (commaIdx === -1) {
-        console.error(`[Image] 无效的 data URL: ${url.substring(0, 100)}`);
-        return null;
-      }
-      const header = url.substring(0, commaIdx);
-      const data = url.substring(commaIdx + 1);
-      // 提取 mime type: "data:image/jpeg;base64" -> "image/jpeg"
-      const mimeMatch = header.match(/^data:([^;,]+)/);
-      const mimeType = mimeMatch ? mimeMatch[1] : 'image/png';
-      return { data, mimeType };
-    }
+function formatMessageOnly(text: string, projectName?: string): string {
+  if (projectName) return `[${projectName}]\n${text}`;
+  return text;
+}
 
-    // 处理 HTTP(S) URL
-    if (url.startsWith('http://') || url.startsWith('https://')) {
-      const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
-      if (!response.ok) {
-        console.error(`[Image] 下载失败: HTTP ${response.status} for ${url.substring(0, 80)}`);
-        return null;
-      }
-
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const contentType = response.headers.get('content-type') || '';
-      let mimeType = contentType.split(';')[0].trim();
-
-      // 如果 Content-Type 不是图片类型，尝试从 URL 推断
-      if (!mimeType.startsWith('image/')) {
-        const urlPath = new URL(url).pathname;
-        mimeType = guessImageMime(urlPath);
-      }
-
-      const data = buffer.toString('base64');
-      console.error(`[Image] 图片下载成功: ${url.substring(0, 80)}..., size=${buffer.length}, type=${mimeType}`);
-      return { data, mimeType };
-    }
-
-    console.error(`[Image] 不支持的图片 URL scheme: ${url.substring(0, 50)}`);
-    return null;
-  } catch (error) {
-    console.error(`[Image] 下载图片失败: ${url.substring(0, 80)}..., error=${error}`);
-    return null;
+function makeEngine(engineType: EngineType): Engine {
+  switch (engineType) {
+    case 'wecom-aibot': return new WecomAibotEngine();
+    case 'ilink':       return new ILinkEngine();
+    default:            return new HilEngine();
   }
 }
 
-/**
- * 处理回复中的图片：下载并转换为 MCP ImageContent
- */
-async function processRepliesWithImages(
-  resultJson: string,
-  replies: any[]
-): Promise<{ content: any[] }> {
-  const contentBlocks: any[] = [{ type: 'text', text: resultJson }];
-
-  for (const reply of replies) {
-    const imageUrl = reply?.image_url;
-    if (!imageUrl) continue;
-
-    const downloaded = await downloadImage(imageUrl);
-    if (downloaded) {
-      contentBlocks.push({
-        type: 'image',
-        data: downloaded.data,
-        mimeType: downloaded.mimeType,
-      });
-      console.error(`[Image] 图片已编码为 MCP ImageContent: mime=${downloaded.mimeType}`);
-    }
-  }
-
-  if (contentBlocks.length > 1) {
-    console.error(`[Image] 返回 MCP 响应: ${contentBlocks.length} 个内容块 (1 text + ${contentBlocks.length - 1} images)`);
-  }
-
-  return { content: contentBlocks };
+function jsonText(obj: unknown): { content: Array<{ type: string; [k: string]: unknown }> } {
+  return { content: [{ type: 'text', text: JSON.stringify(obj, null, 2) }] };
 }
 
-/**
- * 创建并启动 MCP Server
- */
-export async function startServer(): Promise<void> {
-  const config = getConfig();
-  const client = new WeComClient();
+function resultToContent(result: SendResult) {
+  if (result.status === 'login_required') {
+    // 仅返回文本：Cursor 工具面板会裁切内嵌图片，扫码链接更可靠
+    const text = [
+      '【需要微信扫码登录】本工具调用已结束，请勿等待。',
+      '',
+      '扫码链接（手机微信打开）：',
+      result.qrUrl ?? '(未获取到链接)',
+      '',
+      'Agent 下一步：向用户展示上方链接，然后立即调用 wait_for_login 等待扫码，成功后重试原请求。',
+      '',
+      JSON.stringify({
+        status: result.status,
+        tool_completed: true,
+        qr_url: result.qrUrl,
+        next_action: result.nextAction ?? 'wait_for_login',
+      }, null, 2),
+    ].join('\n');
+    return { content: [{ type: 'text', text }] };
+  }
+  return jsonText(result);
+}
 
-  // 创建 MCP Server
-  const server = new Server(
-    {
-      name: 'hitl-mcp',
-      version: '0.2.1',
-    },
-    {
-      capabilities: {
-        tools: {},
-      },
-    }
-  );
+// ── 工具定义（静态部分，引擎启动后不变） ──────────────────────────────────────
 
-  // 定义工具列表
+function buildBaseTools(cfg: ReturnType<typeof getConfig>): Tool[] {
+  const recipientDesc =
+    cfg.engine === 'ilink'
+      ? '目标微信用户 ID。通常留空——有且仅有一个激活用户时自动选择'
+      : '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值';
+
   const tools: Tool[] = [
     {
       name: 'send_and_wait_reply',
-      description: `发送消息到企业微信并等待用户回复。
-
-这个工具会：
-1. 将消息发送到指定的企微群或个人会话
-2. 如果提供了图片路径，也会上传并发送图片
-3. 等待用户回复（需要用户在企微中 @机器人 回复）
-4. 返回用户的回复内容
-
-注意：
-- 用户需要 @机器人 才能触发回调
-- 超时后会返回超时状态
-- 私聊场景下用户直接回复即可
-- 当多个项目同时发送消息时，用户可以使用「引用回复」来精确回复特定消息
-
-返回格式：
-{
-    "status": "success" | "timeout" | "error",
-    "replies": [
-        {
-            "msg_type": "text",
-            "content": "用户回复的文本",
-            "from_user": {"name": "张三", "alias": "zhangsan"},
-            "timestamp": "2024-01-01T10:30:00"
-        }
-    ],
-    "message": "描述信息"
-}`,
+      description: `发送消息并等待用户回复（引擎: ${cfg.engine}）。
+发出带 [#id] 标识的消息，等待用户回复后返回内容。支持引用回复精确匹配，也支持直接回复（FIFO）。
+超时后返回 timeout 状态。${
+        cfg.engine === 'ilink'
+          ? '\n若未登录，本工具会立即返回 login_required（含 qr_url），随后 Agent 应调用 wait_for_login 等待扫码，成功后重试。'
+          : ''
+      }`,
       inputSchema: {
         type: 'object',
         properties: {
-          message: {
-            type: 'string',
-            description: '要发送给用户的消息内容',
-          },
-          chat_id: {
-            type: 'string',
-            description: '目标群 ID 或个人会话 ID。如果不指定，使用默认配置',
-          },
-          image_paths: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '要发送的本地图片文件路径列表',
-          },
-          project_name: {
-            type: 'string',
-            description: '项目名称，用于标识消息来源。如果不指定，使用默认配置',
-          },
+          message:      { type: 'string', description: '要发送给用户的消息内容' },
+          recipient:    { type: 'string', description: recipientDesc },
+          project_name: { type: 'string', description: '项目名称，显示在消息头中' },
         },
         required: ['message'],
       },
     },
     {
       name: 'send_message_only',
-      description: `仅发送消息到企业微信，不等待回复。
-
-适用于只需要通知用户、不需要交互的场景。
-
-返回格式：
-{
-    "status": "success" | "error",
-    "message": "描述信息"
-}`,
+      description: cfg.engine === 'ilink'
+        ? `仅发送消息，不等待回复（引擎: ilink）。
+若未登录，本工具会立即返回 login_required（含扫码链接 qr_url 和二维码图片），工具调用随即结束。
+收到 login_required 后，Agent 必须：1) 向用户展示扫码链接；2) 立即调用 wait_for_login 等待扫码；3) 登录成功后重试本工具。`
+        : `仅发送消息，不等待回复（引擎: ${cfg.engine}）。适用于通知场景。`,
       inputSchema: {
         type: 'object',
         properties: {
-          message: {
-            type: 'string',
-            description: '要发送给用户的消息内容',
-          },
-          chat_id: {
-            type: 'string',
-            description: '目标群 ID 或个人会话 ID',
-          },
-          image_paths: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '要发送的本地图片文件路径列表',
-          },
-          project_name: {
-            type: 'string',
-            description: '项目名称，用于标识消息来源。如果不指定，使用默认配置',
-          },
-          mentioned_list: {
-            type: 'array',
-            items: { type: 'string' },
-            description: '@提醒的用户 ID 列表（仅 text 消息支持，用于群聊场景下 @ 成员）',
-          },
+          message:      { type: 'string', description: '要发送给用户的消息内容' },
+          recipient:    { type: 'string', description: recipientDesc },
+          project_name: { type: 'string', description: '项目名称' },
         },
         required: ['message'],
       },
     },
   ];
 
-  // 注册工具列表处理器
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools,
+  // ilink 专用工具始终注册（避免 Cursor 无法发现动态工具）
+  if (cfg.engine === 'ilink') {
+    tools.push(WAIT_FOR_LOGIN_TOOL, LIST_ACTIVATED_USERS_TOOL);
+  }
+
+  return tools;
+}
+
+const WAIT_FOR_LOGIN_TOOL: Tool = {
+  name: 'wait_for_login',
+  description: `等待用户完成微信扫码登录（阻塞，最长约 5 分钟）。
+在 send_message_only / send_and_wait_reply 返回 login_required 后，Agent 必须立即调用本工具。
+本工具会阻塞直到用户扫码确认或二维码过期；登录成功后返回 success，Agent 应重试原先的发送请求。`,
+  inputSchema: { type: 'object', properties: {} },
+};
+
+const LIST_ACTIVATED_USERS_TOOL: Tool = {
+  name: 'list_activated_users',
+  description: '列出已向 ClawBot 发送过消息（已激活）的微信用户',
+  inputSchema: { type: 'object', properties: {} },
+};
+
+export async function startServer(): Promise<void> {
+  const cfg = getConfig();
+  const engine = makeEngine(cfg.engine);
+
+  const server = new Server(
+    { name: 'hitl-mcp', version: '0.3.0' },
+    // listChanged: true 声明此服务端支持动态工具列表变更通知
+    { capabilities: { tools: { listChanged: true } } }
+  );
+
+  // ── iLink 引擎：注入登录状态变化回调 ──────────────────────────────────────
+  if (engine instanceof ILinkEngine) {
+    engine.onLoginStateChange = () => {
+      // 通知 MCP 客户端重新拉取工具列表
+      server.notification({ method: 'notifications/tools/list_changed' });
+    };
+  }
+
+  await engine.start();
+
+  // ── 动态工具列表 ──────────────────────────────────────────────────────────
+  // 每次客户端 list_tools 时重新计算，以反映最新的登录状态
+
+  server.setRequestHandler(ListToolsRequestSchema, () => ({
+    tools: buildBaseTools(cfg),
   }));
 
-  // 注册工具调用处理器
+  // ── 工具调用处理器 ────────────────────────────────────────────────────────
+
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
+    const a = (args ?? {}) as Record<string, unknown>;
 
     try {
       if (name === 'send_and_wait_reply') {
-        return await handleSendAndWaitReply(client, args);
-      } else if (name === 'send_message_only') {
-        return await handleSendMessageOnly(client, args);
-      } else {
-        throw new Error(`Unknown tool: ${name}`);
+        const message   = String(a.message ?? '');
+        const recipient = String(a.recipient ?? cfg.defaultRecipient);
+        const projectName = a.project_name ? String(a.project_name) : cfg.defaultProjectName || undefined;
+
+        if (!recipient && cfg.engine !== 'ilink') {
+          return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
+        }
+
+        const formatted = formatMessage(message, genShortId(), projectName);
+        const result = await engine.sendAndWait(recipient, formatted, cfg.defaultTimeout);
+        return resultToContent(result);
       }
-    } catch (error) {
-      console.error(`[Server] Tool execution error:`, error);
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              status: 'error',
-              message: error instanceof Error ? error.message : String(error),
-            }),
-          },
-        ],
-      };
+
+      if (name === 'send_message_only') {
+        const message   = String(a.message ?? '');
+        const recipient = String(a.recipient ?? cfg.defaultRecipient);
+        const projectName = a.project_name ? String(a.project_name) : cfg.defaultProjectName || undefined;
+
+        if (!recipient && cfg.engine !== 'ilink') {
+          return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
+        }
+
+        const formatted = formatMessageOnly(message, projectName);
+        const result = await engine.sendOnly(recipient, formatted);
+        return resultToContent(result);
+      }
+
+      if (name === 'wait_for_login' && cfg.engine === 'ilink') {
+        const result = await (engine as ILinkEngine).waitForLogin();
+        return resultToContent(result);
+      }
+
+      if (name === 'list_activated_users' && cfg.engine === 'ilink') {
+        return jsonText({ status: 'success', users: (engine as ILinkEngine).listActivatedUsers() });
+      }
+
+      throw new Error(`未知工具: ${name}`);
+
+    } catch (e) {
+      console.error('[Server] 工具执行错误:', e);
+      return jsonText({ status: 'error', message: e instanceof Error ? e.message : String(e) });
     }
   });
 
-  // 启动服务器
+  // ── 连接传输层 ────────────────────────────────────────────────────────────
+
   const transport = new StdioServerTransport();
   await server.connect(transport);
 
-  console.error('[Server] WeCom HIL MCP Server started');
-  console.error(`[Server]   服务地址: ${config.serviceUrl}`);
-  console.error(`[Server]   默认 Chat ID: ${config.defaultChatId || '(未设置)'}`);
-  console.error(`[Server]   默认项目名: ${config.defaultProjectName || '(未设置)'}`);
-  console.error(`[Server]   超时时间: ${config.defaultTimeout}s`);
-  console.error(`[Server]   轮询间隔: ${config.pollInterval}s`);
-}
-
-/**
- * 处理 send_and_wait_reply 工具调用
- */
-async function handleSendAndWaitReply(
-  client: WeComClient,
-  args: any
-): Promise<any> {
-  const config = getConfig();
-  const timeout = config.defaultTimeout;
-
-  const message: string = args.message;
-  const chatId: string | undefined = args.chat_id;
-  const imagePaths: string[] | undefined = args.image_paths;
-  const projectName: string | undefined = args.project_name;
-
-  // 如果没有指定 chat_id，使用配置中的默认值
-  console.error(`[Tool] 原始 chat_id=${chatId}, config.defaultChatId=${config.defaultChatId}`);
-  const effectiveChatId = chatId || config.defaultChatId || undefined;
-  console.error(
-    `[Tool] 开始发送消息: message=${message.substring(0, 50)}..., ` +
-    `effectiveChatId=${effectiveChatId}, timeout=${timeout}, projectName=${projectName}`
-  );
-
-  // 处理图片上传
-  const imageUrls: string[] = [];
-  if (imagePaths && imagePaths.length > 0) {
-    for (const path of imagePaths) {
-      if (existsSync(path)) {
-        console.error(`[Tool] 上传图片: ${path}`);
-        const result = await client.uploadImage(path);
-        if (result.success && result.image_url) {
-          imageUrls.push(result.image_url);
-          console.error(`[Tool] 图片上传成功: ${path}`);
-        } else {
-          console.error(`[Tool] 图片上传失败: ${path}, ${JSON.stringify(result)}`);
-        }
-      } else {
-        console.error(`[Tool] 图片文件不存在: ${path}`);
-      }
-    }
-  }
-
-  console.error(`[Tool] 共上传 ${imageUrls.length} 张图片`);
-
-  // 发送消息（把 timeout 传给服务端，确保会话超时时间一致）
-  const sendResult = await client.sendMessage({
-    message,
-    chat_id: effectiveChatId,
-    images: imageUrls.length > 0 ? imageUrls : undefined,
-    project_name: projectName,
-    timeout,
-    wait_reply: true,
-  });
-
-  if (!sendResult.success) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            status: 'error',
-            replies: [],
-            message: `发送消息失败: ${sendResult.error || '未知错误'}`,
-          }),
-        },
-      ],
-    };
-  }
-
-  const sessionId = sendResult.session_id;
-  if (!sessionId) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            status: 'error',
-            replies: [],
-            message: '发送成功但未获取到会话 ID',
-          }),
-        },
-      ],
-    };
-  }
-
-  console.error(`[Tool] 消息发送成功, session_id=${sessionId}, 开始等待回复...`);
-
-  // 轮询等待回复
-  const startTime = Date.now();
-  const pollInterval = config.pollInterval * 1000;
-
-  try {
-    while (Date.now() - startTime < timeout * 1000) {
-      try {
-        const result = await client.pollReplies(sessionId);
-
-        if (result.has_reply) {
-          const replies = result.replies || [];
-          console.error(`[Tool] 收到用户回复: ${replies.length} 条`);
-          const replyResult = {
-            status: 'success',
-            replies,
-            message: `收到 ${replies.length} 条回复`,
-          };
-          // 自动下载图片并作为 MCP ImageContent 返回
-          return await processRepliesWithImages(
-            JSON.stringify(replyResult),
-            replies
-          );
-        }
-
-        if (result.status === 'not_found') {
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  status: 'error',
-                  replies: [],
-                  message: '会话不存在或已过期',
-                }),
-              },
-            ],
-          };
-        }
-      } catch (error) {
-        console.error(`[Tool] 轮询失败:`, error);
-      }
-
-      // 等待一段时间再轮询
-      await sleep(pollInterval);
-    }
-
-    // 超时
-    console.error(`[Tool] 等待超时: session_id=${sessionId}`);
-
-    // 标记会话超时
-    await client.markTimeout(sessionId);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            status: 'timeout',
-            replies: [],
-            message: `等待 ${timeout} 秒后超时，未收到用户回复`,
-          }),
-        },
-      ],
-    };
-  } catch (error) {
-    // 如果是取消错误，通知服务端清理会话
-    console.error(`[Tool] 发生错误或用户取消: ${error}`);
-    try {
-      await client.markTimeout(sessionId);
-      console.error(`[Tool] 已通知服务端清理会话: session_id=${sessionId}`);
-    } catch (cleanupError) {
-      console.error(`[Tool] 通知服务端清理会话失败:`, cleanupError);
-    }
-    throw error;
-  }
-}
-
-/**
- * 处理 send_message_only 工具调用
- */
-async function handleSendMessageOnly(
-  client: WeComClient,
-  args: any
-): Promise<any> {
-  const config = getConfig();
-
-  const message: string = args.message;
-  const chatId: string | undefined = args.chat_id;
-  const imagePaths: string[] | undefined = args.image_paths;
-  const projectName: string | undefined = args.project_name;
-  const mentionedList: string[] | undefined = args.mentioned_list;
-
-  // 如果没有指定 chat_id，使用配置中的默认值
-  const effectiveChatId = chatId || config.defaultChatId || undefined;
-  console.error(
-    `[Tool] 发送消息（不等待回复）: message=${message.substring(0, 50)}..., ` +
-    `chat_id=${effectiveChatId}`
-  );
-
-  // 处理图片上传
-  const imageUrls: string[] = [];
-  if (imagePaths && imagePaths.length > 0) {
-    for (const path of imagePaths) {
-      if (existsSync(path)) {
-        const result = await client.uploadImage(path);
-        if (result.success && result.image_url) {
-          imageUrls.push(result.image_url);
-        }
-      }
-    }
-  }
-
-  // 发送消息（不等待回复，不创建会话）
-  const sendResult = await client.sendMessage({
-    message,
-    chat_id: effectiveChatId,
-    images: imageUrls.length > 0 ? imageUrls : undefined,
-    project_name: projectName,
-    mention_list: mentionedList,
-    wait_reply: false,
-  });
-
-  if (sendResult.success) {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            status: 'success',
-            message: '消息发送成功',
-          }),
-        },
-      ],
-    };
-  } else {
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            status: 'error',
-            message: `发送失败: ${sendResult.error || '未知错误'}`,
-          }),
-        },
-      ],
-    };
-  }
+  console.error('[Server] hitl-mcp 已启动');
+  console.error(`[Server]   引擎: ${cfg.engine}`);
+  console.error(`[Server]   默认收件人: ${cfg.defaultRecipient || '(未设置)'}`);
+  console.error(`[Server]   默认项目名: ${cfg.defaultProjectName || '(未设置)'}`);
+  console.error(`[Server]   超时: ${cfg.defaultTimeout}s`);
 }
