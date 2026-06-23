@@ -1,11 +1,12 @@
 {
   "name": "hitl-mcp",
-  "version": "0.2.3",
+  "version": "0.3.0",
   "description": "Human-in-the-Loop MCP Server for WeCom (企业微信) - TypeScript Implementation",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "hitl-mcp": "dist/index.js"
+    "hitl-mcp": "dist/index.js",
+    "hitl-mcp-ilink-login": "dist/ilink-login.js"
   },
   "files": [
     "dist",
@@ -45,10 +46,14 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/ws": "^8.5.13",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   },

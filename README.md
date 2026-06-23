@@ -6,14 +6,24 @@
 
 ```
 hil-mcp/
-├── packages/               # 核心服务（Monorepo）
-│   ├── hil-server/         # HIL 服务器
-│   ├── devcloud-worker/    # DevCloud Worker
-│   ├── mcp-server-py/      # MCP Server (Python)
-│   └── mcp-server-ts/      # MCP Server (TypeScript)
-├── docs/                   # 项目文档
-└── scripts/                # 部署和工具脚本
+├── packages/                    # 核心服务（Monorepo）
+│   ├── hil-server/              # HIL 服务器（腾讯内网 / 自托管）
+│   ├── devcloud-worker/         # DevCloud Worker（腾讯飞鸽传书）
+│   ├── mcp-server-py/           # MCP Server - Python（对接 HIL Server）
+│   ├── mcp-server-ts/           # MCP Server - TypeScript（对接 HIL Server）
+│   ├── mcp-server-wecom-aibot/  # MCP Server - 企业微信智能机器人（独立，无需 HIL Server）
+│   └── mcp-server-ilink/        # MCP Server - 微信 ClawBot/iLink（独立，无需 HIL Server）
+├── docs/                        # 项目文档
+└── scripts/                     # 部署和工具脚本
 ```
+
+## 渠道选择指南
+
+| 包 | 适用场景 | 需要 HIL Server | 是否需要公网 IP |
+|----|---------|----------------|---------------|
+| `mcp-server-py` / `mcp-server-ts` | 腾讯内部或自托管企业微信 | ✅ 需要 | 视部署而定 |
+| `mcp-server-wecom-aibot` | 任意企业的企业微信智能机器人 | ❌ 不需要 | ❌ 不需要 |
+| `mcp-server-ilink` | 个人微信（ClawBot）| ❌ 不需要 | ❌ 不需要 |
 
 ## 功能特性
 
@@ -851,6 +861,130 @@ curl http://localhost:8082/health
 3. WebSocket 地址需要使用 `ws://`（而非 `wss://`）
 
 推荐使用免费域名 + Let's Encrypt 免费 SSL 证书。
+
+---
+
+## 独立 MCP Server（无需 HIL Server）
+
+### 企业微信智能机器人（mcp-server-wecom-aibot）
+
+适用于**腾讯以外的所有企业**，使用企业微信官方 AI Bot API，通过 WebSocket 长连接直接接入企微服务端。无需公网 IP，无需回调 URL，直接在本地运行。
+
+**前置条件：** 在企业微信管理后台创建"智能机器人"，获取 `Bot ID` 和 `Secret`。
+
+**快速开始：**
+
+```bash
+cd packages/mcp-server-wecom-aibot
+uv pip install -e .
+
+# 设置环境变量
+export WECOM_BOT_ID="your-bot-id"
+export WECOM_BOT_SECRET="your-bot-secret"
+export DEFAULT_CHAT_ID="your-chat-id"
+
+hitl-mcp-wecom-aibot
+```
+
+**Cursor MCP 配置（`~/.cursor/mcp.json`）：**
+
+```json
+{
+  "mcpServers": {
+    "wecom-aibot-hil": {
+      "command": "hitl-mcp-wecom-aibot",
+      "env": {
+        "WECOM_BOT_ID": "your-bot-id",
+        "WECOM_BOT_SECRET": "your-bot-secret",
+        "DEFAULT_CHAT_ID": "your-chat-id"
+      }
+    }
+  }
+}
+```
+
+**架构：**
+
+```
+AI Agent（本地）
+    │ MCP
+    ▼
+mcp-server-wecom-aibot（本地）
+    │ WSS（主动出站，无需公网 IP）
+    ▼
+wss://openws.work.weixin.qq.com
+    │
+    ▼
+企业微信用户
+```
+
+---
+
+### 微信 ClawBot（mcp-server-ilink）
+
+适用于**个人微信**用户，使用微信 iLink 协议，通过 HTTP 长轮询直接接入微信服务端。无需公网 IP，无需回调 URL，直接在本地运行。
+
+**前置条件：** 在 [ClawBot](https://clawbot.weixin.qq.com) 申请 Bot，然后运行登录命令完成扫码。
+
+**快速开始：**
+
+```bash
+cd packages/mcp-server-ilink
+uv pip install -e .
+
+# Step 1: 扫码登录（仅需一次，token 会持久化保存）
+hitl-mcp-ilink-login
+
+# Step 2: 让目标用户先向 ClawBot 发一条消息（激活会话）
+
+# Step 3: 启动 MCP Server
+export DEFAULT_USER_ID="target-wechat-user-id"
+hitl-mcp-ilink
+```
+
+**Cursor MCP 配置（`~/.cursor/mcp.json`）：**
+
+```json
+{
+  "mcpServers": {
+    "ilink-hil": {
+      "command": "hitl-mcp-ilink",
+      "env": {
+        "DEFAULT_USER_ID": "target-wechat-user-id",
+        "ILINK_TOKEN_STORE_PATH": "/path/to/ilink_store.json"
+      }
+    }
+  }
+}
+```
+
+**用户激活流程：**
+
+```
+1. 用户在微信中搜索你的 ClawBot 并发送任意消息
+   → 系统自动保存该用户的 context_token
+
+2. AI Agent 调用 send_and_wait_reply(user_id="xxx", message="...")
+   → MCP Server 发送消息给用户
+
+3. 用户回复后
+   → 消息通过长轮询推送给 MCP Server → 返回给 AI Agent
+```
+
+**架构：**
+
+```
+AI Agent（本地）
+    │ MCP
+    ▼
+mcp-server-ilink（本地）
+    │ HTTPS 长轮询（主动出站，无需公网 IP）
+    ▼
+https://ilinkai.weixin.qq.com
+    │
+    ▼
+微信用户
+```
 
 ---
 

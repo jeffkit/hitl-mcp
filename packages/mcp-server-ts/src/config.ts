@@ -1,45 +1,72 @@
 /**
- * MCP Server 配置
+ * 统一配置
+ *
+ * 所有配置均通过命令行参数传入（不依赖环境变量）。
+ *
+ * 引擎选择（--engine）：
+ *   hil         → 对接 HIL Server（原有行为，默认）
+ *   wecom-aibot → 企业微信智能机器人（直连，无需 HIL Server）
+ *   ilink       → 微信 ClawBot/iLink（直连，无需 HIL Server）
  */
 
-export interface MCPConfig {
-  /** HIL Server 的访问地址 */
-  serviceUrl: string;
-  /** 默认发送消息的 Chat ID（群聊或私聊） */
-  defaultChatId: string;
-  /** 默认项目名称，用于标识消息来源 */
+export type EngineType = 'hil' | 'wecom-aibot' | 'ilink';
+
+export interface Config {
+  engine: EngineType;
+
+  // ── 通用 ────────────────────────────────────────────────────────────────────
+  /** 默认收件人：chatid（hil/wecom-aibot）；ilink 引擎自动推断，通常无需设置 */
+  defaultRecipient: string;
   defaultProjectName: string;
-  /** 默认等待回复超时时间（秒） */
+  /** 等待回复超时（秒） */
   defaultTimeout: number;
-  /** 轮询获取回复的间隔（秒，内部使用） */
+
+  // ── HIL Server 引擎 ─────────────────────────────────────────────────────────
+  serviceUrl: string;
   pollInterval: number;
+
+  // ── 企业微信 AI Bot 引擎 ─────────────────────────────────────────────────────
+  wecomBotId: string;
+  wecomBotSecret: string;
+  wecomWsUrl: string;
+  wecomHeartbeatInterval: number;
+  wecomReconnectDelay: number;
+  wecomMaxReconnectDelay: number;
+
+  // ── iLink 引擎 ───────────────────────────────────────────────────────────────
+  /** iLink API 基础地址（登录扫码、getupdates、sendmessage 均走此地址） */
+  ilinkBaseUrl: string;
+  ilinkTokenStorePath: string;
+  ilinkPollTimeout: number;
 }
 
-/**
- * 从环境变量和命令行参数创建配置
- */
-export function createConfig(overrides: Partial<MCPConfig> = {}): MCPConfig {
+export function createConfig(opts: Partial<Config>): Config {
   return {
-    serviceUrl: overrides.serviceUrl || process.env.SERVICE_URL || 'http://localhost:8081',
-    defaultChatId: overrides.defaultChatId || process.env.DEFAULT_CHAT_ID || '',
-    defaultProjectName: overrides.defaultProjectName || process.env.DEFAULT_PROJECT_NAME || '',
-    defaultTimeout: overrides.defaultTimeout || parseInt(process.env.DEFAULT_TIMEOUT || '1200', 10),
-    pollInterval: overrides.pollInterval || parseInt(process.env.POLL_INTERVAL || '2', 10),
+    engine:               opts.engine               ?? 'hil',
+    defaultRecipient:     opts.defaultRecipient     ?? '',
+    defaultProjectName:   opts.defaultProjectName   ?? '',
+    defaultTimeout:       opts.defaultTimeout       ?? 1200,
+    serviceUrl:           opts.serviceUrl           ?? 'http://localhost:8081',
+    pollInterval:         opts.pollInterval         ?? 2,
+    wecomBotId:           opts.wecomBotId           ?? '',
+    wecomBotSecret:       opts.wecomBotSecret       ?? '',
+    wecomWsUrl:           opts.wecomWsUrl           ?? 'wss://openws.work.weixin.qq.com',
+    wecomHeartbeatInterval: opts.wecomHeartbeatInterval ?? 30,
+    wecomReconnectDelay:  opts.wecomReconnectDelay  ?? 5,
+    wecomMaxReconnectDelay: opts.wecomMaxReconnectDelay ?? 60,
+    ilinkBaseUrl:         opts.ilinkBaseUrl         ?? 'https://ilinkai.weixin.qq.com',
+    ilinkTokenStorePath:  opts.ilinkTokenStorePath  ?? './data/ilink_store.json',
+    ilinkPollTimeout:     opts.ilinkPollTimeout     ?? 40,
   };
 }
 
-/**
- * 全局配置实例（延迟初始化）
- */
-let globalConfig: MCPConfig | null = null;
+let _config: Config | null = null;
 
-export function getConfig(): MCPConfig {
-  if (!globalConfig) {
-    globalConfig = createConfig();
-  }
-  return globalConfig;
+export function getConfig(): Config {
+  if (!_config) _config = createConfig({});
+  return _config;
 }
 
-export function setConfig(config: MCPConfig): void {
-  globalConfig = config;
+export function setConfig(cfg: Config): void {
+  _config = cfg;
 }
