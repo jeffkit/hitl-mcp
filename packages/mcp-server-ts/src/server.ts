@@ -195,8 +195,12 @@ export async function startServer(): Promise<void> {
           return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
         }
 
-        const formatted = formatMessage(message, genShortId(), projectName);
-        const result = await engine.sendAndWait(recipient, formatted, cfg.defaultTimeout);
+        // hil 引擎：HIL Server 端 (Python) 会自己调用 format_message_with_header 加头部和「请回复」，
+        // TS 端不能再加一次，否则企微群机器人会出现双层短 ID/项目名 和双层「请回复」提示。
+        const text = cfg.engine === 'hil'
+          ? message
+          : formatMessage(message, genShortId(), projectName);
+        const result = await engine.sendAndWait(recipient, text, cfg.defaultTimeout, projectName);
         return resultToContent(result);
       }
 
@@ -209,8 +213,11 @@ export async function startServer(): Promise<void> {
           return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
         }
 
-        const formatted = formatMessageOnly(message, projectName);
-        const result = await engine.sendOnly(recipient, formatted);
+        // 同上：hil 引擎跳过 TS 端格式化，由 HIL Server 端统一处理。
+        const text = cfg.engine === 'hil'
+          ? message
+          : formatMessageOnly(message, projectName);
+        const result = await engine.sendOnly(recipient, text, projectName);
         return resultToContent(result);
       }
 

@@ -202,7 +202,7 @@ export class WecomAibotEngine implements Engine {
     });
   }
 
-  async sendAndWait(recipient: string, text: string, timeoutSec: number): Promise<SendResult> {
+  async sendAndWait(recipient: string, text: string, timeoutSec: number, _projectName?: string): Promise<SendResult> {
     const shortId = _genShortId();
     const promise = sessionManager.create(shortId, recipient, timeoutSec * 1000);
 
@@ -228,7 +228,7 @@ export class WecomAibotEngine implements Engine {
     }
   }
 
-  async sendOnly(recipient: string, text: string): Promise<SendResult> {
+  async sendOnly(recipient: string, text: string, _projectName?: string): Promise<SendResult> {
     try {
       await this._send(recipient, text);
       return { status: 'success', message: '消息发送成功' };
