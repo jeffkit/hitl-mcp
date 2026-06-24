@@ -33,7 +33,12 @@ export class HilEngine implements Engine {
 
   async stop(): Promise<void> {}
 
-  async sendAndWait(recipient: string, text: string, timeoutSec: number): Promise<SendResult> {
+  async sendAndWait(
+    recipient: string,
+    text: string,
+    timeoutSec: number,
+    projectName?: string,
+  ): Promise<SendResult> {
     const cfg = getConfig();
 
     const sendResult: Record<string, any> = await apiFetch('/send', {
@@ -44,6 +49,7 @@ export class HilEngine implements Engine {
         chat_id: recipient,
         wait_reply: true,
         timeout: timeoutSec,
+        project_name: projectName,
       }),
     }).catch(e => ({ success: false, error: String(e) }));
 
@@ -88,11 +94,20 @@ export class HilEngine implements Engine {
     return { status: 'timeout', replies: [], message: `等待 ${timeoutSec} 秒后超时` };
   }
 
-  async sendOnly(recipient: string, text: string): Promise<SendResult> {
+  async sendOnly(
+    recipient: string,
+    text: string,
+    projectName?: string,
+  ): Promise<SendResult> {
     const result = await apiFetch('/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, chat_id: recipient, wait_reply: false }),
+      body: JSON.stringify({
+        message: text,
+        chat_id: recipient,
+        wait_reply: false,
+        project_name: projectName,
+      }),
     }).catch(e => ({ success: false, error: String(e) }));
 
     return result.success

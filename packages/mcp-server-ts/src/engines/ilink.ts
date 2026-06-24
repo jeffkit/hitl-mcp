@@ -194,7 +194,7 @@ export class ILinkEngine implements Engine {
     }
   }
 
-  async sendAndWait(recipient: string, text: string, timeoutSec: number): Promise<SendResult> {
+  async sendAndWait(recipient: string, text: string, timeoutSec: number, _projectName?: string): Promise<SendResult> {
     const loginResult = await this._ensureLoggedIn();
     if (loginResult) return loginResult;
 
@@ -229,7 +229,7 @@ export class ILinkEngine implements Engine {
     }
   }
 
-  async sendOnly(recipient: string, text: string): Promise<SendResult> {
+  async sendOnly(recipient: string, text: string, _projectName?: string): Promise<SendResult> {
     const loginResult = await this._ensureLoggedIn();
     if (loginResult) return loginResult;
 

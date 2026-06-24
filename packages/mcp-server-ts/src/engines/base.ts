@@ -16,7 +16,16 @@ export interface Engine {
   /** 停止引擎 */
   stop(): Promise<void>;
   /** 发消息并等待回复 */
-  sendAndWait(recipient: string, text: string, timeoutSec: number): Promise<SendResult>;
+  sendAndWait(
+    recipient: string,
+    text: string,
+    timeoutSec: number,
+    projectName?: string,
+  ): Promise<SendResult>;
   /** 仅发消息，不等待回复 */
-  sendOnly(recipient: string, text: string): Promise<SendResult>;
+  sendOnly(
+    recipient: string,
+    text: string,
+    projectName?: string,
+  ): Promise<SendResult>;
 }
