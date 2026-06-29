@@ -94,3 +94,7 @@ Thumbs.db
 
 # Alembic
 alembic/versions/__pycache__/
+
+# 保留 PyInstaller spec（被上面 *.spec 忽略，需显式放行）
+!packaging/*.spec
+!/**/packaging/*.spec
