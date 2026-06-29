@@ -1,20 +1,20 @@
 /**
  * `hitl-mcp ilink-setup` — iLink 一键安装 + 服务化（macOS launchd，单进程模式）
  *
- * 架构：iLink 长连接作为 HIL Server 的内置引擎跑在同一个进程内，
- * 不再需要独立的 ilink-worker 进程。因此只需服务化 HIL Server 一个进程。
+ * 架构：iLink 长连接作为 HITL Server 的内置引擎跑在同一个进程内，
+ * 不再需要独立的 ilink-worker 进程。因此只需服务化 HITL Server 一个进程。
  *
  * 流程：
- *   1. 确保 hil-server venv 与依赖（httpx 等内置引擎所需）
- *   2. 停掉旧的服务：unload 现有 HIL Server / ilink-worker plist，kill 占用 :8081 的手动进程
- *   3. 生成 HIL Server 的 launchd plist（带 ENABLE_ILINK_ENGINE 等环境变量），load
- *   4. 等 HIL Server 起来 + 内置 ilink 引擎就绪
+ *   1. 确保 hitl-server venv 与依赖（httpx 等内置引擎所需）
+ *   2. 停掉旧的服务：unload 现有 HITL Server / ilink-worker plist，kill 占用 :8081 的手动进程
+ *   3. 生成 HITL Server 的 launchd plist（带 ENABLE_ILINK_ENGINE 等环境变量），load
+ *   4. 等 HITL Server 起来 + 内置 ilink 引擎就绪
  *   5. 若未登录：拉二维码引导扫码
  *   6. 打印一段可直接粘贴进 Cursor 的 MCP 配置
  *
  * 设计取舍：
  *   - 全参数可命令行传入，不做交互式 readline（Agent 跑时 stdin 不可交互）。
- *   - hil-server 用 venv 内 python 的绝对路径写进 plist，不依赖 shell PATH。
+ *   - hitl-server 用 venv 内 python 的绝对路径写进 plist，不依赖 shell PATH。
  *   - 仅支持 macOS（launchd 专属）。
  */
 import { spawnSync } from 'child_process';
@@ -24,18 +24,20 @@ import { dirname, join, resolve } from 'path';
 
 // ── 路径常量 ──────────────────────────────────────────────────────────────
 
-const HIL_DIR = process.env.HIL_MCP_HOME || join(homedir(), '.hil-mcp');
-const LOG_DIR = join(HIL_DIR, 'logs');
+const HITL_DIR = process.env.HITL_HOME || join(homedir(), '.hitl');
+const LOG_DIR = join(HITL_DIR, 'logs');
 const LAUNCH_AGENT_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
-const HIL_SERVER_LABEL = 'com.woa.hitl-mcp.hil-server';
-const HIL_SERVER_PLIST = join(LAUNCH_AGENT_DIR, `${HIL_SERVER_LABEL}.plist`);
+const HITL_SERVER_LABEL = 'com.woa.hitl-mcp.hitl-server';
+const HITL_SERVER_PLIST = join(LAUNCH_AGENT_DIR, `${HITL_SERVER_LABEL}.plist`);
+// 旧名 plist（改名前），重装时一并卸载，避免端口被旧服务占用
+const LEGACY_HITL_SERVER_PLIST = join(LAUNCH_AGENT_DIR, 'com.woa.hitl-mcp.hil-server.plist');
 const LEGACY_WORKER_PLIST = join(LAUNCH_AGENT_DIR, 'com.woa.hitl-mcp.ilink-worker.plist');
 
 /** monorepo 根：从本文件向上回溯 4 层（src -> mcp-server-ts -> packages -> hil-mcp） */
 const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..', '..', '..');
-const HIL_SERVER_DIR = join(REPO_ROOT, 'packages', 'hil-server');
-const HIL_SERVER_VENV_PY = join(HIL_SERVER_DIR, '.venv', 'bin', 'python');
+const HITL_SERVER_DIR = join(REPO_ROOT, 'packages', 'hitl-server');
+const HITL_SERVER_VENV_PY = join(HITL_SERVER_DIR, '.venv', 'bin', 'python');
 
 // ── 小工具 ────────────────────────────────────────────────────────────────
 
@@ -69,7 +71,7 @@ async function httpGet(url: string, timeoutMs = 5000): Promise<Record<string, an
   }
 }
 
-/** 找到占用 :8081 LISTEN 的进程 PID（本机手动起的 HIL Server），返回 PID 或 null */
+/** 找到占用 :8081 LISTEN 的进程 PID（本机手动起的 HITL Server），返回 PID 或 null */
 function pidListeningOn(port: number): number | null {
   const r = run('lsof', ['-nP', '-iTCP:' + port, '-sTCP:LISTEN', '-t']);
   if (!r.ok) return null;
@@ -79,7 +81,7 @@ function pidListeningOn(port: number): number | null {
 
 // ── plist 生成 ────────────────────────────────────────────────────────────
 
-function buildHilServerPlist(args: {
+function buildHitlServerPlist(args: {
   pythonPath: string;
   workingDir: string;
   port: string;
@@ -94,18 +96,18 @@ function buildHilServerPlist(args: {
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>${HIL_SERVER_LABEL}</string>
+  <string>${HITL_SERVER_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
     <string>${args.pythonPath}</string>
     <string>-m</string>
-    <string>hil_server.app</string>
+    <string>hitl_server.app</string>
   </array>
   <key>WorkingDirectory</key>
   <string>${args.workingDir}</string>
   <key>EnvironmentVariables</key>
   <dict>
-      <key>HIL_PORT</key><string>${args.port}</string>
+      <key>HITL_PORT</key><string>${args.port}</string>
 ${envEntries}
   </dict>
   <key>RunAtLoad</key>
@@ -113,9 +115,9 @@ ${envEntries}
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>${args.logDir}/hil-server.out.log</string>
+  <string>${args.logDir}/hitl-server.out.log</string>
   <key>StandardErrorPath</key>
-  <string>${args.logDir}/hil-server.err.log</string>
+  <string>${args.logDir}/hitl-server.err.log</string>
 </dict>
 </plist>
 `;
@@ -123,39 +125,45 @@ ${envEntries}
 
 // ── 核心步骤 ──────────────────────────────────────────────────────────────
 
-/** 确保 hil-server venv 与依赖（内置引擎需要 httpx；qrcode 可选） */
-function ensureHilServerVenv(): string {
-  if (!existsSync(HIL_SERVER_DIR)) {
-    throw new Error(`找不到 hil-server 包目录: ${HIL_SERVER_DIR}\n请确认在 hil-mcp monorepo 内运行。`);
+/** 确保 hitl-server venv 与依赖（内置引擎需要 httpx；qrcode 可选） */
+function ensureHitlServerVenv(): string {
+  if (!existsSync(HITL_SERVER_DIR)) {
+    throw new Error(`找不到 hitl-server 包目录: ${HITL_SERVER_DIR}\n请确认在 hil-mcp monorepo 内运行。`);
   }
-  if (!existsSync(HIL_SERVER_VENV_PY)) {
+  if (!existsSync(HITL_SERVER_VENV_PY)) {
     if (!hasCmd('uv')) {
       throw new Error(
-        `hil-server venv 缺失，且 PATH 中没有 uv。\n` +
+        `hitl-server venv 缺失，且 PATH 中没有 uv。\n` +
         `请先安装 uv:  curl -LsSf https://astral.sh/uv/install.sh | sh\n然后重跑本命令。`
       );
     }
-    log('建立 hil-server venv...');
-    const r = run('uv', ['sync'], { cwd: HIL_SERVER_DIR });
-    if (!r.ok) throw new Error(`hil-server uv sync 失败: ${r.stderr}`);
+    log('建立 hitl-server venv...');
+    const r = run('uv', ['sync'], { cwd: HITL_SERVER_DIR });
+    if (!r.ok) throw new Error(`hitl-server uv sync 失败: ${r.stderr}`);
   }
-  // 确保 httpx 可用（内置 ilink 引擎依赖；hil-server 主依赖未必含 httpx）
-  const probe = run(HIL_SERVER_VENV_PY, ['-c', 'import httpx'], { cwd: HIL_SERVER_DIR });
+  // 确保 httpx 可用（内置 ilink 引擎依赖；hitl-server 主依赖未必含 httpx）
+  const probe = run(HITL_SERVER_VENV_PY, ['-c', 'import httpx'], { cwd: HITL_SERVER_DIR });
   if (!probe.ok) {
     log('venv 缺 httpx，安装中...');
-    const r = run(HIL_SERVER_VENV_PY, ['-m', 'pip', 'install', 'httpx'], { cwd: HIL_SERVER_DIR });
+    const r = run(HITL_SERVER_VENV_PY, ['-m', 'pip', 'install', 'httpx'], { cwd: HITL_SERVER_DIR });
     if (!r.ok) throw new Error(`安装 httpx 失败: ${r.stderr}`);
   }
-  log(`hil-server venv 就绪: ${HIL_SERVER_VENV_PY}`);
-  return HIL_SERVER_VENV_PY;
+  log(`hitl-server venv 就绪: ${HITL_SERVER_VENV_PY}`);
+  return HITL_SERVER_VENV_PY;
 }
 
 /** 停掉旧的服务：unload 旧 plist + kill 占用端口的手动进程 */
 function stopExistingServices(port: number): void {
-  // 卸载旧的单进程 HIL Server plist（如有）
-  if (existsSync(HIL_SERVER_PLIST)) {
-    run('launchctl', ['unload', HIL_SERVER_PLIST]);
-    log('已卸载旧 HIL Server plist');
+  // 卸载旧的单进程 HITL Server plist（如有）
+  if (existsSync(HITL_SERVER_PLIST)) {
+    run('launchctl', ['unload', HITL_SERVER_PLIST]);
+    log('已卸载旧 HITL Server plist');
+  }
+  // 卸载改名前的旧 label plist（com.woa.hitl-mcp.hil-server）
+  if (existsSync(LEGACY_HITL_SERVER_PLIST)) {
+    run('launchctl', ['unload', LEGACY_HITL_SERVER_PLIST]);
+    rmSync(LEGACY_HITL_SERVER_PLIST);
+    log('已卸载改名前的旧 plist（hil-server）');
   }
   // 卸载遗留的独立 ilink-worker plist（切换到内置引擎后不再需要）
   if (existsSync(LEGACY_WORKER_PLIST)) {
@@ -171,37 +179,37 @@ function stopExistingServices(port: number): void {
   }
 }
 
-/** 写 HIL Server plist 并 load */
-function installHilServer(pythonPath: string, env: Record<string, string>, port: string): void {
+/** 写 HITL Server plist 并 load */
+function installHitlServer(pythonPath: string, env: Record<string, string>, port: string): void {
   if (!existsSync(LAUNCH_AGENT_DIR)) mkdirSync(LAUNCH_AGENT_DIR, { recursive: true });
-  const plist = buildHilServerPlist({
+  const plist = buildHitlServerPlist({
     pythonPath,
-    workingDir: HIL_SERVER_DIR,
+    workingDir: HITL_SERVER_DIR,
     port,
     env,
     logDir: LOG_DIR,
   });
-  writeFileSync(HIL_SERVER_PLIST, plist);
-  log(`已写入 plist: ${HIL_SERVER_PLIST}`);
-  const load = run('launchctl', ['load', HIL_SERVER_PLIST]);
+  writeFileSync(HITL_SERVER_PLIST, plist);
+  log(`已写入 plist: ${HITL_SERVER_PLIST}`);
+  const load = run('launchctl', ['load', HITL_SERVER_PLIST]);
   if (!load.ok) throw new Error(`launchctl load 失败: ${load.stderr}`);
-  log('HIL Server 已加载（开机自启 + 崩溃自动重启 + 内置 iLink 引擎）');
+  log('HITL Server 已加载（开机自启 + 崩溃自动重启 + 内置 iLink 引擎）');
 }
 
-/** 等 HIL Server 起来且 ilink 引擎就绪（login_status 可达即可） */
+/** 等 HITL Server 起来且 ilink 引擎就绪（login_status 可达即可） */
 async function waitReady(serviceUrl: string, botKey: string): Promise<void> {
   const base = serviceUrl.replace(/\/$/, '');
   const url = `${base}/api/ilink/login_status?bot_key=${encodeURIComponent(botKey)}`;
   for (let i = 0; i < 40; i++) {
     const r = await httpGet(url, 3000);
     if (r !== null && r.status !== 'error') {
-      log(`HIL Server 就绪，内置 ilink 引擎 login_status=${r.status}`);
+      log(`HITL Server 就绪，内置 ilink 引擎 login_status=${r.status}`);
       return;
     }
     await sleep(1000);
   }
   throw new Error(
-    `HIL Server 未在 40s 内就绪。\n查看日志: tail -f ${join(LOG_DIR, 'hil-server.err.log')}`
+    `HITL Server 未在 40s 内就绪。\n查看日志: tail -f ${join(LOG_DIR, 'hitl-server.err.log')}`
   );
 }
 
@@ -275,21 +283,26 @@ function printCursorConfig(args: { serviceUrl: string; botKey: string; projectNa
   console.error('卸载: npx hitl-mcp ilink-setup --uninstall\n');
 }
 
-/** 卸载：unload HIL Server plist + 删文件（凭证保留） */
+/** 卸载：unload HITL Server plist + 删文件（凭证保留） */
 function uninstallAll(): void {
-  if (existsSync(HIL_SERVER_PLIST)) {
-    run('launchctl', ['unload', HIL_SERVER_PLIST]);
-    rmSync(HIL_SERVER_PLIST);
-    log('已卸载 HIL Server launchd 服务');
+  if (existsSync(HITL_SERVER_PLIST)) {
+    run('launchctl', ['unload', HITL_SERVER_PLIST]);
+    rmSync(HITL_SERVER_PLIST);
+    log('已卸载 HITL Server launchd 服务');
   } else {
-    log('未找到 HIL Server plist，无需卸载');
+    log('未找到 HITL Server plist，无需卸载');
   }
   if (existsSync(LEGACY_WORKER_PLIST)) {
     run('launchctl', ['unload', LEGACY_WORKER_PLIST]);
     rmSync(LEGACY_WORKER_PLIST);
     log('已清理遗留的独立 ilink-worker plist');
   }
-  log('注意：凭证文件未删除（' + HIL_DIR + '），如需彻底清理请手动 rm -rf ~/.hil-mcp');
+  if (existsSync(LEGACY_HITL_SERVER_PLIST)) {
+    run('launchctl', ['unload', LEGACY_HITL_SERVER_PLIST]);
+    rmSync(LEGACY_HITL_SERVER_PLIST);
+    log('已清理改名前的旧 plist（hil-server）');
+  }
+  log('注意：凭证文件未删除（' + HITL_DIR + '），如需彻底清理请手动 rm -rf ~/.hitl');
 }
 
 // ── 入口 ──────────────────────────────────────────────────────────────────
@@ -318,7 +331,16 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
     return;
   }
 
-  mkdirSync(HIL_DIR, { recursive: true });
+  // 一次性迁移：旧目录 ~/.hil-mcp → ~/.hitl（保留凭证与日志）
+  const legacyDir = join(homedir(), '.hil-mcp');
+  if (existsSync(legacyDir) && !existsSync(join(HITL_DIR, '.migrated'))) {
+    log(`检测到旧数据目录 ${legacyDir}，迁移到 ${HITL_DIR}...`);
+    run('cp', ['-R', `${legacyDir}/.`, `${HITL_DIR}/`]);
+    writeFileSync(join(HITL_DIR, '.migrated'), new Date().toISOString());
+    log('迁移完成（旧目录保留，可手动删除: rm -rf ~/.hil-mcp）');
+  }
+
+  mkdirSync(HITL_DIR, { recursive: true });
   mkdirSync(LOG_DIR, { recursive: true });
 
   const port = (() => {
@@ -327,13 +349,13 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
   })();
 
   // 1. venv + 依赖
-  const pythonPath = ensureHilServerVenv();
+  const pythonPath = ensureHitlServerVenv();
 
   // 2. 停旧服务
   stopExistingServices(parseInt(port, 10));
   await sleep(2000);
 
-  // 3. 安装 HIL Server（内置 ilink 引擎，可选 wecom-aibot）
+  // 3. 安装 HITL Server（内置 ilink 引擎，可选 wecom-aibot）
   const env: Record<string, string> = {
     ENABLE_ILINK_ENGINE: 'true',
     ILINK_BOT_KEY: opts.botKey,
@@ -350,7 +372,7 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
     env.WECOM_AIBOT_BOT_ID = opts.wecomBotId;
     env.WECOM_AIBOT_BOT_SECRET = opts.wecomBotSecret;
   }
-  installHilServer(pythonPath, env, port);
+  installHitlServer(pythonPath, env, port);
 
   // 4. 等就绪
   await waitReady(opts.serviceUrl, opts.botKey);

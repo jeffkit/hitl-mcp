@@ -120,7 +120,7 @@ node dist/index.js --service-url http://hitl.woa.com/api --chat-id your-chat-id
 
 | 参数 | 说明 | 是否必填 | 默认值 |
 |------|------|----------|--------|
-| `--service-url` | HIL Server 地址（如 `http://hitl.woa.com/api`） | ✅ 必填 | `http://localhost:8081` |
+| `--service-url` | HITL Server 地址（如 `http://hitl.woa.com/api`） | ✅ 必填 | `http://localhost:8081` |
 | `--chat-id` | 默认 Chat ID（群聊或私聊） | ✅ 必填 | - |
 | `--project-name` | 项目名称，用于标识消息来源 | 可选 | - |
 | `--timeout` | 等待回复超时时间（秒） | 可选 | `1200` (20 分钟) |
@@ -139,7 +139,7 @@ node dist/index.js --service-url http://hitl.woa.com/api --chat-id your-chat-id
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SERVICE_URL` | HIL Server 地址 | `http://localhost:8081` |
+| `SERVICE_URL` | HITL Server 地址 | `http://localhost:8081` |
 | `DEFAULT_CHAT_ID` | 默认 Chat ID | - |
 | `DEFAULT_PROJECT_NAME` | 默认项目名称 | - |
 | `DEFAULT_TIMEOUT` | 超时时间（秒） | `1200` |
@@ -312,7 +312,7 @@ MCP Server 的日志会输出到 stderr，可以在 Cursor 的开发者工具中
 
 ## 服务端部署
 
-请参考主项目的 [README.md](../README.md) 了解如何部署 HIL Server。
+请参考主项目的 [README.md](../README.md) 了解如何部署 HITL Server。
 
 ---
 

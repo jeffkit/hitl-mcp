@@ -1,8 +1,8 @@
 /**
- * HIL Server 引擎（原有行为）
+ * HITL Server 引擎（原有行为）
  *
- * 通过 HTTP 调用 HIL Server，轮询等待回复。
- * 适用于腾讯内部飞鸽传书场景（需要 HIL Server 在线）。
+ * 通过 HTTP 调用 HITL Server，轮询等待回复。
+ * 适用于腾讯内部飞鸽传书场景（需要 HITL Server 在线）。
  */
 
 import { getConfig } from '../config.js';
@@ -28,7 +28,7 @@ async function apiFetch(path: string, init?: RequestInit): Promise<Record<string
 export class HilEngine implements Engine {
   async start(): Promise<void> {
     const cfg = getConfig();
-    console.error(`[HIL] 使用 HIL Server: ${cfg.serviceUrl}`);
+    console.error(`[HIL] 使用 HITL Server: ${cfg.serviceUrl}`);
   }
 
   async stop(): Promise<void> {}

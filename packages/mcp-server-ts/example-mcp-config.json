@@ -22,7 +22,7 @@
     "",
     "注意事项：",
     "1. 将 'your-chat-id-here' 替换为你的实际 Chat ID",
-    "2. 将 'http://hitl.woa.com/api' 替换为你的 HIL Server 地址",
+    "2. 将 'http://hitl.woa.com/api' 替换为你的 HITL Server 地址",
     "3. 如果在内网环境，确保禁用代理（http_proxy 等设置为空字符串）",
     "",
     "本地开发时的配置：",

@@ -5,9 +5,9 @@
  *
  * 引擎选择（--engine）：
  *   auto        → 自动：查询管理台已注册的内置引擎，按 ilink→wecom-aibot→hil 优先级选用（默认）
- *   hil         → 对接 HIL Server（飞鸽传书 relay/direct）
- *   wecom-aibot → 企业微信智能机器人（走 HIL Server 的 wecom-aibot 内置引擎）
- *   ilink       → 微信 ClawBot/iLink（走 HIL Server 的 ilink 内置引擎）
+ *   hil         → 对接 HITL Server（飞鸽传书 relay/direct）
+ *   wecom-aibot → 企业微信智能机器人（走 HITL Server 的 wecom-aibot 内置引擎）
+ *   ilink       → 微信 ClawBot/iLink（走 HITL Server 的 ilink 内置引擎）
  */
 
 export type EngineType = 'auto' | 'hil' | 'wecom-aibot' | 'ilink';
@@ -21,10 +21,10 @@ export interface Config {
   defaultProjectName: string;
   /** 等待回复超时（秒） */
   defaultTimeout: number;
-  /** bot_key：ilink/wecom-aibot 走 HIL Server 时的路由键 */
+  /** bot_key：ilink/wecom-aibot 走 HITL Server 时的路由键 */
   botKey: string;
 
-  // ── HIL Server 引擎 ─────────────────────────────────────────────────────────
+  // ── HITL Server 引擎 ─────────────────────────────────────────────────────────
   serviceUrl: string;
   pollInterval: number;
 
