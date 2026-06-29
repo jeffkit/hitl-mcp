@@ -163,14 +163,19 @@ def extract_reply_from_callback(data: dict) -> tuple[Reply, str | None]:
     if msg_type == "text":
         text_data = data.get("text", {})
         raw_content = text_data.get("content", "")
-        
+
         short_id, content = parse_quoted_message(raw_content)
-        
+
         if short_id is None and content == raw_content:
             if content.startswith("@"):
                 parts = content.split(" ", 1)
                 if len(parts) > 1:
                     content = parts[1].strip()
+
+        # 引用内容未嵌入正文（如 wecom-aibot 的「...」格式）时，
+        # 从独立的 quote 字段提取 short_id。
+        if short_id is None:
+            short_id = _extract_short_id_from_quote(data)
     
     elif msg_type == "image":
         image_data = data.get("image", {})

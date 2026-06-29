@@ -38,6 +38,22 @@ class EngineManager:
     def all(self) -> list[BaseEngine]:
         return list(self._engines)
 
+    def status_all(self) -> list[dict]:
+        return [e.status() for e in self._engines]
+
+    def remove(self, bot_key: str) -> Optional[BaseEngine]:
+        """按 bot_key 移除并返回引擎（不 stop，由调用方负责 stop）。"""
+        engine = self._by_bot_key.get(bot_key)
+        if not engine:
+            return None
+        self._engines.remove(engine)
+        self._by_bot_key.pop(bot_key, None)
+        if engine.worker_type in self._by_type:
+            self._by_type[engine.worker_type] = [
+                e for e in self._by_type[engine.worker_type] if e is not engine
+            ]
+        return engine
+
     async def start_all(self) -> None:
         for engine in self._engines:
             try:

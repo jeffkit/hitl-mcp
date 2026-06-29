@@ -1,20 +1,6 @@
 // API 基础配置
+// 本地 HIL Server 管理台：只绑 127.0.0.1，无需登录鉴权，开箱即用。
 const API_BASE = '/admin/api'
-
-let authToken: string | null = localStorage.getItem('auth_token')
-
-export function setAuthToken(token: string | null) {
-  authToken = token
-  if (token) {
-    localStorage.setItem('auth_token', token)
-  } else {
-    localStorage.removeItem('auth_token')
-  }
-}
-
-export function getAuthToken() {
-  return authToken
-}
 
 async function request<T>(
   endpoint: string,
@@ -22,10 +8,6 @@ async function request<T>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-  }
-
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`
   }
 
   const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -36,10 +18,6 @@ async function request<T>(
   const data = await response.json()
 
   if (!response.ok) {
-    if (response.status === 401 && endpoint !== '/login') {
-      setAuthToken(null)
-      window.location.href = '/console/'
-    }
     throw new Error(data.detail || data.error || `请求失败: ${response.status}`)
   }
 
@@ -55,140 +33,69 @@ export const api = {
   delete: <T>(endpoint: string) => request<T>(endpoint, { method: 'DELETE' }),
 }
 
-// Auth APIs
-export async function login(username: string, password: string) {
-  try {
-    const data = await api.post<{ token: string; expires_at: string }>('/login', {
-      username,
-      password,
-    })
-    if (data.token) {
-      setAuthToken(data.token)
-      return { success: true, token: data.token }
-    }
-    return { success: false, error: '登录失败' }
-  } catch (error: unknown) {
-    const err = error as { message?: string }
-    return { success: false, error: err.message || '登录失败' }
-  }
-}
-
-export async function verifyToken() {
-  return api.get<{ valid: boolean; username?: string }>('/verify')
-}
-
-export function logout() {
-  setAuthToken(null)
-}
-
-// Bot APIs (通过 forward-service 代理)
-export interface Bot {
-  id: number
-  bot_key: string
-  name: string
-  description: string
-  target_url: string
-  agent_id: string
-  api_key: string
-  timeout: number
-  access_mode: 'allow_all' | 'whitelist' | 'blacklist'
-  enabled: boolean
-  whitelist_count?: number
-  blacklist_count?: number
-  created_at: string
-  updated_at: string
-}
-
-export interface BotListResponse {
-  success: boolean
-  bots: Bot[]
-  error?: string
-}
-
-export interface BotDetailResponse {
-  success: boolean
-  bot: Bot & {
-    whitelist: string[]
-    blacklist: string[]
-  }
-  error?: string
-}
-
-export interface UserProjectConfig {
-  id: number
-  bot_key: string
-  chat_id: string
-  project_id: string
-  project_name: string | null
-  url_template: string
-  api_key: string | null
-  timeout: number
-  is_default: boolean
-  enabled: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface UserProjectsByBotResponse {
-  success: boolean
-  bot_key: string
-  users: Record<string, UserProjectConfig[]>
-  total_users: number
-  total_projects: number
-  error?: string
-}
-
-export const botApi = {
-  list: () => api.get<BotListResponse>('/forward/proxy/admin/bots'),
-  get: (botKey: string) => api.get<BotDetailResponse>(`/forward/proxy/admin/bots/${botKey}`),
-  create: (bot: Partial<Bot>) => api.post<{ success: boolean; bot?: Bot; error?: string }>('/forward/proxy/admin/bots', bot),
-  update: (botKey: string, bot: Partial<Bot>) => api.put<{ success: boolean; error?: string }>(`/forward/proxy/admin/bots/${botKey}`, bot),
-  delete: (botKey: string) => api.delete<{ success: boolean; error?: string }>(`/forward/proxy/admin/bots/${botKey}`),
-  getUserProjects: (botKey: string) => api.get<UserProjectsByBotResponse>(`/forward/proxy/admin/user-projects/by-bot?bot_key=${botKey}`),
-}
-
-// Forward Mode API
-export async function getForwardMode() {
-  return api.get<{ mode: string; supports_bot_api: boolean; version: string }>('/forward/proxy/admin/mode')
-}
-
-// Overview API
-export async function getOverview() {
-  return api.get<{
-    hil_stats: { total: number; pending: number; replied: number; timeout: number }
-    forward_stats: { total_bots: number; enabled_bots: number; total_rules: number; total_logs: number; recent_logs: number }
-    worker_stats: { connected: number; total_registered: number }
-  }>('/overview')
-}
-
-// HIL Sessions API
+// HIL Sessions API（会话调试）
 export interface HILSession {
   session_id: string
+  short_id?: string
   chat_id: string
+  chat_type?: string
   project_name: string
   status: string
   message: string
+  replies_count?: number
   created_at: string
-  expires_at: string
+  expire_at?: string
+  expires_at?: string
 }
 
 export async function getHILSessions() {
-  return api.get<{ sessions: HILSession[] }>('/hil/sessions')
+  return api.get<{ total: number; sessions: HILSession[] }>('/hil/sessions')
 }
 
-// Forward Logs API
-export interface ForwardLog {
-  timestamp: string
-  chat_id: string
-  from_user: string
-  content: string
-  target_url: string
+// Engines API（内置引擎管理：iLink 扫码、WeCom AI Bot 凭证）
+export interface EngineStatus {
+  worker_type: string
+  bot_key: string
+  running: boolean
+  // ilink 专属
+  logged_in?: boolean
+  login_status?: string
+  activated_users?: { from_user_id: string; has_context_token: boolean }[]
+  // wecom-aibot 专属
+  bot_id?: string
+  connected?: boolean
+  known_recipients?: { recipient: string; chat_type: string; from_user: string; last_active: number }[]
+}
+
+export interface EnginesListResponse {
+  engines: EngineStatus[]
+}
+
+export interface IlinkQrResponse {
   status: string
-  response?: string
+  qr_url?: string
+  qr_base64?: string
+  qrcode_key?: string
   error?: string
-  duration_ms: number
 }
 
-export async function getForwardLogs() {
-  return api.get<{ success: boolean; logs: ForwardLog[] }>('/forward/logs')
+export const engineApi = {
+  list: () => api.get<EnginesListResponse>('/engines'),
+  ilinkStart: (botKey?: string) =>
+    api.post<{ success: boolean; engine: EngineStatus }>('/engines/ilink/start', { bot_key: botKey ?? null }),
+  ilinkQr: (botKey?: string) =>
+    api.get<IlinkQrResponse>(`/engines/ilink/qr${botKey ? `?bot_key=${botKey}` : ''}`),
+  ilinkStatus: (botKey?: string) =>
+    api.get<EngineStatus>(`/engines/ilink/status${botKey ? `?bot_key=${botKey}` : ''}`),
+  wecomStart: (botId: string, botSecret: string, botKey?: string) =>
+    api.post<{ success: boolean; engine: EngineStatus }>('/engines/wecom-aibot/start', {
+      bot_id: botId,
+      bot_secret: botSecret,
+      bot_key: botKey ?? 'wecom-aibot-1',
+    }),
+  wecomStop: (botKey?: string) =>
+    api.post<{ success: boolean; error?: string }>(
+      `/engines/wecom-aibot/stop${botKey ? `?bot_key=${botKey}` : ''}`,
+      {},
+    ),
 }

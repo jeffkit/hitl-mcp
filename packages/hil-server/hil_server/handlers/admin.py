@@ -1,196 +1,181 @@
 """
-管理台 API 处理器
+管理台 API 处理器（精简版）。
 
-提供统一的管理台 API，整合 HIL Server、Worker、Forward Service 的状态
+本地 HIL Server 场景下，管理台只做两件事：
+1. 引擎管理：扫码启用 iLink、填凭证启用 WeCom AI Bot
+2. 会话调试：查看本地 HIL 会话状态
+
+已移除：登录鉴权、Forward Service 代理、Bot 管理、Worker 管理、空闲提示配置等
+旧场景（远端 HIL Server + 企微群机器人 + Agent Studio）的功能。
+本地服务只绑 127.0.0.1，管理台开箱即用，无需登录。
 """
 import logging
-import hashlib
-import secrets
-from pathlib import Path
-from datetime import datetime, timedelta
+import os
 from typing import Optional
 
-import httpx
-import jwt
-from fastapi import APIRouter, HTTPException, Depends, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 
 from ..config import config
-from ..ws_manager import ws_manager
 from ..storage import storage
-from ..idle_hint_config import idle_hint_config
-from .forward_client import (
-    ForwardRule,
-    get_forward_service_status as _get_forward_service_status,
-    get_forward_service_logs as _get_forward_service_logs,
-    get_forward_service_rules as _get_forward_service_rules,
-    get_forward_service_config as _get_forward_service_config,
-    update_forward_service_config as _update_forward_service_config,
-    reload_forward_service_config as _reload_forward_service_config,
-    add_forward_rule as _add_forward_rule,
-    update_forward_rule as _update_forward_rule,
-    delete_forward_rule as _delete_forward_rule,
-)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-# 静态文件目录
-STATIC_DIR = Path(__file__).parent.parent / "static"
-
-# JWT 配置
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
-
-# 安全认证
-security = HTTPBearer(auto_error=False)
-
 
 # ============== 数据模型 ==============
 
-class LoginRequest(BaseModel):
-    username: str
-    password: str
+class WecomAibotEngineStartRequest(BaseModel):
+    bot_id: str = ""
+    bot_secret: str = ""
+    bot_key: str = "wecom-aibot-1"
 
 
-class LoginResponse(BaseModel):
-    token: str
-    expires_at: str
-
-
-# ForwardRule 已移动到 forward_client.py
-
-
-# ============== 认证工具函数 ==============
-
-def create_token(username: str) -> tuple[str, datetime]:
-    """创建 JWT Token"""
-    expires_at = datetime.utcnow() + timedelta(hours=JWT_EXPIRATION_HOURS)
-    payload = {
-        "sub": username,
-        "exp": expires_at,
-        "iat": datetime.utcnow()
-    }
-    token = jwt.encode(payload, config.admin_token_secret, algorithm=JWT_ALGORITHM)
-    return token, expires_at
-
-
-def verify_token(token: str) -> Optional[str]:
-    """验证 JWT Token，返回用户名"""
-    try:
-        payload = jwt.decode(token, config.admin_token_secret, algorithms=[JWT_ALGORITHM])
-        return payload.get("sub")
-    except jwt.ExpiredSignatureError:
-        return None
-    except jwt.InvalidTokenError:
-        return None
-
-
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
-) -> str:
-    """获取当前登录用户"""
-    if not credentials:
-        raise HTTPException(status_code=401, detail="未登录")
-    
-    username = verify_token(credentials.credentials)
-    if not username:
-        raise HTTPException(status_code=401, detail="Token 无效或已过期")
-    
-    return username
-
-
-def require_auth(request: Request) -> bool:
-    """检查是否需要认证（用于页面）"""
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
-        return False
-    token = auth_header[7:]
-    return verify_token(token) is not None
-
-
-# ============== 认证 API ==============
-
-@router.post("/api/login")
-async def login(request: LoginRequest) -> LoginResponse:
-    """登录获取 Token"""
-    if request.username != config.admin_username or request.password != config.admin_password:
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-    
-    token, expires_at = create_token(request.username)
-    logger.info(f"用户登录成功: {request.username}")
-    
-    return LoginResponse(
-        token=token,
-        expires_at=expires_at.isoformat()
-    )
-
-
-@router.get("/api/verify")
-async def verify_auth(user: str = Depends(get_current_user)):
-    """验证 Token 有效性"""
-    return {"valid": True, "username": user}
+class IlinkEngineStartRequest(BaseModel):
+    bot_key: Optional[str] = None  # 缺省用 config.ilink_bot_key
 
 
 # ============== 页面路由 ==============
 
 @router.get("")
 async def admin_page():
-    """管理台页面 - 重定向到新版管理台"""
+    """管理台入口 - 重定向到 console SPA。"""
     return RedirectResponse(url="/console", status_code=302)
 
 
-# ============== API 路由 ==============
+# ============== 内置引擎管理 API ==============
 
-@router.get("/api/overview")
-async def get_overview(user: str = Depends(get_current_user)):
-    """
-    获取所有服务的概览状态（需要登录）
-    """
-    mode = config.effective_mode
-    
-    # HIL Server 状态
-    hil_status = {
-        "service": "HIL Server",
-        "version": "2.0.0",
-        "status": "running",
-        "mode": mode,
-        "port": config.port,
-        "sessions": {
-            "active": len([s for s in storage._sessions.values() if s.status == "waiting"]),
-            "total": len(storage._sessions)
-        }
-    }
-    
-    # Worker 状态（仅 Relay 模式）
-    worker_status = None
-    if mode == "relay":
-        # 使用 get_all_workers 获取完整的 Worker 信息
-        workers = ws_manager.get_all_workers()
-        
-        worker_status = {
-            "connected": ws_manager.has_worker,
-            "count": len(workers),
-            "workers": workers
-        }
-    
-    # Forward Service 状态
-    forward_status = await _get_forward_service_status()
-    
-    return {
-        "timestamp": datetime.now().isoformat(),
-        "mode": mode,
-        "hil_server": hil_status,
-        "worker": worker_status,
-        "forward_service": forward_status
-    }
+@router.get("/api/engines")
+async def list_engines():
+    """列出所有已注册内置引擎及其状态。"""
+    from ..engines import engine_manager
+    return {"engines": engine_manager.status_all()}
 
+
+@router.post("/api/engines/ilink/start")
+async def engines_ilink_start(request: IlinkEngineStartRequest):
+    """动态注册并启动 iLink 内置引擎（未在配置中启用时也可由此拉起）。"""
+    from ..engines import engine_manager, ILinkEngine
+
+    bot_key = request.bot_key or config.ilink_bot_key
+    existing = engine_manager.get_by_bot_key(bot_key)
+    if existing:
+        await existing.stop()
+        engine_manager.remove(bot_key)
+
+    token_store_path = config.ilink_token_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "ilink_store.json"
+    )
+    engine = ILinkEngine(
+        bot_key=bot_key,
+        base_url=config.ilink_base_url,
+        token_store_path=token_store_path,
+        poll_timeout=config.ilink_poll_timeout,
+    )
+    engine.on_user_message = storage.handle_callback
+    engine_manager.register(engine)
+    await engine.start()
+    logger.info(f"管理台启动 iLink 引擎: bot_key={bot_key}")
+    return {"success": True, "engine": engine.status()}
+
+
+@router.get("/api/engines/ilink/qr")
+async def engines_ilink_qr(bot_key: str = ""):
+    """获取 iLink 登录二维码（扫码后状态通过 /engines/ilink/status 轮询）。"""
+    from ..engines import engine_manager
+    engine = engine_manager.get_by_bot_key(bot_key) or engine_manager.get_by_type("ilink")
+    if not engine:
+        raise HTTPException(status_code=404, detail="iLink 引擎未启动，请先点击「启动引擎」")
+    return await engine.get_qr()
+
+
+@router.get("/api/engines/ilink/status")
+async def engines_ilink_status(bot_key: str = ""):
+    """查询 iLink 引擎登录状态与已激活用户。"""
+    from ..engines import engine_manager
+    engine = engine_manager.get_by_bot_key(bot_key) or engine_manager.get_by_type("ilink")
+    if not engine:
+        return {
+            "worker_type": "ilink",
+            "running": False,
+            "logged_in": False,
+            "login_status": "not_started",
+            "activated_users": [],
+        }
+    return engine.status()
+
+
+@router.post("/api/engines/wecom-aibot/start")
+async def engines_wecom_aibot_start_admin(request: WecomAibotEngineStartRequest):
+    """注册并启动 WeCom AI Bot 内置引擎。
+
+    - bot_secret 可留空：此时从持久化 store 按 bot_key 读取已保存的 secret（用于「重启」）。
+    - bot_id 也可留空：同样从 store 读取（重启时前端不必回显也能重启）。
+    - 若请求带了凭证，则以其为准并落盘（覆盖旧值）。
+    """
+    from ..engines import engine_manager, WecomAibotEngine, WecomAibotStore
+
+    bot_key = request.bot_key or "wecom-aibot-1"
+    existing = engine_manager.get_by_bot_key(bot_key)
+    if existing:
+        await existing.stop()
+        engine_manager.remove(bot_key)
+
+    store_path = config.wecom_aibot_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "wecom_aibot_store.json"
+    )
+    store = WecomAibotStore(store_path)
+
+    bot_id = request.bot_id
+    bot_secret = request.bot_secret
+    # 请求未带凭证 → 从持久化 store 补齐（重启场景）
+    if not bot_id or not bot_secret:
+        persisted = store.get_credentials()
+        if persisted:
+            bot_id = bot_id or persisted["bot_id"]
+            bot_secret = bot_secret or persisted["bot_secret"]
+            bot_key = bot_key or persisted["bot_key"]
+    if not bot_id or not bot_secret:
+        return {"success": False, "error": "缺少 Bot ID/Secret，且本地无已保存凭证；请填写后再启动。"}
+
+    # 落盘（请求带凭证时覆盖；重启时也刷新一遍，保持一致）
+    store.set_credentials(bot_id, bot_secret, bot_key)
+
+    engine = WecomAibotEngine(
+        bot_key=bot_key,
+        bot_id=bot_id,
+        bot_secret=bot_secret,
+        ws_url=config.wecom_aibot_ws_url,
+        heartbeat_interval=config.wecom_aibot_heartbeat_interval,
+        reconnect_delay=config.wecom_aibot_reconnect_delay,
+    )
+    engine.on_user_message = storage.handle_callback
+    engine_manager.register(engine)
+    await engine.start()
+    logger.info(f"管理台启动 WeCom AI Bot 引擎: bot_key={bot_key}, bot_id={bot_id}")
+    return {"success": True, "engine": engine.status()}
+
+
+@router.post("/api/engines/wecom-aibot/stop")
+async def engines_wecom_aibot_stop_admin(bot_key: str = "wecom-aibot-1"):
+    """停止并注销 WeCom AI Bot 引擎（保留持久化凭证，重启后仍会自动恢复）。"""
+    from ..engines import engine_manager
+
+    engine = engine_manager.get_by_bot_key(bot_key)
+    if engine:
+        await engine.stop()
+        engine_manager.remove(bot_key)
+        logger.info(f"管理台停止 WeCom AI Bot 引擎: bot_key={bot_key}（凭证保留，重启自动恢复）")
+        return {"success": True}
+    return {"success": False, "error": "引擎未注册"}
+
+
+# ============== HIL 会话查询 API ==============
 
 @router.get("/api/hil/sessions")
-async def get_hil_sessions(user: str = Depends(get_current_user)):
-    """获取 HIL Server 会话列表（需要登录）"""
+async def get_hil_sessions():
+    """获取本地 HIL Server 会话列表（调试用）。"""
     sessions = []
     for session in storage._sessions.values():
         sessions.append({
@@ -205,337 +190,5 @@ async def get_hil_sessions(user: str = Depends(get_current_user)):
             "created_at": session.created_at.isoformat(),
             "expire_at": session.expire_at.isoformat()
         })
-    
-    # 按创建时间倒序
     sessions.sort(key=lambda x: x["created_at"], reverse=True)
-    
-    return {
-        "total": len(sessions),
-        "sessions": sessions[:50]  # 最多返回 50 条
-    }
-
-
-@router.get("/api/forward/status")
-async def get_forward_status(user: str = Depends(get_current_user)):
-    """获取 Forward Service 状态（需要登录）"""
-    return await _get_forward_service_status()
-
-
-@router.get("/api/forward/logs")
-async def get_forward_logs(limit: int = 20, user: str = Depends(get_current_user)):
-    """获取 Forward Service 日志（需要登录）"""
-    return await _get_forward_service_logs(limit)
-
-
-@router.get("/api/forward/rules")
-async def get_forward_rules(user: str = Depends(get_current_user)):
-    """获取 Forward Service 转发规则（需要登录）"""
-    return await _get_forward_service_rules()
-
-
-
-@router.get("/api/forward/config")
-async def get_forward_config(user: str = Depends(get_current_user)):
-    """获取 Forward Service 完整配置（需要登录）"""
-    return await _get_forward_service_config()
-
-
-@router.put("/api/forward/config")
-async def update_forward_config(request: Request, user: str = Depends(get_current_user)):
-    """更新 Forward Service 完整配置（需要登录）"""
-    data = await request.json()
-    return await _update_forward_service_config(data)
-
-
-@router.post("/api/forward/config/reload")
-async def reload_forward_config(user: str = Depends(get_current_user)):
-    """重新加载 Forward Service 配置（需要登录）"""
-    return await _reload_forward_service_config()
-
-
-# ============== Forward Service 代理 API ==============
-
-@router.api_route(
-    "/api/forward/proxy/{path:path}",
-    methods=["GET", "POST", "PUT", "DELETE"],
-)
-async def forward_proxy(
-    request: Request,
-    path: str,
-    user: str = Depends(get_current_user)
-):
-    """
-    代理请求到 Forward Service
-    
-    将 /admin/api/forward/proxy/* 的请求转发到 FORWARD_SERVICE_URL/*
-    """
-    if not config.forward_service_url:
-        raise HTTPException(status_code=503, detail="FORWARD_SERVICE_URL not configured")
-    
-    # 构建目标 URL
-    target_url = f"{config.forward_service_url}/{path}"
-    
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            # 获取请求体（如果有）
-            body = None
-            if request.method in ["POST", "PUT"]:
-                body = await request.body()
-            
-            # 构建请求头
-            headers = {}
-            if "content-type" in request.headers:
-                headers["content-type"] = request.headers["content-type"]
-            
-            # 发送请求
-            response = await client.request(
-                method=request.method,
-                url=target_url,
-                content=body,
-                headers=headers,
-                params=request.query_params,
-            )
-            
-            # 检查响应状态码
-            if response.status_code >= 400:
-                logger.error(f"Forward Service 返回错误: {response.status_code}, body: {response.text[:500]}")
-                raise HTTPException(
-                    status_code=response.status_code,
-                    detail=f"Forward Service 返回错误: {response.status_code}"
-                )
-            
-            # 检查响应是否为空
-            if not response.text or not response.text.strip():
-                logger.error(f"Forward Service 返回空响应, status: {response.status_code}")
-                raise HTTPException(
-                    status_code=502,
-                    detail="Forward Service 返回空响应"
-                )
-            
-            # 尝试解析 JSON
-            try:
-                return response.json()
-            except Exception as json_error:
-                logger.error(f"Forward Service 响应非 JSON 格式: {response.text[:200]}")
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Forward Service 响应非 JSON 格式: {str(json_error)}"
-                )
-    except httpx.TimeoutException:
-        raise HTTPException(status_code=504, detail="Forward Service 请求超时")
-    except httpx.ConnectError as e:
-        logger.error(f"无法连接到 Forward Service: {target_url}, error: {e}")
-        raise HTTPException(status_code=503, detail=f"无法连接到 Forward Service: {str(e)}")
-    except HTTPException:
-        raise  # 重新抛出 HTTPException
-    except Exception as e:
-        logger.error(f"代理请求失败: {e}")
-        raise HTTPException(status_code=502, detail=f"Forward Service 请求失败: {str(e)}")
-
-
-# ============== 转发规则管理 API ==============
-
-@router.post("/api/forward/rules")
-async def add_forward_rule(rule: ForwardRule, user: str = Depends(get_current_user)):
-    """添加转发规则（需要登录）"""
-    return await _add_forward_rule(rule)
-
-
-@router.put("/api/forward/rules/{chat_id}")
-async def update_forward_rule(chat_id: str, rule: ForwardRule, user: str = Depends(get_current_user)):
-    """更新转发规则（需要登录）"""
-    return await _update_forward_rule(chat_id, rule)
-
-
-@router.delete("/api/forward/rules/{chat_id}")
-async def delete_forward_rule(chat_id: str, user: str = Depends(get_current_user)):
-    """删除转发规则（需要登录）"""
-    return await _delete_forward_rule(chat_id)
-
-
-# ============== Worker 管理 API ==============
-
-@router.get("/api/workers")
-async def get_workers(user: str = Depends(get_current_user)):
-    """
-    获取所有 Worker 列表（需要登录）
-    
-    返回每个 Worker 的详细信息：
-    - worker_id: Worker 标识
-    - ip_address: IP 地址
-    - hostname: 主机名
-    - callback_port: 回调端口
-    - bot_key: 机器人 Key（部分显示）
-    - forward_service_url: 关联的 Forward Service 地址
-    - connected_at: 连接时间
-    - last_heartbeat: 最后心跳时间
-    - is_alive: 是否存活
-    """
-    workers = ws_manager.get_all_workers()
-    return {
-        "count": len(workers),
-        "workers": workers
-    }
-
-
-@router.get("/api/workers/{worker_id}/config")
-async def get_worker_config(worker_id: str, user: str = Depends(get_current_user)):
-    """
-    获取指定 Worker 的配置（需要登录）
-    
-    通过 WebSocket 向 Worker 请求其配置
-    """
-    # 检查 Worker 是否存在
-    if worker_id not in ws_manager._workers:
-        raise HTTPException(status_code=404, detail=f"Worker not found: {worker_id}")
-    
-    worker = ws_manager._workers[worker_id]
-    
-    # 返回 Worker 的基本配置（从注册信息中获取）
-    return {
-        "worker_id": worker.worker_id,
-        "ip_address": worker.ip_address,
-        "hostname": worker.hostname,
-        "callback_port": worker.callback_port,
-        "bot_key": worker.bot_key,
-        "hil_url": worker.hil_url,
-        "config_file": worker.config_file,
-        "forward_service_url": worker.forward_service_url
-    }
-
-
-class WorkerConfigUpdate(BaseModel):
-    bot_key: str | None = None
-    hil_url: str | None = None
-    callback_port: int | None = None
-
-
-class IdleHintConfigRequest(BaseModel):
-    """空闲提示消息配置请求"""
-    template: str
-    enabled: bool = True
-    chat_id: str | None = None  # 如果为 None，则更新全局默认配置
-
-
-@router.put("/api/workers/{worker_id}/config")
-async def update_worker_config(
-    worker_id: str, 
-    config_update: WorkerConfigUpdate,
-    user: str = Depends(get_current_user)
-):
-    """
-    更新指定 Worker 的配置（需要登录）
-    
-    通过 WebSocket 向 Worker 发送配置更新请求
-    """
-    if not ws_manager.has_worker:
-        raise HTTPException(status_code=503, detail="No worker connected")
-    
-    try:
-        # 构造更新 payload
-        payload = {}
-        if config_update.bot_key is not None:
-            payload["bot_key"] = config_update.bot_key
-        if config_update.hil_url is not None:
-            payload["hil_url"] = config_update.hil_url
-        if config_update.callback_port is not None:
-            payload["callback_port"] = config_update.callback_port
-        
-        result = await ws_manager.send_request(
-            action="update_worker_config",
-            payload=payload,
-            timeout=10
-        )
-        
-        return result
-    except Exception as e:
-        logger.error(f"更新 Worker 配置失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# 内部函数已移动到 forward_client.py
-
-
-# ============== 空闲提示消息配置 API ==============
-
-@router.get("/api/idle-hint-config")
-async def get_idle_hint_config(user: str = Depends(get_current_user)):
-    """
-    获取空闲提示消息配置（需要登录）
-    
-    返回：
-    - default: 全局默认配置
-    - chat_configs: 按 chat_id 的自定义配置
-    """
-    try:
-        configs = idle_hint_config.get_all_configs()
-        return {
-            "success": True,
-            "data": configs
-        }
-    except Exception as e:
-        logger.error(f"获取空闲提示消息配置失败: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-
-@router.post("/api/idle-hint-config")
-async def update_idle_hint_config(
-    config_request: IdleHintConfigRequest,
-    user: str = Depends(get_current_user)
-):
-    """
-    更新空闲提示消息配置（需要登录）
-    
-    如果 chat_id 为 None，则更新全局默认配置
-    否则更新指定 chat_id 的配置
-    """
-    try:
-        if config_request.chat_id:
-            # 更新指定 chat_id 的配置
-            result = idle_hint_config.update_chat_config(
-                chat_id=config_request.chat_id,
-                template=config_request.template,
-                enabled=config_request.enabled,
-                updated_by=user
-            )
-        else:
-            # 更新全局默认配置
-            result = idle_hint_config.update_default_config(
-                template=config_request.template,
-                enabled=config_request.enabled,
-                updated_by=user
-            )
-        
-        return result
-    except Exception as e:
-        logger.error(f"更新空闲提示消息配置失败: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-
-@router.delete("/api/idle-hint-config/{chat_id}")
-async def delete_idle_hint_config(
-    chat_id: str,
-    user: str = Depends(get_current_user)
-):
-    """
-    删除指定 chat_id 的自定义配置（需要登录）
-    
-    删除后将使用全局默认配置
-    """
-    try:
-        result = idle_hint_config.delete_chat_config(chat_id)
-        return result
-    except Exception as e:
-        logger.error(f"删除空闲提示消息配置失败: {e}", exc_info=True)
-        return {
-            "success": False,
-            "error": str(e)
-        }
-
-# Forward Config 内部函数已移动到 forward_client.py
+    return {"total": len(sessions), "sessions": sessions[:50]}

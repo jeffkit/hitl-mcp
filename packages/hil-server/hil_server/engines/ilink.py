@@ -364,14 +364,19 @@ class ILinkClient:
 def _format_message_with_header(
     message: str, short_id: str, project_name: Optional[str], wait_reply: bool
 ) -> str:
-    """iLink 是纯文本通道（不支持 markdown），footer 用纯文本。"""
+    """iLink 是纯文本通道（不支持 markdown），footer 用纯文本。
+
+    尾部提示与 wecom-aibot 引擎保持一致文案「> 请引用回复此消息」，引导用户
+    长按引用回复，以便 storage.parse_quoted_message 从引用块中提取 short_id
+    完成精确会话匹配。
+    """
     parts: list[str] = []
     if short_id:
         parts.append(f"[#{short_id} {project_name}]" if project_name else f"[#{short_id}]")
     parts.append(message)
     body = "\n".join(parts)
     if wait_reply:
-        body = f"{body}\n\n📮 请回复"
+        body = f"{body}\n\n> 请引用回复此消息"
     return body
 
 
@@ -438,3 +443,13 @@ class ILinkEngine(BaseEngine):
 
     async def list_activated_users(self) -> dict:
         return {"users": self.store.list_known_users()}
+
+    def status(self) -> dict:
+        return {
+            "worker_type": self.worker_type,
+            "bot_key": self.bot_key,
+            "running": self.client._polling,
+            "logged_in": self.client.is_logged_in,
+            "login_status": self.client.login_status,
+            "activated_users": self.store.list_known_users(),
+        }

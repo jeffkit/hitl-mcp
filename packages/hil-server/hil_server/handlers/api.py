@@ -119,6 +119,13 @@ async def send_message(request: SendMessageRequest):
         engine_manager.get_by_type(request.upstream) if request.upstream else None
     )
 
+    # 内置引擎未启动：ilink / wecom-aibot 走进程内引擎，若未在管理台初始化则给出明确引导
+    if not _engine and request.upstream in ("ilink", "wecom-aibot"):
+        return SendMessageResponse(
+            success=False,
+            error=f"engine_not_started: {request.upstream} 引擎未启动，请在管理台初始化"
+        )
+
     # Relay 模式检查 Worker 连接（内置引擎命中时跳过——不依赖外部 Worker）
     if not _engine and not config.is_direct_mode and not ws_manager.has_worker:
         return SendMessageResponse(
@@ -600,3 +607,59 @@ async def ilink_activated_users(bot_key: str = Query("", description="ilink work
     except Exception as e:
         logger.error(f"查询 iLink 已激活用户失败: {e}", exc_info=True)
         return {"status": "error", "error": str(e), "users": []}
+
+
+# ============== 动态引擎注册（普通用户：Cursor 配置带凭证，MCP 启动时自举后端引擎）==============
+
+
+class WecomAibotStartRequest(BaseModel):
+    bot_id: str
+    bot_secret: str
+    bot_key: str = "wecom-aibot-1"
+
+
+@router.post("/engines/wecom-aibot/start")
+async def engines_wecom_aibot_start(request: WecomAibotStartRequest):
+    """运行时启动企微 AI Bot 内置引擎（无需重启 HIL Server）。
+
+    由 MCP 端在启动时调用，把用户在 Cursor 配置里填的 bot_id/bot_secret 注册到后端。
+    幂等：同 bot_key 同凭证已运行则 no-op；凭证变化则停旧起新。
+    """
+    from ..engines import engine_manager, WecomAibotEngine
+    if not request.bot_id or not request.bot_secret:
+        return {"success": False, "error": "需要 bot_id 和 bot_secret"}
+
+    existing = engine_manager.get_by_bot_key(request.bot_key)
+    if (
+        existing
+        and isinstance(existing, WecomAibotEngine)
+        and existing.bot_id == request.bot_id
+        and existing.bot_secret == request.bot_secret
+    ):
+        return {"success": True, "status": "already_running"}
+
+    if existing:
+        try:
+            await existing.stop()
+        except Exception:
+            pass
+        engine_manager.remove(request.bot_key)
+
+    engine = WecomAibotEngine(
+        bot_key=request.bot_key,
+        bot_id=request.bot_id,
+        bot_secret=request.bot_secret,
+        ws_url=config.wecom_aibot_ws_url,
+        heartbeat_interval=config.wecom_aibot_heartbeat_interval,
+        reconnect_delay=config.wecom_aibot_reconnect_delay,
+    )
+    engine.on_user_message = storage.handle_callback
+    engine_manager.register(engine)
+    try:
+        await engine.start()
+    except Exception as e:
+        engine_manager.remove(request.bot_key)
+        logger.error(f"启动 wecom-aibot 引擎失败: {e}", exc_info=True)
+        return {"success": False, "error": str(e)}
+    logger.info(f"动态启动 wecom-aibot 引擎: bot_key={request.bot_key}, bot_id={request.bot_id}")
+    return {"success": True, "status": "started"}

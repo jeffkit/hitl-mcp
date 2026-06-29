@@ -1,25 +1,14 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { Bot, LayoutDashboard, MessageSquare, Send, LogOut, BarChart3, Settings } from 'lucide-react'
+import { Link, useLocation } from 'react-router-dom'
+import { Plug, MessageSquare } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { logout } from '@/api/client'
 
 const navItems = [
-  { path: '/dashboard', label: '概览', icon: LayoutDashboard },
-  { path: '/bots', label: 'Bot 管理', icon: Bot },
-  { path: '/sessions', label: 'HIL 会话', icon: MessageSquare },
-  { path: '/logs', label: 'Forward 日志', icon: Send },
-  { path: '/stats', label: '消息统计', icon: BarChart3 },
-  { path: '/settings', label: '系统设置', icon: Settings },
+  { path: '/engines', label: '引擎管理', icon: Plug },
+  { path: '/sessions', label: '会话调试', icon: MessageSquare },
 ]
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation()
-  const navigate = useNavigate()
-
-  const handleLogout = () => {
-    logout()
-    navigate('/')
-  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -28,7 +17,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-border">
           <div className="w-8 h-8 bg-gradient-to-br from-purple-500 to-blue-500 rounded-lg flex items-center justify-center mr-3">
-            <Bot className="w-4 h-4 text-white" />
+            <Plug className="w-4 h-4 text-white" />
           </div>
           <span className="font-semibold text-lg">HIL Console</span>
         </div>
@@ -55,17 +44,6 @@ export function Layout({ children }: { children: React.ReactNode }) {
             )
           })}
         </nav>
-
-        {/* 底部 */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-border">
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground w-full transition-colors"
-          >
-            <LogOut className="w-4 h-4" />
-            退出登录
-          </button>
-        </div>
       </aside>
 
       {/* 主内容区 */}
