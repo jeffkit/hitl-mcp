@@ -87,6 +87,9 @@ export class ILinkEngine implements Engine {
         const loginResult = await this._ensureLoggedIn();
         if (loginResult) return loginResult;
       }
+      if (err.includes('engine_not_started') || err.includes('尚无已激活用户')) {
+        return this._notInitialized(err);
+      }
       return { status: 'error', message: `发送失败: ${err}` };
     }
 
@@ -126,6 +129,9 @@ export class ILinkEngine implements Engine {
         const loginResult = await this._ensureLoggedIn();
         if (loginResult) return loginResult;
       }
+      if (err.includes('engine_not_started') || err.includes('尚无已激活用户')) {
+        return this._notInitialized(err);
+      }
       return { status: 'error', message: `发送失败: ${err}` };
     }
     return { status: 'success', message: '消息发送成功' };
@@ -135,14 +141,7 @@ export class ILinkEngine implements Engine {
     if (this._loginStatus === 'success') {
       return { status: 'success', message: '已登录，可以直接重试请求。' };
     }
-    if (!this._loginPending) {
-      return {
-        status: 'error',
-        message: '没有待完成的登录流程，请重新调用 send_and_wait_reply 获取二维码。',
-      };
-    }
-
-    // 轮询 HIL Server 的登录状态，直到 success / expired
+    // 扫码在管理台完成；本工具阻塞轮询登录状态，直到用户在管理台扫码成功
     const deadline = Date.now() + 5 * 60 * 1000;
     while (Date.now() < deadline) {
       await sleep(2000);
@@ -151,15 +150,8 @@ export class ILinkEngine implements Engine {
         this.onLoginStateChange?.();
         return { status: 'success', message: '登录成功！现在可以重新调用 send_and_wait_reply。' };
       }
-      if (this._loginStatus === 'expired' || this._loginStatus === 'not_started') {
-        this.onLoginStateChange?.();
-        return {
-          status: 'timeout',
-          message: '二维码已过期，微信端未在有效期内确认。请重新调用 send_and_wait_reply 获取新二维码。',
-        };
-      }
     }
-    return { status: 'timeout', message: '等待扫码登录超时' };
+    return this._notInitialized('等待扫码登录超时');
   }
 
   async listActivatedUsers(): Promise<Array<{ fromUserId: string; hasContextToken: boolean }>> {
@@ -227,39 +219,15 @@ export class ILinkEngine implements Engine {
   private async _ensureLoggedIn(): Promise<SendResult | null> {
     await this._refreshLoginStatus();
     if (this._loginStatus === 'success') return null;
+    // 扫码登录统一在管理台完成；MCP 侧不再展示二维码，只引导用户打开管理台
+    return this._notInitialized('iLink 未登录');
+  }
 
-    // 触发 worker 申请二维码
-    const cfg = getConfig();
-    let qr: Record<string, any> = {};
-    try {
-      qr = await apiFetch(`/api/ilink/qr?bot_key=${encodeURIComponent(cfg.botKey)}`);
-    } catch (e) {
-      return { status: 'error', message: `发起登录失败: ${e}` };
-    }
-
-    if (qr.status === 'success') {
-      // 极少见：刷新状态时刚好登录完成
-      this._loginStatus = 'success';
-      this._loginPending = false;
-      return null;
-    }
-    if (qr.status === 'error') {
-      return { status: 'error', message: `发起登录失败: ${qr.error ?? '未知错误'}` };
-    }
-
-    this._loginPending = true;
-    this.onLoginStateChange?.();
-
+  private _notInitialized(reason: string): SendResult {
     return {
-      status: 'login_required',
-      message: [
-        '需要微信扫码登录。本工具调用已结束，请勿等待。',
-        `扫码链接（手机微信打开）：${qr.qr_url ?? '(未获取到链接)'}`,
-        '请向用户展示上方链接，然后立即调用 wait_for_login 等待扫码完成，成功后重试原请求。',
-      ].join('\n'),
-      qrUrl: qr.qr_url,
-      qrCode: qr.qr_base64 ? { data: qr.qr_base64, mimeType: 'image/png' } : undefined,
-      nextAction: 'call wait_for_login',
+      status: 'not_initialized',
+      initUrl: baseUrl() + '/console',
+      message: `${reason}。请打开管理台完成初始化（扫码登录 + 给 bot 发一条消息激活收件人），然后重试。`,
     };
   }
 }

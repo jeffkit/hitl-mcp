@@ -2,9 +2,14 @@
  * 统一 MCP Server
  *
  * 工具（按引擎）：
+ *   auto        — send_and_wait_reply, send_message_only（启动时按管理台配置解析为下面之一）
  *   hil         — send_and_wait_reply, send_message_only
  *   wecom-aibot — send_and_wait_reply, send_message_only
- *   ilink       — send_and_wait_reply, send_message_only, wait_for_login, list_activated_users
+ *   ilink       — send_and_wait_reply, send_message_only
+ *
+ * 初始化（扫码登录 / 填写凭证 / 激活收件人）统一在管理台完成，MCP 侧不再暴露
+ * wait_for_login / list_activated_users 工具；未初始化时 send_* 返回 not_initialized
+ * 并引导用户打开管理台。
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -43,11 +48,64 @@ function makeEngine(engineType: EngineType): Engine {
   }
 }
 
+/**
+ * auto 模式：查询管理台 /admin/api/engines，按 ilink(logged_in) → wecom-aibot(connected)
+ * → ilink(已注册) → wecom-aibot(已注册) → hil 的优先级选用通道。
+ * 返回具体引擎类型与对应 bot_key（供 /api/send 路由）。
+ */
+async function resolveAutoEngine(serviceUrl: string): Promise<{ engineType: EngineType; botKey: string }> {
+  const base = serviceUrl.replace(/\/$/, '');
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 5000);
+    const res = await fetch(`${base}/admin/api/engines`, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = (await res.json()) as { engines?: Array<Record<string, any>> };
+    const engines = data.engines ?? [];
+    const find = (type: string, ready: (e: Record<string, any>) => boolean) =>
+      engines.find(e => e.worker_type === type && ready(e));
+
+    const ilinkReady = find('ilink', e => e.logged_in === true);
+    if (ilinkReady) return { engineType: 'ilink', botKey: String(ilinkReady.bot_key ?? '') };
+
+    const wecomReady = find('wecom-aibot', e => e.connected === true);
+    if (wecomReady) return { engineType: 'wecom-aibot', botKey: String(wecomReady.bot_key ?? '') };
+
+    const ilinkAny = engines.find(e => e.worker_type === 'ilink');
+    if (ilinkAny) return { engineType: 'ilink', botKey: String(ilinkAny.bot_key ?? '') };
+
+    const wecomAny = engines.find(e => e.worker_type === 'wecom-aibot');
+    if (wecomAny) return { engineType: 'wecom-aibot', botKey: String(wecomAny.bot_key ?? '') };
+
+    return { engineType: 'hil', botKey: '' };
+  } catch (e) {
+    console.error(`[Server] auto 解析失败（管理台不可达?），回退到 hil: ${e instanceof Error ? e.message : e}`);
+    return { engineType: 'hil', botKey: '' };
+  }
+}
+
 function jsonText(obj: unknown): { content: Array<{ type: string; [k: string]: unknown }> } {
   return { content: [{ type: 'text', text: JSON.stringify(obj, null, 2) }] };
 }
 
 function resultToContent(result: SendResult) {
+  if (result.status === 'not_initialized') {
+    const text = [
+      '【需要初始化】本工具调用已结束，请勿等待。',
+      '',
+      `请让用户在浏览器打开管理台完成初始化：${result.initUrl ?? '(未获取到链接)'}`,
+      '',
+      '初始化步骤（管理台「引擎管理」页）：',
+      '  • iLink：扫码登录，然后给 bot 发一条消息激活收件人',
+      '  • WeCom AI Bot：填写 Bot ID + Secret 启动，然后在企微给 bot 发一条消息激活收件人',
+      '',
+      '完成后请重试原请求。',
+      '',
+      JSON.stringify({ status: result.status, init_url: result.initUrl, tool_completed: true }, null, 2),
+    ].join('\n');
+    return { content: [{ type: 'text', text }] };
+  }
   if (result.status === 'login_required') {
     // 仅返回文本：Cursor 工具面板会裁切内嵌图片，扫码链接更可靠
     const text = [
@@ -56,13 +114,13 @@ function resultToContent(result: SendResult) {
       '扫码链接（手机微信打开）：',
       result.qrUrl ?? '(未获取到链接)',
       '',
-      'Agent 下一步：向用户展示上方链接，然后立即调用 wait_for_login 等待扫码，成功后重试原请求。',
+      'Agent 下一步：向用户展示上方链接，引导用户在管理台扫码完成登录后，重试原请求。',
       '',
       JSON.stringify({
         status: result.status,
         tool_completed: true,
         qr_url: result.qrUrl,
-        next_action: result.nextAction ?? 'wait_for_login',
+        next_action: result.nextAction ?? 'retry_after_console_login',
       }, null, 2),
     ].join('\n');
     return { content: [{ type: 'text', text }] };
@@ -78,14 +136,12 @@ function buildTools(cfg: ReturnType<typeof getConfig>): Tool[] {
       return [
         makeSendAndWaitTool('ilink', '目标微信用户 ID。通常留空——有且仅有一个激活用户时自动选择'),
         makeSendOnlyTool('ilink', '目标微信用户 ID。通常留空——有且仅有一个激活用户时自动选择'),
-        WAIT_FOR_LOGIN_TOOL,
-        LIST_ACTIVATED_USERS_TOOL,
       ];
 
     case 'wecom-aibot':
       return [
-        makeSendAndWaitTool('wecom-aibot', '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值'),
-        makeSendOnlyTool('wecom-aibot', '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值'),
+        makeSendAndWaitTool('wecom-aibot', '目标 chatid（群聊或私聊）。可选；不指定时使用最近活跃收件人（需先在企微给 bot 发条消息激活）'),
+        makeSendOnlyTool('wecom-aibot', '目标 chatid（群聊或私聊）。可选；不指定时使用最近活跃收件人（需先在企微给 bot 发条消息激活）'),
       ];
 
     default: // hil
@@ -97,14 +153,14 @@ function buildTools(cfg: ReturnType<typeof getConfig>): Tool[] {
 }
 
 function makeSendAndWaitTool(engine: EngineType, recipientDesc: string): Tool {
-  const ilinkNote = engine === 'ilink'
-    ? '\n若未登录，本工具会立即返回 login_required（含 qr_url），随后 Agent 应调用 wait_for_login 等待扫码，成功后重试。'
+  const initNote = (engine === 'ilink' || engine === 'wecom-aibot')
+    ? '\n若引擎未初始化（未登录/未激活收件人），本工具返回 not_initialized（含管理台链接 init_url），请引导用户打开管理台完成初始化后重试。'
     : '';
   return {
     name: 'send_and_wait_reply',
     description: `发送消息并等待用户回复（引擎: ${engine}）。
 发出带 [#id] 标识的消息，等待用户回复后返回内容。支持引用回复精确匹配，也支持直接回复（FIFO）。
-超时后返回 timeout 状态。${ilinkNote}`,
+超时后返回 timeout 状态。${initNote}`,
     inputSchema: {
       type: 'object',
       properties: {
@@ -118,10 +174,9 @@ function makeSendAndWaitTool(engine: EngineType, recipientDesc: string): Tool {
 }
 
 function makeSendOnlyTool(engine: EngineType, recipientDesc: string): Tool {
-  const description = engine === 'ilink'
-    ? `仅发送消息，不等待回复（引擎: ilink）。
-若未登录，本工具会立即返回 login_required（含扫码链接 qr_url 和二维码图片），工具调用随即结束。
-收到 login_required 后，Agent 必须：1) 向用户展示扫码链接；2) 立即调用 wait_for_login 等待扫码；3) 登录成功后重试本工具。`
+  const description = (engine === 'ilink' || engine === 'wecom-aibot')
+    ? `仅发送消息，不等待回复（引擎: ${engine}）。适用于通知场景。
+若引擎未初始化，本工具返回 not_initialized（含管理台链接 init_url），请引导用户打开管理台完成初始化后重试。`
     : `仅发送消息，不等待回复（引擎: ${engine}）。适用于通知场景。`;
   return {
     name: 'send_message_only',
@@ -138,37 +193,23 @@ function makeSendOnlyTool(engine: EngineType, recipientDesc: string): Tool {
   };
 }
 
-const WAIT_FOR_LOGIN_TOOL: Tool = {
-  name: 'wait_for_login',
-  description: `等待用户完成微信扫码登录（阻塞，最长约 5 分钟）。
-在 send_message_only / send_and_wait_reply 返回 login_required 后，Agent 必须立即调用本工具。
-本工具会阻塞直到用户扫码确认或二维码过期；登录成功后返回 success，Agent 应重试原先的发送请求。`,
-  inputSchema: { type: 'object', properties: {} },
-};
-
-const LIST_ACTIVATED_USERS_TOOL: Tool = {
-  name: 'list_activated_users',
-  description: '列出已向 ClawBot 发送过消息（已激活）的微信用户',
-  inputSchema: { type: 'object', properties: {} },
-};
-
 export async function startServer(): Promise<void> {
   const cfg = getConfig();
+
+  // auto 模式：启动时查管理台，按 ilink→wecom-aibot→hil 优先级解析出具体引擎与 bot_key
+  if (cfg.engine === 'auto') {
+    const resolved = await resolveAutoEngine(cfg.serviceUrl);
+    cfg.engine = resolved.engineType;
+    if (resolved.botKey) cfg.botKey = resolved.botKey;
+    console.error(`[Server] auto 解析 → 引擎: ${cfg.engine}, bot_key: ${cfg.botKey || '(默认)'}`);
+  }
+
   const engine = makeEngine(cfg.engine);
 
   const server = new Server(
     { name: 'hitl-mcp', version: '0.3.0' },
-    // listChanged: true 声明此服务端支持动态工具列表变更通知
-    { capabilities: { tools: { listChanged: true } } }
+    { capabilities: { tools: {} } }
   );
-
-  // ── iLink 引擎：注入登录状态变化回调 ──────────────────────────────────────
-  if (engine instanceof ILinkEngine) {
-    engine.onLoginStateChange = () => {
-      // 通知 MCP 客户端重新拉取工具列表
-      server.notification({ method: 'notifications/tools/list_changed' });
-    };
-  }
 
   await engine.start();
 
@@ -191,14 +232,13 @@ export async function startServer(): Promise<void> {
         const recipient = String(a.recipient ?? cfg.defaultRecipient);
         const projectName = a.project_name ? String(a.project_name) : cfg.defaultProjectName || undefined;
 
-        if (!recipient && cfg.engine !== 'ilink') {
+        if (!recipient && cfg.engine === 'hil') {
           return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
         }
 
-        // hil / ilink 引擎：shortId/头部/「请回复」全部由 HIL Server 端 (Python) 统一处理，
+        // hil / ilink / wecom-aibot 引擎：shortId/头部/「请回复」全部由 HIL Server 端 (Python) 统一处理，
         // TS 端不生成 shortId、不格式化、也不传 shortId，避免重复添加。
-        // wecom-aibot（直连模式，待步骤4 改造为 HIL Server 客户端前）：由 TS 端生成 shortId。
-        if (cfg.engine === 'hil' || cfg.engine === 'ilink') {
+        if (cfg.engine === 'hil' || cfg.engine === 'ilink' || cfg.engine === 'wecom-aibot') {
           const result = await engine.sendAndWait(recipient, message, cfg.defaultTimeout, projectName);
           return resultToContent(result);
         }
@@ -214,26 +254,16 @@ export async function startServer(): Promise<void> {
         const recipient = String(a.recipient ?? cfg.defaultRecipient);
         const projectName = a.project_name ? String(a.project_name) : cfg.defaultProjectName || undefined;
 
-        if (!recipient && cfg.engine !== 'ilink') {
+        if (!recipient && cfg.engine === 'hil') {
           return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
         }
 
-        // 同上：hil / ilink 引擎跳过 TS 端格式化，由 HIL Server 端统一处理。
-        const text = (cfg.engine === 'hil' || cfg.engine === 'ilink')
+        // 同上：hil / ilink / wecom-aibot 引擎跳过 TS 端格式化，由 HIL Server 端统一处理。
+        const text = (cfg.engine === 'hil' || cfg.engine === 'ilink' || cfg.engine === 'wecom-aibot')
           ? message
           : formatMessageOnly(message, projectName);
         const result = await engine.sendOnly(recipient, text, projectName);
         return resultToContent(result);
-      }
-
-      if (name === 'wait_for_login' && cfg.engine === 'ilink') {
-        const result = await (engine as ILinkEngine).waitForLogin();
-        return resultToContent(result);
-      }
-
-      if (name === 'list_activated_users' && cfg.engine === 'ilink') {
-        const users = await (engine as ILinkEngine).listActivatedUsers();
-        return jsonText({ status: 'success', users });
       }
 
       throw new Error(`未知工具: ${name}`);

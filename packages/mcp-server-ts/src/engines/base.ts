@@ -1,7 +1,9 @@
 export interface SendResult {
-  status: 'success' | 'timeout' | 'error' | 'login_required';
+  status: 'success' | 'timeout' | 'error' | 'login_required' | 'not_initialized';
   replies?: Array<{ text: string }>;
   message: string;
+  /** 管理台地址，status=not_initialized 时存在，引导用户打开完成初始化 */
+  initUrl?: string;
   /** 微信扫码链接（手机可直接打开），status=login_required 时存在 */
   qrUrl?: string;
   /** 登录二维码（base64 PNG），status=login_required 时存在 */
