@@ -1,13 +1,13 @@
 /**
- * 微信 iLink 引擎（HTTP 客户端版，走 HIL Server）
+ * 微信 iLink 引擎（HTTP 客户端版，走 HITL Server）
  *
  * 本引擎不持有任何长连接——iLink 长轮询由独立的 ilink-worker 常驻进程维持，
- * 并通过 HIL Server 注册为上游。本引擎只做：
- *   - 调 HIL Server 的 /api/send + /api/poll 完成发消息与等回复
+ * 并通过 HITL Server 注册为上游。本引擎只做：
+ *   - 调 HITL Server 的 /api/send + /api/poll 完成发消息与等回复
  *   - 调 /api/ilink/qr + /api/ilink/login_status 完成扫码登录流程（方案 B）
  *   - 调 /api/ilink/activated_users 列出已激活用户
  *
- * 会话匹配（[#short_id] / FIFO）由 HIL Server 端统一完成，本引擎不参与。
+ * 会话匹配（[#short_id] / FIFO）由 HITL Server 端统一完成，本引擎不参与。
  */
 import { getConfig } from '../config.js';
 import type { Engine, SendResult } from './base.js';
@@ -48,7 +48,7 @@ export class ILinkEngine implements Engine {
 
   async start(): Promise<void> {
     const cfg = getConfig();
-    console.error(`[iLink] 通过 HIL Server: ${cfg.serviceUrl}, bot_key=${cfg.botKey || '(未设置)'}`);
+    console.error(`[iLink] 通过 HITL Server: ${cfg.serviceUrl}, bot_key=${cfg.botKey || '(未设置)'}`);
     // 启动时探一次登录状态，便于 server 暴露正确的工具集
     this._refreshLoginStatus().catch(() => {});
   }
@@ -210,7 +210,7 @@ export class ILinkEngine implements Engine {
       this._loginStatus = res.status ?? 'not_started';
       this._loginPending = this._loginStatus === 'pending';
     } catch (e) {
-      // HIL Server / worker 不可达时按未登录处理
+      // HITL Server / worker 不可达时按未登录处理
       this._loginStatus = 'not_started';
       this._loginPending = false;
     }

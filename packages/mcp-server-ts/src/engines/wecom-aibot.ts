@@ -1,12 +1,12 @@
 /**
- * 企业微信 AI Bot 引擎（HTTP 客户端版，走 HIL Server）
+ * 企业微信 AI Bot 引擎（HTTP 客户端版，走 HITL Server）
  *
- * 本引擎不持有 WebSocket——企微 AI Bot 的 WS 长连接由 HIL Server 的内置引擎
- * （hil_server/engines/wecom_aibot.py）维持。本引擎只做：
- *   - 调 HIL Server 的 /api/send + /api/poll 完成发消息与等回复
+ * 本引擎不持有 WebSocket——企微 AI Bot 的 WS 长连接由 HITL Server 的内置引擎
+ * （hitl_server/engines/wecom_aibot.py）维持。本引擎只做：
+ *   - 调 HITL Server 的 /api/send + /api/poll 完成发消息与等回复
  *
- * 会话匹配（[#short_id] / FIFO）由 HIL Server 端统一完成，本引擎不参与。
- * 消息头 [#short_id] 也由 HIL Server 端统一拼接，TS 端不格式化。
+ * 会话匹配（[#short_id] / FIFO）由 HITL Server 端统一完成，本引擎不参与。
+ * 消息头 [#short_id] 也由 HITL Server 端统一拼接，TS 端不格式化。
  */
 import { getConfig } from '../config.js';
 import type { Engine, SendResult } from './base.js';
@@ -40,12 +40,12 @@ export class WecomAibotEngine implements Engine {
   async start(): Promise<void> {
     const cfg = getConfig();
     const botKey = cfg.botKey || 'wecom-aibot-1';
-    // 凭证可选：若提供则在此自动注册到 HIL Server（兜底）；未提供时假定已通过管理台配置。
+    // 凭证可选：若提供则在此自动注册到 HITL Server（兜底）；未提供时假定已通过管理台配置。
     if (!cfg.wecomBotId || !cfg.wecomBotSecret) {
       console.error(`[WecomAibot] 未带 --bot-id/--bot-secret，跳过自动注册（假定已在管理台配置 bot_key=${botKey}）`);
       return;
     }
-    console.error(`[WecomAibot] 注册到 HIL Server: ${cfg.serviceUrl}, bot_key=${botKey}`);
+    console.error(`[WecomAibot] 注册到 HITL Server: ${cfg.serviceUrl}, bot_key=${botKey}`);
     try {
       const r = await apiFetch('/api/engines/wecom-aibot/start', {
         method: 'POST',
@@ -58,7 +58,7 @@ export class WecomAibotEngine implements Engine {
       });
       console.error(`[WecomAibot] 引擎就绪: ${r.status ?? r.success}`);
     } catch (e) {
-      console.error(`[WecomAibot] 注册失败（HIL Server 是否已启动？）: ${e}`);
+      console.error(`[WecomAibot] 注册失败（HITL Server 是否已启动？）: ${e}`);
     }
   }
 

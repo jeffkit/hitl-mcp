@@ -1,7 +1,7 @@
 /**
  * 服务客户端
  * 
- * 用于 MCP Server 调用 HIL Server
+ * 用于 MCP Server 调用 HITL Server
  */
 
 import { readFileSync } from 'fs';
@@ -54,7 +54,7 @@ export interface TimeoutResponse {
 }
 
 /**
- * 企业微信客户端（连接 HIL Server）
+ * 企业微信客户端（连接 HITL Server）
  */
 export class WeComClient {
   private baseUrlOverride?: string;

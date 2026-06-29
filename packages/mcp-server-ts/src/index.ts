@@ -21,7 +21,7 @@ import { runSetup } from './setup.js';
 
 program
   .name('hitl-mcp')
-  .description('Human-in-the-Loop MCP Server（支持 HIL Server / 企业微信 AI Bot / 微信 iLink）')
+  .description('Human-in-the-Loop MCP Server（支持 HITL Server / 企业微信 AI Bot / 微信 iLink）')
   .version('0.3.0')
 
   // ── 子命令：iLink 一键安装 + 服务化 ───────────────────────────────────────
@@ -29,7 +29,7 @@ program
   .description('一键安装并服务化 iLink worker（macOS launchd）：建 venv、写 plist、扫码登录、打印 Cursor 配置')
   .option('--ilink-base-url <url>', 'iLink API 地址', 'https://ilinkai.weixin.qq.com')
   .option('--bot-key <key>', 'worker 的 bot_key（MCP 端按此路由）', 'ilink-bot-1')
-  .option('--service-url <url>', 'HIL Server 地址', 'http://localhost:8081')
+  .option('--service-url <url>', 'HITL Server 地址', 'http://localhost:8081')
   .option('--token-store <path>', 'iLink 凭证存储路径', '~/.hil-mcp/ilink_store.json')
   .option('--project-name <name>', '写入 Cursor 配置的默认项目名')
   .option('--enable-wecom-aibot', '同时启用企微 AI Bot 内置引擎')
@@ -71,8 +71,8 @@ program
   .option('--project-name <name>','默认项目名称')
   .option('--timeout <seconds>',  '等待回复超时（秒，默认 1200）', parseInt)
 
-  // ── HIL Server 参数 ───────────────────────────────────────────────────────
-  .option('--service-url <url>',  'HIL Server 地址（engine=hil 时使用）')
+  // ── HITL Server 参数 ───────────────────────────────────────────────────────
+  .option('--service-url <url>',  'HITL Server 地址（engine=hil 时使用）')
 
   // ── 企业微信 AI Bot 参数 ──────────────────────────────────────────────────
   .option('--bot-id <id>',        '企业微信 AI Bot ID（engine=wecom-aibot 时使用）')

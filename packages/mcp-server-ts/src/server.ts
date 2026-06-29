@@ -236,7 +236,7 @@ export async function startServer(): Promise<void> {
           return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
         }
 
-        // hil / ilink / wecom-aibot 引擎：shortId/头部/「请回复」全部由 HIL Server 端 (Python) 统一处理，
+        // hil / ilink / wecom-aibot 引擎：shortId/头部/「请回复」全部由 HITL Server 端 (Python) 统一处理，
         // TS 端不生成 shortId、不格式化、也不传 shortId，避免重复添加。
         if (cfg.engine === 'hil' || cfg.engine === 'ilink' || cfg.engine === 'wecom-aibot') {
           const result = await engine.sendAndWait(recipient, message, cfg.defaultTimeout, projectName);
@@ -258,7 +258,7 @@ export async function startServer(): Promise<void> {
           return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
         }
 
-        // 同上：hil / ilink / wecom-aibot 引擎跳过 TS 端格式化，由 HIL Server 端统一处理。
+        // 同上：hil / ilink / wecom-aibot 引擎跳过 TS 端格式化，由 HITL Server 端统一处理。
         const text = (cfg.engine === 'hil' || cfg.engine === 'ilink' || cfg.engine === 'wecom-aibot')
           ? message
           : formatMessageOnly(message, projectName);
