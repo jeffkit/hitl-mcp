@@ -38,6 +38,7 @@ export class HilEngine implements Engine {
     text: string,
     timeoutSec: number,
     projectName?: string,
+    _shortId?: string,
   ): Promise<SendResult> {
     const cfg = getConfig();
 

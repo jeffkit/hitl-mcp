@@ -5,8 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "bin": {
-    "hitl-mcp": "dist/index.js",
-    "hitl-mcp-ilink-login": "dist/ilink-login.js"
+    "hitl-mcp": "dist/index.js"
   },
   "files": [
     "dist",

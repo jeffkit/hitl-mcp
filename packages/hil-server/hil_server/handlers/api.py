@@ -8,7 +8,7 @@ HTTP API 处理器
 """
 import logging
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, Header, Query
 from pydantic import BaseModel
 
 from ..config import config
@@ -33,6 +33,8 @@ class SendMessageRequest(BaseModel):
     project_name: str | None = None
     timeout: int | None = None  # 会话超时时间（秒）
     wait_reply: bool = True  # 是否等待回复（False 则不创建会话）
+    bot_key: str | None = None        # 指定目标 bot（ilink/wecom-aibot 多上游路由用）
+    upstream: str | None = None       # 指定上游类型：fly-pigeon | ilink | wecom-aibot（冗余校验）
 
 
 class SendMessageResponse(BaseModel):
@@ -98,7 +100,10 @@ async def send_message(request: SendMessageRequest):
     - direct: 直接调用 fly-pigeon
     - relay: 通过 WebSocket 转发给 Worker
     """
-    if not request.chat_id:
+    # 安全拦截：fly-pigeon 在没有 chat_id 时会群发至所有群，必须阻止。
+    # ilink / wecom-aibot 走各自 Worker，无 chat_id 时由 Worker 自行解析收件人，不受此限。
+    is_flypigeon = request.upstream in (None, "fly-pigeon")
+    if is_flypigeon and not request.chat_id:
         logger.warning(
             f"[安全拦截] /api/send 被拒绝：未指定 chat_id（防止群发）| "
             f"message_preview={request.message[:80]!r}"
@@ -108,8 +113,14 @@ async def send_message(request: SendMessageRequest):
             error="禁止发送：未指定 chat_id，fly-pigeon 在没有 chat_id 时会群发至所有群"
         )
     
-    # Relay 模式检查 Worker 连接
-    if not config.is_direct_mode and not ws_manager.has_worker:
+    # 内置引擎查询（进程内引擎优先于 direct/relay）
+    from ..engines import engine_manager
+    _engine = engine_manager.get_by_bot_key(request.bot_key or "") or (
+        engine_manager.get_by_type(request.upstream) if request.upstream else None
+    )
+
+    # Relay 模式检查 Worker 连接（内置引擎命中时跳过——不依赖外部 Worker）
+    if not _engine and not config.is_direct_mode and not ws_manager.has_worker:
         return SendMessageResponse(
             success=False,
             error="没有可用的 Worker 连接，请确保 DevCloud Worker 已启动"
@@ -122,8 +133,9 @@ async def send_message(request: SendMessageRequest):
         
         # 查询 chat_type（从数据库）
         chat_type = request.chat_type  # 默认使用请求中的值
-        logger.info(f"准备查询 chat_type: chat_id={request.chat_id[:20]}..., use_db={storage._use_database}, has_db_manager={storage._db_manager is not None}")
-        if storage._use_database and storage._db_manager:
+        _cid_preview = (request.chat_id or "")[:20]
+        logger.info(f"准备查询 chat_type: chat_id={_cid_preview}..., use_db={storage._use_database}, has_db_manager={storage._db_manager is not None}")
+        if storage._use_database and storage._db_manager and request.chat_id:
             try:
                 from ..chat_info_repo import get_chat_info_repository
                 async with storage._db_manager.session() as db:
@@ -153,7 +165,19 @@ async def send_message(request: SendMessageRequest):
             logger.info(f"仅发送消息（不等待回复）: chat_id={request.chat_id}, mode={config.effective_mode}")
         
         # 2. 根据模式发送消息
-        if config.is_direct_mode:
+        if _engine:
+            # 内置引擎：进程内直接调用（不走 direct/relay/WS）
+            payload = {
+                "short_id": short_id,
+                "message": request.message,
+                "chat_id": request.chat_id,
+                "chat_type": request.chat_type,
+                "images": request.images,
+                "project_name": request.project_name,
+                "wait_reply": request.wait_reply,
+            }
+            result = await _engine.send_message(payload)
+        elif config.is_direct_mode:
             # Direct 模式：直接调用 fly-pigeon
             result = await send_message_direct(
                 short_id=short_id,
@@ -180,7 +204,9 @@ async def send_message(request: SendMessageRequest):
             result = await ws_manager.send_request(
                 action="send_message",
                 payload=payload,
-                timeout=min(timeout, 60)
+                timeout=min(timeout, 60),
+                bot_key=request.bot_key,
+                worker_type=request.upstream,
             )
         
         if not result.get("success", True):
@@ -190,7 +216,16 @@ async def send_message(request: SendMessageRequest):
                 success=False,
                 error=result.get("error", "发送失败")
             )
-        
+
+        # iLink / wecom-aibot 等在发送时未指定 chat_id 的场景：
+        # Worker 解析出实际收件人 openid 后在响应中回传 chat_id，
+        # 据此更新 session.chat_id，使后续用户回复能按 chat_id 匹配到会话。
+        # 注意：ws_manager.send_request 返回值即 Worker 响应的 data dict 本身。
+        if session and not request.chat_id:
+            resolved_chat_id = result.get("chat_id") if isinstance(result, dict) else None
+            if resolved_chat_id:
+                await storage.update_chat_id(session.session_id, resolved_chat_id)
+
         return SendMessageResponse(
             success=True,
             session_id=session.session_id if session else None,
@@ -240,8 +275,6 @@ async def mark_session_timeout(session_id: str):
 
 
 # ============== Direct 模式：回调接口 ==============
-
-from fastapi import Request, Header
 
 @router.post("/callback")
 async def handle_callback(
@@ -490,3 +523,80 @@ async def upload_image(file: UploadFile = File(...)):
             success=False,
             error=str(e)
         )
+
+
+# ============== iLink 登录 ==============
+# 优先调内置 ilink 引擎（进程内）；未启用时回退到 WS 外部 ilink-worker。
+
+
+def _ilink_engine(bot_key: str):
+    """查找内置 ilink 引擎（按 bot_key 精确匹配，否则取任一 ilink 引擎）。"""
+    from ..engines import engine_manager
+    return engine_manager.get_by_bot_key(bot_key) or engine_manager.get_by_type("ilink")
+
+
+@router.get("/ilink/qr")
+async def ilink_get_qr(bot_key: str = Query("", description="ilink worker 的 bot_key")):
+    """获取 iLink 扫码二维码。
+
+    优先调内置 ilink 引擎；未启用则通过 WS 转发给外部 ilink-worker。
+    返回: { status, qr_url, qr_base64, qrcode_key, error? }
+    """
+    engine = _ilink_engine(bot_key)
+    if engine:
+        return await engine.get_qr()
+    try:
+        result = await ws_manager.send_request(
+            action="get_qr",
+            payload={"bot_key": bot_key},
+            timeout=20.0,
+            bot_key=bot_key or None,
+            worker_type="ilink",
+        )
+        return result
+    except Exception as e:
+        logger.error(f"获取 iLink 二维码失败: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/ilink/login_status")
+async def ilink_login_status(bot_key: str = Query("", description="ilink worker 的 bot_key")):
+    """查询 iLink 登录状态。
+
+    返回: { status: "pending" | "success" | "expired" | "not_started" | "error" }
+    """
+    engine = _ilink_engine(bot_key)
+    if engine:
+        return await engine.get_login_status()
+    try:
+        result = await ws_manager.send_request(
+            action="get_login_status",
+            payload={"bot_key": bot_key},
+            timeout=10.0,
+            bot_key=bot_key or None,
+            worker_type="ilink",
+        )
+        return result
+    except Exception as e:
+        logger.error(f"查询 iLink 登录状态失败: {e}", exc_info=True)
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/ilink/activated_users")
+async def ilink_activated_users(bot_key: str = Query("", description="ilink worker 的 bot_key")):
+    """列出 iLink 已激活用户。"""
+    engine = _ilink_engine(bot_key)
+    if engine:
+        return await engine.list_activated_users()
+    try:
+        result = await ws_manager.send_request(
+            action="list_activated_users",
+            payload={"bot_key": bot_key},
+            timeout=10.0,
+            bot_key=bot_key or None,
+            worker_type="ilink",
+        )
+        return result
+    except Exception as e:
+        logger.error(f"查询 iLink 已激活用户失败: {e}", exc_info=True)
+        return {"status": "error", "error": str(e), "users": []}

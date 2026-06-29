@@ -67,6 +67,33 @@ class HILConfig(BaseSettings):
         description="单条消息最大字节数（建议2048，企微后端可能在此限制分拆）"
     )
     
+    # ========== 内置引擎（in-process，无需独立 Worker 进程）==========
+    enable_ilink_engine: bool = Field(
+        default=False,
+        alias="ENABLE_ILINK_ENGINE",
+        description="启用 iLink 内置引擎（进程内维持长轮询，无需 ilink-worker）",
+    )
+    ilink_bot_key: str = Field(
+        default="ilink-bot-1",
+        alias="ILINK_BOT_KEY",
+        description="iLink 内置引擎的 bot_key（MCP 端按此路由）",
+    )
+    ilink_base_url: str = Field(
+        default="https://ilinkai.weixin.qq.com",
+        alias="ILINK_BASE_URL",
+        description="iLink API 基础地址",
+    )
+    ilink_token_store_path: str = Field(
+        default="",
+        alias="ILINK_TOKEN_STORE_PATH",
+        description="iLink 凭证存储路径（默认 ~/.hil-mcp/ilink_store.json）",
+    )
+    ilink_poll_timeout: int = Field(
+        default=40,
+        alias="ILINK_POLL_TIMEOUT",
+        description="iLink getupdates 长轮询超时（秒）",
+    )
+
     # ========== Forward Service 配置（用于统一管理台）==========
     forward_service_url: str = Field(
         default="",

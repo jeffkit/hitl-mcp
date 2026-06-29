@@ -69,6 +69,23 @@ async def lifespan(app: FastAPI):
     # 启动心跳任务（Relay 模式需要）
     task = asyncio.create_task(heartbeat_task())
     
+    # 启动内置引擎（in-process，启用时维持长连接，消息直接进 storage）
+    from .engines import engine_manager, ILinkEngine
+    if config.enable_ilink_engine:
+        token_store_path = config.ilink_token_store_path or os.path.join(
+            os.path.expanduser("~"), ".hil-mcp", "ilink_store.json"
+        )
+        ilink_engine = ILinkEngine(
+            bot_key=config.ilink_bot_key,
+            base_url=config.ilink_base_url,
+            token_store_path=token_store_path,
+            poll_timeout=config.ilink_poll_timeout,
+        )
+        ilink_engine.on_user_message = storage.handle_callback
+        engine_manager.register(ilink_engine)
+        logger.info(f"  [内置引擎] iLink 已启用: bot_key={config.ilink_bot_key}, base={config.ilink_base_url}")
+    await engine_manager.start_all()
+    
     # 启动文件清理任务（7 天后清理过期文件）
     from .file_storage import get_file_storage
     file_storage = get_file_storage()
@@ -83,6 +100,10 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
+    
+    # 停止内置引擎
+    from .engines import engine_manager
+    await engine_manager.stop_all()
     
     # 停止文件清理任务
     file_storage.stop_cleanup_task()

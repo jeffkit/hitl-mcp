@@ -195,12 +195,17 @@ export async function startServer(): Promise<void> {
           return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
         }
 
-        // hil 引擎：HIL Server 端 (Python) 会自己调用 format_message_with_header 加头部和「请回复」，
-        // TS 端不能再加一次，否则企微群机器人会出现双层短 ID/项目名 和双层「请回复」提示。
-        const text = cfg.engine === 'hil'
-          ? message
-          : formatMessage(message, genShortId(), projectName);
-        const result = await engine.sendAndWait(recipient, text, cfg.defaultTimeout, projectName);
+        // hil / ilink 引擎：shortId/头部/「请回复」全部由 HIL Server 端 (Python) 统一处理，
+        // TS 端不生成 shortId、不格式化、也不传 shortId，避免重复添加。
+        // wecom-aibot（直连模式，待步骤4 改造为 HIL Server 客户端前）：由 TS 端生成 shortId。
+        if (cfg.engine === 'hil' || cfg.engine === 'ilink') {
+          const result = await engine.sendAndWait(recipient, message, cfg.defaultTimeout, projectName);
+          return resultToContent(result);
+        }
+
+        const shortId = genShortId();
+        const text = formatMessage(message, shortId, projectName);
+        const result = await engine.sendAndWait(recipient, text, cfg.defaultTimeout, projectName, shortId);
         return resultToContent(result);
       }
 
@@ -213,8 +218,8 @@ export async function startServer(): Promise<void> {
           return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
         }
 
-        // 同上：hil 引擎跳过 TS 端格式化，由 HIL Server 端统一处理。
-        const text = cfg.engine === 'hil'
+        // 同上：hil / ilink 引擎跳过 TS 端格式化，由 HIL Server 端统一处理。
+        const text = (cfg.engine === 'hil' || cfg.engine === 'ilink')
           ? message
           : formatMessageOnly(message, projectName);
         const result = await engine.sendOnly(recipient, text, projectName);
@@ -227,7 +232,8 @@ export async function startServer(): Promise<void> {
       }
 
       if (name === 'list_activated_users' && cfg.engine === 'ilink') {
-        return jsonText({ status: 'success', users: (engine as ILinkEngine).listActivatedUsers() });
+        const users = await (engine as ILinkEngine).listActivatedUsers();
+        return jsonText({ status: 'success', users });
       }
 
       throw new Error(`未知工具: ${name}`);
