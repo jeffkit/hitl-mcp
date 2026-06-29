@@ -1,0 +1,142 @@
+name: Release HITL Server
+
+on:
+  push:
+    tags:
+      - 'hitl-server/v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号（不打 tag 时手动指定，如 2.1.0）'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: darwin-arm64
+            runner: macos-14
+            archive: hitl-server-darwin-arm64.tar.gz
+          - os: darwin-x86_64
+            runner: macos-13
+            archive: hitl-server-darwin-x86_64.tar.gz
+          - os: linux-x86_64
+            runner: ubuntu-22.04
+            archive: hitl-server-linux-x86_64.tar.gz
+
+    defaults:
+      run:
+        working-directory: packages/hitl-server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: packages/hitl-server/hitl_server/console/pnpm-lock.yaml
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install console deps & build dist
+        run: |
+          cd hitl_server/console
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Sync Python deps (core, 无 fly-pigeon)
+        run: uv sync
+
+      - name: Install PyInstaller
+        run: uv pip install pyinstaller
+
+      - name: PyInstaller build
+        run: |
+          uv run python -m PyInstaller packaging/hitl-server.spec \
+            --distpath dist --workpath build --noconfirm
+
+      - name: Archive
+        run: |
+          OS_TAG="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          ARCH_TAG="$(uname -m)"
+          tar -C dist -czf "dist/hitl-server-${OS_TAG}-${ARCH_TAG}.tar.gz" hitl-server
+          (cd dist && shasum -a 256 hitl-server-*.tar.gz > sha256-${OS_TAG}-${ARCH_TAG}.txt)
+          ls -la dist/
+
+      - name: Build Linux packages (deb/rpm)
+        if: matrix.os == 'linux-x86_64'
+        run: |
+          sudo gem install fpm --no-document
+          bash packaging/build-linux-pkgs.sh "${VERSION#hitl-server/v}"
+        env:
+          VERSION: ${{ github.ref_name || inputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hitl-server-${{ matrix.os }}
+          path: |
+            packages/hitl-server/dist/*.tar.gz
+            packages/hitl-server/dist/sha256-*.txt
+            packages/hitl-server/dist/*.deb
+            packages/hitl-server/dist/*.rpm
+
+  release:
+    name: Publish GitHub Release & Brew formula
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/hitl-server/v')
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: hitl-server-*
+          merge-multiple: true
+
+      - name: Compute sha256 per asset
+        id: sha
+        run: |
+          set -e
+          for f in artifacts/*.tar.gz; do
+            s=$(sha256sum "$f" | cut -d' ' -f1)
+            echo "$(basename "$f")=$s" >> "$GITHUB_OUTPUT"
+            echo "$(basename "$f")  $s"
+          done
+
+      - name: Render Homebrew formula
+        run: |
+          VERSION="${GITHUB_REF_NAME#hitl-server/v}"
+          ARM_SHA="${{ steps.sha.outputs['hitl-server-darwin-arm64.tar.gz'] }}"
+          X64_SHA="${{ steps.sha.outputs['hitl-server-darwin-x86_64.tar.gz'] }}"
+          mkdir -p release
+          sed -e "s|__VERSION__|${VERSION}|g" \
+              -e "s|__ARM64_SHA256__|${ARM_SHA}|g" \
+              -e "s|__X86_64_SHA256__|${X64_SHA}|g" \
+              packages/hitl-server/packaging/hitl-server.rb.template \
+              > release/hitl-server.rb
+          cat release/hitl-server.rb
+
+      - name: Create / update release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/*.tar.gz
+            artifacts/sha256-*.txt
+            artifacts/*.deb
+            artifacts/*.rpm
+            release/hitl-server.rb
+          generate_release_notes: true

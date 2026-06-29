@@ -1,0 +1,64 @@
+# Homebrew formula for HITL Server
+# 此为模板，由发版 CI (.github/workflows/release-hitl-server.yml) 渲染真实
+# version / sha256 / 资源 URL 后，随 Release 一并发布为 hitl-server.rb。
+#
+# 安装（发布到 tap 后）：brew tap jeffkit/hitl && brew install hitl-server
+class HitlServer < Formula
+  desc "Human-in-the-Loop Server (iLink + WeCom AI, personal desktop)"
+  homepage "https://github.com/jeffkit/hitl-mcp"
+  version "__VERSION__"
+
+  on_macos do
+    on_arm do
+      url "https://github.com/jeffkit/hitl-mcp/releases/download/hitl-server-v__VERSION__/hitl-server-darwin-arm64.tar.gz"
+      sha256 "__ARM64_SHA256__"
+    end
+    on_intel do
+      url "https://github.com/jeffkit/hitl-mcp/releases/download/hitl-server-v__VERSION__/hitl-server-darwin-x86_64.tar.gz"
+      sha256 "__X86_64_SHA256__"
+    end
+  end
+
+  depends_on "uv" => :build
+
+  def install
+    libexec.install Dir["hitl-server/*"]
+    bin.install_symlink libexec/"hitl-server"
+  end
+
+  def plist
+    <<~EOS
+      <?xml version="1.0" encoding="UTF-8"?>
+      <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+      <plist version="1.0">
+      <dict>
+        <key>Label</key><string>#{plist_name}</string>
+        <key>ProgramArguments</key>
+        <array><string>#{opt_libexec}/hitl-server</string></array>
+        <key>WorkingDirectory</key><string>#{opt_libexec}</string>
+        <key>EnvironmentVariables</key>
+        <dict>
+          <key>HITL_PORT</key><string>8081</string>
+          <key>ENABLE_ILINK_ENGINE</key><string>true</string>
+          <key>ILINK_BOT_KEY</key><string>ilink-bot-1</string>
+          <key>ILINK_BASE_URL</key><string>https://ilinkai.weixin.qq.com</string>
+          <key>HITL_HOME</key><string>#{Dir.home}/.hitl</string>
+        </dict>
+        <key>RunAtLoad</key><true/>
+        <key>KeepAlive</key><true/>
+        <key>StandardOutPath</key><string>#{Dir.home}/.hitl/logs/hitl-server.out.log</string>
+        <key>StandardErrorPath</key><string>#{Dir.home}/.hitl/logs/hitl-server.err.log</string>
+      </dict>
+      </plist>
+    EOS
+  end
+
+  def caveats
+    <<~EOS
+      HITL Server 已安装。
+        启动：  brew services start hitl-server
+        管理台：http://localhost:8081/console
+        数据/凭证：~/.hitl
+    EOS
+  end
+end
