@@ -154,7 +154,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="HITL Server",
     description="Human-in-the-Loop Server - 支持 Relay 和 Direct 两种模式",
-    version="2.0.0",
+    version="2.1.0",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None
@@ -214,7 +214,7 @@ async def root():
     mode = config.effective_mode
     result = {
         "service": "HITL Server",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "running",
         "mode": mode,
     }

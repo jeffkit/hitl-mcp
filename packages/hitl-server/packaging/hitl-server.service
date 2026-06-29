@@ -1,0 +1,25 @@
+[Unit]
+Description=HITL Server (Human-in-the-Loop, iLink + WeCom AI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# 二进制由 deb/rpm 安装到 /opt/hitl-server/hitl-server
+ExecStart=/opt/hitl-server/hitl-server
+Environment=HITL_PORT=8081
+Environment=HITL_MODE=auto
+Environment=ENABLE_ILINK_ENGINE=true
+Environment=ILINK_BOT_KEY=ilink-bot-1
+Environment=ILINK_BASE_URL=https://ilinkai.weixin.qq.com
+# 如需开机即启用企微 AI Bot，取消下行注释并填凭证（否则在管理台运行时启动）
+# Environment=ENABLE_WECOM_AIBOT_ENGINE=true
+# Environment=WECOM_AIBOT_BOT_ID=
+# Environment=WECOM_AIBOT_BOT_SECRET=
+Environment=HITL_HOME=%h/.hitl
+WorkingDirectory=/opt/hitl-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
