@@ -37,7 +37,7 @@ fpm -t deb -s dir -C "$STAGE" \
   --depends systemd \
   --after-install <(printf 'systemctl daemon-reload || true\nsystemctl enable hitl-server || true\n') \
   --before-remove <(printf 'systemctl --no-reload disable hitl-server || true\nsystemctl stop hitl-server || true\n') \
-  -p "$PKG_ROOT/dist/hitl-server_#{VERSION}-1_amd64.deb"
+  -p "$PKG_ROOT/dist/hitl-server_#{version}-#{iteration}_#{arch}.deb"
 
 echo "==> 构建 .rpm"
 fpm -t rpm -s dir -C "$STAGE" \
@@ -48,7 +48,7 @@ fpm -t rpm -s dir -C "$STAGE" \
   --depends systemd \
   --after-install <(printf 'systemctl daemon-reload || true\nsystemctl enable hitl-server || true\n') \
   --before-remove <(printf 'systemctl --no-reload disable hitl-server || true\nsystemctl stop hitl-server || true\n') \
-  -p "$PKG_ROOT/dist/hitl-server-#{VERSION}-1.x86_64.rpm"
+  -p "$PKG_ROOT/dist/hitl-server-#{version}-#{iteration}.#{arch}.rpm"
 
 rm -rf "$STAGE"
 echo
