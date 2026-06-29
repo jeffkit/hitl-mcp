@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse
 from .config import config
 from .ws_manager import ws_manager
 from .storage import storage
-from .handlers import api_router, ws_router, admin_router, auth_router, forward_proxy_router
+from .handlers import api_router, ws_router, admin_router
 
 # 配置日志
 logging.basicConfig(
@@ -70,7 +70,7 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(heartbeat_task())
     
     # 启动内置引擎（in-process，启用时维持长连接，消息直接进 storage）
-    from .engines import engine_manager, ILinkEngine
+    from .engines import engine_manager, ILinkEngine, WecomAibotEngine, WecomAibotStore
     if config.enable_ilink_engine:
         token_store_path = config.ilink_token_store_path or os.path.join(
             os.path.expanduser("~"), ".hil-mcp", "ilink_store.json"
@@ -84,6 +84,39 @@ async def lifespan(app: FastAPI):
         ilink_engine.on_user_message = storage.handle_callback
         engine_manager.register(ilink_engine)
         logger.info(f"  [内置引擎] iLink 已启用: bot_key={config.ilink_bot_key}, base={config.ilink_base_url}")
+
+    # 企微 AI Bot：
+    #   1) 若 env 提供了 bot_id/secret（如 ilink-setup 写进 plist）→ 用 env，并落盘
+    #   2) 否则若持久化 store 里有凭证 → 用 store 自动注册（重启免填）
+    #   3) 都没有 → 等管理台运行时启动
+    wecom_store_path = config.wecom_aibot_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "wecom_aibot_store.json"
+    )
+    wecom_store = WecomAibotStore(wecom_store_path)
+    wecom_bot_id = config.wecom_aibot_bot_id
+    wecom_bot_secret = config.wecom_aibot_bot_secret
+    wecom_bot_key = config.wecom_aibot_bot_key
+    if not wecom_bot_id or not wecom_bot_secret:
+        persisted = wecom_store.get_credentials()
+        if persisted:
+            wecom_bot_id = persisted["bot_id"]
+            wecom_bot_secret = persisted["bot_secret"]
+            wecom_bot_key = persisted["bot_key"]
+            logger.info(f"  [内置引擎] 从持久化恢复 WeCom AI Bot 凭证: bot_key={wecom_bot_key}, bot_id={wecom_bot_id}")
+    if wecom_bot_id and wecom_bot_secret:
+        wecom_engine = WecomAibotEngine(
+            bot_key=wecom_bot_key,
+            bot_id=wecom_bot_id,
+            bot_secret=wecom_bot_secret,
+            ws_url=config.wecom_aibot_ws_url,
+            heartbeat_interval=config.wecom_aibot_heartbeat_interval,
+            reconnect_delay=config.wecom_aibot_reconnect_delay,
+        )
+        wecom_engine.on_user_message = storage.handle_callback
+        engine_manager.register(wecom_engine)
+        # 落盘（env 启动时也同步到 store，保证后续重启可自动恢复）
+        wecom_store.set_credentials(wecom_bot_id, wecom_bot_secret, wecom_bot_key)
+        logger.info(f"  [内置引擎] WeCom AI Bot 已启用: bot_key={wecom_bot_key}, bot_id={wecom_bot_id}")
     await engine_manager.start_all()
     
     # 启动文件清理任务（7 天后清理过期文件）
@@ -131,8 +164,6 @@ app = FastAPI(
 app.include_router(api_router)
 app.include_router(ws_router)
 app.include_router(admin_router)
-app.include_router(auth_router)
-app.include_router(forward_proxy_router)
 
 # 查找仓库根目录（兼容不同部署结构）
 # - monorepo: packages/hil-server/hil_server/app.py -> 需要 4 层 parent

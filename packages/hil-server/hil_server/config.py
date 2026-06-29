@@ -10,8 +10,8 @@ class HILConfig(BaseSettings):
     
     # 服务监听配置
     host: str = Field(
-        default="0.0.0.0",
-        description="服务监听地址"
+        default="127.0.0.1",
+        description="服务监听地址（本地服务，默认仅本机访问）"
     )
     port: int = Field(
         default=8081,
@@ -92,6 +92,48 @@ class HILConfig(BaseSettings):
         default=40,
         alias="ILINK_POLL_TIMEOUT",
         description="iLink getupdates 长轮询超时（秒）",
+    )
+
+    # ========== 内置引擎：企业微信 AI Bot ==========
+    enable_wecom_aibot_engine: bool = Field(
+        default=False,
+        alias="ENABLE_WECOM_AIBOT_ENGINE",
+        description="启用企微 AI Bot 内置引擎（进程内维持 WS 长连接）",
+    )
+    wecom_aibot_bot_key: str = Field(
+        default="wecom-aibot-1",
+        alias="WECOM_AIBOT_BOT_KEY",
+        description="企微 AI Bot 内置引擎的 bot_key（MCP 端按此路由）",
+    )
+    wecom_aibot_bot_id: str = Field(
+        default="",
+        alias="WECOM_AIBOT_BOT_ID",
+        description="企微 AI Bot ID",
+    )
+    wecom_aibot_bot_secret: str = Field(
+        default="",
+        alias="WECOM_AIBOT_BOT_SECRET",
+        description="企微 AI Bot Secret",
+    )
+    wecom_aibot_ws_url: str = Field(
+        default="wss://openws.work.weixin.qq.com",
+        alias="WECOM_AIBOT_WS_URL",
+        description="企微 AI Bot WebSocket 地址",
+    )
+    wecom_aibot_heartbeat_interval: int = Field(
+        default=30,
+        alias="WECOM_AIBOT_HEARTBEAT_INTERVAL",
+        description="心跳间隔（秒）",
+    )
+    wecom_aibot_reconnect_delay: int = Field(
+        default=5,
+        alias="WECOM_AIBOT_RECONNECT_DELAY",
+        description="断线重连延迟（秒）",
+    )
+    wecom_aibot_store_path: str = Field(
+        default="",
+        alias="WECOM_AIBOT_STORE_PATH",
+        description="企微 AI Bot 凭证存储路径（默认 ~/.hil-mcp/wecom_aibot_store.json），重启后据此自动注册",
     )
 
     # ========== Forward Service 配置（用于统一管理台）==========

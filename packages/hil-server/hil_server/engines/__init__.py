@@ -12,5 +12,6 @@
 from .base import BaseEngine
 from .manager import engine_manager
 from .ilink import ILinkEngine
+from .wecom_aibot import WecomAibotEngine, WecomAibotStore
 
-__all__ = ["BaseEngine", "engine_manager", "ILinkEngine"]
+__all__ = ["BaseEngine", "engine_manager", "ILinkEngine", "WecomAibotEngine", "WecomAibotStore"]

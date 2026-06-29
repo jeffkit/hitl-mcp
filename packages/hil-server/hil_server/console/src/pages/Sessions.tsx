@@ -54,7 +54,8 @@ export function SessionsPage() {
     }
   }
 
-  const formatTime = (dateStr: string) => {
+  const formatTime = (dateStr?: string) => {
+    if (!dateStr) return '—'
     const date = new Date(dateStr)
     return date.toLocaleString('zh-CN', {
       month: '2-digit',
@@ -128,7 +129,7 @@ export function SessionsPage() {
                       {formatTime(session.created_at)}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {formatTime(session.expires_at)}
+                      {formatTime(session.expire_at || session.expires_at)}
                     </TableCell>
                   </TableRow>
                 ))}

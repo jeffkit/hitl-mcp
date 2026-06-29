@@ -38,3 +38,11 @@ class BaseEngine(ABC):
             {"success": bool, "chat_id"?: str, "error"?: str}
             回传实际使用的 chat_id（收件人 openid），供 HIL Server 关联 session。
         """
+
+    @abstractmethod
+    def status(self) -> dict:
+        """返回引擎当前状态（供管理台展示）。
+
+        至少包含 worker_type / bot_key / running；各引擎可补充渠道特有字段
+        （如 ilink 的 logged_in / activated_users，wecom-aibot 的 connected / bot_id）。
+        """

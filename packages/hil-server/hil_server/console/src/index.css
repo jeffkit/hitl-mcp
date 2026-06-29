@@ -30,3 +30,48 @@
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
 }
+
+/* ── 引擎状态引导动画 ──────────────────────────────────────────────────── */
+
+/* 呼吸光点：用于“等待用户上行消息”等需要用户动作的状态 */
+@keyframes hitl-breath {
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgb(245 158 11 / 0.45); }
+  50%      { opacity: 0.55; transform: scale(0.82); box-shadow: 0 0 0 8px rgb(245 158 11 / 0); }
+}
+.hitl-breath-dot {
+  animation: hitl-breath 1.8s ease-in-out infinite;
+}
+
+/* 连接中：蓝色脉冲 */
+@keyframes hitl-pulse-blue {
+  0%, 100% { opacity: 1; transform: scale(1); box-shadow: 0 0 0 0 rgb(59 130 246 / 0.45); }
+  50%      { opacity: 0.6; transform: scale(0.85); box-shadow: 0 0 0 7px rgb(59 130 246 / 0); }
+}
+.hitl-pulse-blue {
+  animation: hitl-pulse-blue 1.6s ease-in-out infinite;
+}
+
+/* 边框流光：高亮“需要用户操作”的卡片 */
+@keyframes hitl-glow {
+  0%, 100% { box-shadow: 0 0 0 1px rgb(245 158 11 / 0.25), 0 0 18px -6px rgb(245 158 11 / 0.35); }
+  50%      { box-shadow: 0 0 0 1px rgb(245 158 11 / 0.55), 0 0 26px -4px rgb(245 158 11 / 0.55); }
+}
+.hitl-glow-amber {
+  animation: hitl-glow 2.4s ease-in-out infinite;
+}
+@keyframes hitl-glow-blue {
+  0%, 100% { box-shadow: 0 0 0 1px rgb(59 130 246 / 0.25), 0 0 18px -6px rgb(59 130 246 / 0.35); }
+  50%      { box-shadow: 0 0 0 1px rgb(59 130 246 / 0.55), 0 0 26px -4px rgb(59 130 246 / 0.55); }
+}
+.hitl-glow-blue {
+  animation: hitl-glow-blue 2.4s ease-in-out infinite;
+}
+
+/* 文字渐显循环：提示文案轻柔闪烁，吸引注意但不刺眼 */
+@keyframes hitl-text-soft {
+  0%, 100% { opacity: 0.75; }
+  50%      { opacity: 1; }
+}
+.hitl-text-soft {
+  animation: hitl-text-soft 2.2s ease-in-out infinite;
+}
