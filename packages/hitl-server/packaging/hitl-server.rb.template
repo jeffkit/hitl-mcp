@@ -13,10 +13,7 @@ class HitlServer < Formula
       url "https://github.com/jeffkit/hitl-mcp/releases/download/hitl-server-v__VERSION__/hitl-server-darwin-arm64.tar.gz"
       sha256 "__ARM64_SHA256__"
     end
-    on_intel do
-      url "https://github.com/jeffkit/hitl-mcp/releases/download/hitl-server-v__VERSION__/hitl-server-darwin-x86_64.tar.gz"
-      sha256 "__X86_64_SHA256__"
-    end
+    # Intel macOS 暂无预构建 bottle；如需可在本地 packaging/build.sh 自行构建。
   end
 
   depends_on "uv" => :build
