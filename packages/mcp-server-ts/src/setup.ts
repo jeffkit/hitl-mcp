@@ -301,6 +301,11 @@ export interface SetupOptions {
   tokenStorePath: string;
   projectName?: string;
   uninstall: boolean;
+  // 企微 AI Bot 内置引擎（可选，与 iLink 共进程）
+  enableWecomAibot: boolean;
+  wecomBotId: string;
+  wecomBotSecret: string;
+  wecomBotKey: string;
 }
 
 export async function runSetup(opts: SetupOptions): Promise<void> {
@@ -328,7 +333,7 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
   stopExistingServices(parseInt(port, 10));
   await sleep(2000);
 
-  // 3. 安装 HIL Server（内置 ilink 引擎）
+  // 3. 安装 HIL Server（内置 ilink 引擎，可选 wecom-aibot）
   const env: Record<string, string> = {
     ENABLE_ILINK_ENGINE: 'true',
     ILINK_BOT_KEY: opts.botKey,
@@ -336,6 +341,15 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
     ILINK_TOKEN_STORE_PATH: opts.tokenStorePath,
     PATH: `/usr/local/bin:/usr/bin:/bin:${homedir()}/.local/bin`,
   };
+  if (opts.enableWecomAibot) {
+    if (!opts.wecomBotId || !opts.wecomBotSecret) {
+      throw new Error('启用 wecom-aibot 需要 --wecom-bot-id 和 --wecom-bot-secret');
+    }
+    env.ENABLE_WECOM_AIBOT_ENGINE = 'true';
+    env.WECOM_AIBOT_BOT_KEY = opts.wecomBotKey;
+    env.WECOM_AIBOT_BOT_ID = opts.wecomBotId;
+    env.WECOM_AIBOT_BOT_SECRET = opts.wecomBotSecret;
+  }
   installHilServer(pythonPath, env, port);
 
   // 4. 等就绪

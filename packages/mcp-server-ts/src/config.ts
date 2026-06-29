@@ -4,12 +4,13 @@
  * 所有配置均通过命令行参数传入（不依赖环境变量）。
  *
  * 引擎选择（--engine）：
- *   hil         → 对接 HIL Server（原有行为，默认）
- *   wecom-aibot → 企业微信智能机器人（直连，无需 HIL Server）
- *   ilink       → 微信 ClawBot/iLink（直连，无需 HIL Server）
+ *   auto        → 自动：查询管理台已注册的内置引擎，按 ilink→wecom-aibot→hil 优先级选用（默认）
+ *   hil         → 对接 HIL Server（飞鸽传书 relay/direct）
+ *   wecom-aibot → 企业微信智能机器人（走 HIL Server 的 wecom-aibot 内置引擎）
+ *   ilink       → 微信 ClawBot/iLink（走 HIL Server 的 ilink 内置引擎）
  */
 
-export type EngineType = 'hil' | 'wecom-aibot' | 'ilink';
+export type EngineType = 'auto' | 'hil' | 'wecom-aibot' | 'ilink';
 
 export interface Config {
   engine: EngineType;
@@ -44,7 +45,7 @@ export interface Config {
 
 export function createConfig(opts: Partial<Config>): Config {
   return {
-    engine:               opts.engine               ?? 'hil',
+    engine:               opts.engine               ?? 'auto',
     defaultRecipient:     opts.defaultRecipient     ?? '',
     defaultProjectName:   opts.defaultProjectName   ?? '',
     defaultTimeout:       opts.defaultTimeout       ?? 1200,

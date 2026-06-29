@@ -1,254 +1,161 @@
 /**
- * 企业微信 AI Bot 引擎
+ * 企业微信 AI Bot 引擎（HTTP 客户端版，走 HIL Server）
  *
- * 通过 WebSocket 长连接直接对接企业微信 AI Bot 服务端。
- * 无需 HIL Server，无需公网 IP，无需回调 URL。
+ * 本引擎不持有 WebSocket——企微 AI Bot 的 WS 长连接由 HIL Server 的内置引擎
+ * （hil_server/engines/wecom_aibot.py）维持。本引擎只做：
+ *   - 调 HIL Server 的 /api/send + /api/poll 完成发消息与等回复
  *
- * 官方协议文档：https://developer.work.weixin.qq.com/document/path/101463
- *
- * 协议：
- *   连接 wss://openws.work.weixin.qq.com
- *   → aibot_subscribe（鉴权，body 包裹，headers.req_id 必填）
- *   ← 响应无 cmd，通过 headers.req_id 匹配，errcode=0 表示成功
- *   → ping（心跳，每 30s）
- *   ← pong（errcode=0）
- *   ← aibot_msg_callback（用户消息，字段在 body 中）
- *   → aibot_send_msg（发送消息，body 包裹）
+ * 会话匹配（[#short_id] / FIFO）由 HIL Server 端统一完成，本引擎不参与。
+ * 消息头 [#short_id] 也由 HIL Server 端统一拼接，TS 端不格式化。
  */
-
-import WebSocket from 'ws';
 import { getConfig } from '../config.js';
-import { sessionManager, TimeoutError } from '../session.js';
 import type { Engine, SendResult } from './base.js';
 
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>(r => setTimeout(r, ms));
+}
+
+function baseUrl(): string {
+  return getConfig().serviceUrl.replace(/\/$/, '');
+}
+
+async function apiFetch(path: string, init?: RequestInit): Promise<Record<string, any>> {
+  const res = await fetch(`${baseUrl()}${path}`, {
+    ...init,
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
+  return res.json() as Promise<Record<string, any>>;
+}
+
+function notInitialized(reason: string): SendResult {
+  return {
+    status: 'not_initialized',
+    initUrl: baseUrl() + '/console',
+    message: `${reason}。请打开管理台完成初始化（填写凭证 + 在企微给 bot 发条消息激活收件人），然后重试。`,
+  };
+}
+
 export class WecomAibotEngine implements Engine {
-  private ws: WebSocket | null = null;
-  private ready = false;
-  private readyPromise: Promise<void> | null = null;
-  private readyResolve?: () => void;
-  private readyReject?: (err: Error) => void;
-  private heartbeatTimer?: ReturnType<typeof setInterval>;
-  private reconnectTimer?: ReturnType<typeof setTimeout>;
-  private stopped = false;
-
-  /** req_id → callback，用于匹配无 cmd 的响应 */
-  private _pending = new Map<string, (resp: any) => void>();
-
   async start(): Promise<void> {
     const cfg = getConfig();
+    const botKey = cfg.botKey || 'wecom-aibot-1';
+    // 凭证可选：若提供则在此自动注册到 HIL Server（兜底）；未提供时假定已通过管理台配置。
     if (!cfg.wecomBotId || !cfg.wecomBotSecret) {
-      throw new Error('必须通过 --bot-id 和 --bot-secret 指定企业微信 AI Bot 凭证');
+      console.error(`[WecomAibot] 未带 --bot-id/--bot-secret，跳过自动注册（假定已在管理台配置 bot_key=${botKey}）`);
+      return;
     }
-    console.error(`[WecomAibot] 连接: ${cfg.wecomWsUrl}`);
-    this._connect();
-  }
-
-  async stop(): Promise<void> {
-    this.stopped = true;
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.ws?.close();
-  }
-
-  private _resetReady() {
-    this.ready = false;
-    this.readyPromise = new Promise<void>((res, rej) => {
-      this.readyResolve = res;
-      this.readyReject = rej;
-    });
-  }
-
-  private _connect() {
-    this._resetReady();
-    this._pending.clear();
-    const cfg = getConfig();
-    const ws = new WebSocket(cfg.wecomWsUrl);
-    this.ws = ws;
-
-    ws.on('open', () => {
-      const reqId = _genReqId();
-      // 官方格式：bot_id/secret 放在 body 中，headers 携带 req_id
-      this._sendRaw(ws, {
-        cmd: 'aibot_subscribe',
-        headers: { req_id: reqId },
-        body: {
+    console.error(`[WecomAibot] 注册到 HIL Server: ${cfg.serviceUrl}, bot_key=${botKey}`);
+    try {
+      const r = await apiFetch('/api/engines/wecom-aibot/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           bot_id: cfg.wecomBotId,
-          secret: cfg.wecomBotSecret,
-        },
-      }, reqId, (resp) => {
-        if (resp.errcode === 0) {
-          this.ready = true;
-          this.readyResolve?.();
-          console.error('[WecomAibot] 订阅成功，连接就绪');
-        } else {
-          console.error(`[WecomAibot] 订阅失败: errcode=${resp.errcode}, errmsg=${resp.errmsg}`);
-          this.readyReject?.(new Error(`订阅失败: ${resp.errmsg}`));
-        }
+          bot_secret: cfg.wecomBotSecret,
+          bot_key: botKey,
+        }),
       });
-
-      this.heartbeatTimer = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-          const pingId = _genReqId();
-          this._sendRaw(ws, { cmd: 'ping', headers: { req_id: pingId } }, pingId, () => {});
-        }
-      }, cfg.wecomHeartbeatInterval * 1000);
-    });
-
-    ws.on('message', (raw: Buffer) => {
-      let msg: any;
-      try { msg = JSON.parse(raw.toString()); } catch { return; }
-      this._handleMessage(msg);
-    });
-
-    ws.on('close', () => {
-      if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
-      this._pending.clear();
-      this.ready = false;
-      if (!this.stopped) {
-        const delay = cfg.wecomReconnectDelay * 1000;
-        console.error(`[WecomAibot] 连接断开，${delay / 1000}s 后重连...`);
-        this.reconnectTimer = setTimeout(() => this._connect(), delay);
-      }
-    });
-
-    ws.on('error', (err: Error) => {
-      console.error('[WecomAibot] WebSocket 错误:', err.message);
-    });
-  }
-
-  /** 发送消息，如提供 reqId 则注册响应回调 */
-  private _sendRaw(ws: WebSocket, payload: any, reqId: string | null, cb: (resp: any) => void) {
-    if (reqId) this._pending.set(reqId, cb);
-    ws.send(JSON.stringify(payload));
-  }
-
-  private _handleMessage(msg: any) {
-    const cmd = msg.cmd as string | undefined;
-    const reqId = msg.headers?.req_id as string | undefined;
-
-    // 响应消息：无 cmd，通过 req_id 匹配待处理请求
-    if (!cmd && reqId && this._pending.has(reqId)) {
-      const cb = this._pending.get(reqId)!;
-      this._pending.delete(reqId);
-      cb(msg);
-      return;
+      console.error(`[WecomAibot] 引擎就绪: ${r.status ?? r.success}`);
+    } catch (e) {
+      console.error(`[WecomAibot] 注册失败（HIL Server 是否已启动？）: ${e}`);
     }
-
-    if (cmd === 'aibot_msg_callback') {
-      const body = msg.body ?? {};
-      const chatType: string = body.chattype ?? 'single';
-      // 单聊没有 chatid，用 from.userid 作为 recipient；群聊用 chatid
-      const recipient: string = chatType === 'group'
-        ? (body.chatid ?? '')
-        : (body.from?.userid ?? '');
-      const msgType: string = body.msgtype ?? '';
-      const content: string = body.text?.content ?? '';
-
-      if (msgType !== 'text') return;
-
-      // 引用回复：WeCom 将被引用内容以 「原文」\n 格式嵌入正文开头
-      // 提取引用部分（「...」块）传给 dispatch，以便匹配 [#shortId]
-      const quoteMatch = content.match(/^「(.+?)」\s*/s);
-      const quotes = quoteMatch ? [quoteMatch[1]] : [];
-
-      const matched = sessionManager.dispatch(recipient, content, quotes);
-      if (!matched) {
-        console.error(`[WecomAibot] 无匹配会话，忽略: recipient=${recipient}, text=${content.substring(0, 40)}`);
-      }
-      return;
-    }
-
-    if (cmd === 'aibot_event_callback') {
-      const eventType = msg.body?.event?.eventtype;
-      if (eventType === 'disconnected_event') {
-        console.error('[WecomAibot] 收到 disconnected_event，连接被新连接踢出');
-      }
-      return;
-    }
-
-    // 其他未处理消息静默忽略
   }
 
-  private async _waitReady(timeoutMs = 30_000): Promise<void> {
-    if (this.ready) return;
-    await Promise.race([
-      this.readyPromise,
-      new Promise<void>((_, rej) =>
-        setTimeout(() => rej(new Error('等待 WeCom 连接超时')), timeoutMs)
-      ),
-    ]);
-  }
-
-  private async _send(chatId: string, text: string): Promise<void> {
-    await this._waitReady();
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      throw new Error('WebSocket 未连接');
-    }
-    const reqId = _genReqId();
-    // 官方格式：chatid/msgtype/markdown 放在 body 中
-    this._sendRaw(this.ws, {
-      cmd: 'aibot_send_msg',
-      headers: { req_id: reqId },
-      body: {
-        chatid: chatId,
-        chat_type: 0,
-        msgtype: 'markdown',
-        markdown: { content: text },
-      },
-    }, reqId, (resp) => {
-      if (resp.errcode !== 0) {
-        console.error(`[WecomAibot] 发送消息失败: errcode=${resp.errcode}, errmsg=${resp.errmsg}`);
-      }
-    });
-  }
+  async stop(): Promise<void> {}
 
   async sendAndWait(
     recipient: string,
     text: string,
     timeoutSec: number,
     _projectName?: string,
-    shortId?: string,
+    _shortId?: string,
   ): Promise<SendResult> {
-    // 复用 server 嵌入消息文本的 shortId，保证引用回复可精确匹配。
-    const sid = shortId ?? _genShortId();
-    const promise = sessionManager.create(sid, recipient, timeoutSec * 1000);
+    const cfg = getConfig();
 
-    try {
-      await this._send(recipient, text);
-    } catch (e) {
-      sessionManager.cancel(sid);
-      return { status: 'error', message: `发送失败: ${e}` };
-    }
+    const sendResult: Record<string, any> = await apiFetch('/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        chat_id: recipient || undefined,
+        wait_reply: true,
+        timeout: timeoutSec,
+        bot_key: cfg.botKey,
+        upstream: 'wecom-aibot',
+      }),
+    }).catch(e => ({ success: false, error: String(e) }));
 
-    try {
-      const reply = await promise;
-      return {
-        status: 'success',
-        replies: [{ text: reply.text }],
-        message: '收到用户回复',
-      };
-    } catch (e) {
-      if (e instanceof TimeoutError) {
-        return { status: 'timeout', replies: [], message: e.message };
+    if (!sendResult.success) {
+      const err = String(sendResult.error ?? '未知错误');
+      if (err.includes('engine_not_started') || err.includes('尚无已知收件人')) {
+        return notInitialized(err);
       }
-      throw e;
+      return { status: 'error', message: `发送失败: ${err}` };
     }
+
+    const sessionId: string = sendResult.session_id;
+    if (!sessionId) {
+      return { status: 'error', message: '发送成功但未获取到 session_id' };
+    }
+
+    return this._pollReply(sessionId, timeoutSec);
   }
 
-  async sendOnly(recipient: string, text: string, _projectName?: string): Promise<SendResult> {
-    try {
-      await this._send(recipient, text);
-      return { status: 'success', message: '消息发送成功' };
-    } catch (e) {
-      return { status: 'error', message: `发送失败: ${e}` };
+  async sendOnly(
+    recipient: string,
+    text: string,
+    _projectName?: string,
+  ): Promise<SendResult> {
+    const cfg = getConfig();
+
+    const sendResult: Record<string, any> = await apiFetch('/api/send', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: text,
+        chat_id: recipient || undefined,
+        wait_reply: false,
+        bot_key: cfg.botKey,
+        upstream: 'wecom-aibot',
+      }),
+    }).catch(e => ({ success: false, error: String(e) }));
+
+    if (!sendResult.success) {
+      const err = String(sendResult.error ?? '未知错误');
+      if (err.includes('engine_not_started') || err.includes('尚无已知收件人')) {
+        return notInitialized(err);
+      }
+      return { status: 'error', message: `发送失败: ${err}` };
     }
+    return { status: 'success', message: '消息发送成功' };
   }
-}
 
-function _genShortId(): string {
-  return Math.random().toString(16).slice(2, 8);
-}
+  private async _pollReply(sessionId: string, timeoutSec: number): Promise<SendResult> {
+    const cfg = getConfig();
+    const deadline = Date.now() + timeoutSec * 1000;
+    const pollMs = cfg.pollInterval * 1000;
 
-function _genReqId(): string {
-  return `req_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+    while (Date.now() < deadline) {
+      try {
+        const poll = await apiFetch(`/api/poll/${sessionId}`);
+        if (poll.has_reply) {
+          return {
+            status: 'success',
+            replies: (poll.replies ?? []).map((r: any) => ({ text: r.content ?? r.text ?? '' })),
+            message: `收到 ${poll.replies?.length ?? 0} 条回复`,
+          };
+        }
+        if (poll.status === 'not_found') {
+          return { status: 'error', message: '会话不存在或已过期' };
+        }
+      } catch (e) {
+        console.error('[WecomAibot] 轮询失败:', e);
+      }
+      await sleep(pollMs);
+    }
+
+    try { await apiFetch(`/api/session/${sessionId}/timeout`, { method: 'POST' }); } catch {}
+    return { status: 'timeout', replies: [], message: `等待 ${timeoutSec} 秒后超时` };
+  }
 }

@@ -4,14 +4,13 @@
  * hitl-mcp — Human-in-the-Loop MCP Server（三合一版本）
  *
  * 用法：
- *   # 对接 HIL Server（原有，默认）
+ *   # 自动：按管理台已配置的内置引擎选用（默认，推荐）
+ *   hitl-mcp --service-url http://localhost:8081
+ *
+ *   # 指定引擎（覆盖 auto）
+ *   hitl-mcp --engine ilink --service-url http://localhost:8081
+ *   hitl-mcp --engine wecom-aibot --service-url http://localhost:8081
  *   hitl-mcp --engine hil --service-url http://hitl.woa.com/api --chat-id xxx
- *
- *   # 企业微信智能机器人（直连，无需 HIL Server）
- *   hitl-mcp --engine wecom-aibot --bot-id xxx --bot-secret yyy --chat-id xxx
- *
- *   # 微信 ClawBot/iLink（直连，无需 HIL Server）
- *   hitl-mcp --engine ilink --user-id xxx --token-store /path/to/store.json
  */
 
 import { program } from 'commander';
@@ -33,6 +32,10 @@ program
   .option('--service-url <url>', 'HIL Server 地址', 'http://localhost:8081')
   .option('--token-store <path>', 'iLink 凭证存储路径', '~/.hil-mcp/ilink_store.json')
   .option('--project-name <name>', '写入 Cursor 配置的默认项目名')
+  .option('--enable-wecom-aibot', '同时启用企微 AI Bot 内置引擎')
+  .option('--wecom-bot-id <id>', '企微 AI Bot ID')
+  .option('--wecom-bot-secret <secret>', '企微 AI Bot Secret')
+  .option('--wecom-bot-key <key>', '企微 AI Bot 的 bot_key（MCP 端按此路由）', 'wecom-aibot-1')
   .option('--uninstall', '卸载 launchd 服务（凭证保留）')
   .action(async (opts) => {
     const tokenStore = opts.tokenStore.replace(/^~/, homedir());
@@ -43,6 +46,10 @@ program
         serviceUrl: opts.serviceUrl,
         tokenStorePath: tokenStore,
         projectName: opts.projectName,
+        enableWecomAibot: !!opts.enableWecomAibot,
+        wecomBotId: opts.wecomBotId ?? '',
+        wecomBotSecret: opts.wecomBotSecret ?? '',
+        wecomBotKey: opts.wecomBotKey,
         uninstall: !!opts.uninstall,
       });
       process.exit(0);
@@ -56,11 +63,11 @@ program
   // ── 通用参数（默认行为：启动 MCP server） ────────────────────────────────
   .option(
     '--engine <type>',
-    '引擎类型: hil | wecom-aibot | ilink（默认: hil）',
-    'hil'
+    '引擎类型: auto | hil | wecom-aibot | ilink（默认: auto，按管理台已配置引擎自动选用）',
+    'auto'
   )
   .option('--chat-id <id>',       '默认 chatid（hil / wecom-aibot 引擎）')
-  .option('--bot-key <key>',     'bot_key（ilink / wecom-aibot 走 HIL Server 时的路由键）')
+  .option('--bot-key <key>',     '可选。单 bot 可不传，后端按引擎类型自动路由；管理台绑定多个 bot 时用它指定')
   .option('--project-name <name>','默认项目名称')
   .option('--timeout <seconds>',  '等待回复超时（秒，默认 1200）', parseInt)
 
@@ -87,7 +94,7 @@ program
     const opts = program.opts();
 
     const config = createConfig({
-      engine:             (opts.engine as EngineType) ?? 'hil',
+      engine:             (opts.engine as EngineType) ?? 'auto',
       defaultRecipient:   opts.chatId ?? '',
       defaultProjectName: opts.projectName ?? '',
       defaultTimeout:     opts.timeout,
