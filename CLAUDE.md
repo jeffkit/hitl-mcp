@@ -17,7 +17,7 @@ The project is organized as a Monorepo with the following structure:
 ```
 hil-mcp/
 ├── packages/
-│   ├── hil-server/         # HIL Server (FastAPI + React admin console)
+│   ├── hitl-server/         # HITL Server (FastAPI + React admin console)
 │   ├── devcloud-worker/    # Intranet Worker (WebSocket connection)
 │   ├── forward-service/    # Message forwarding service (database support)
 │   ├── mcp-server-py/      # MCP client (Python version)
@@ -29,7 +29,7 @@ hil-mcp/
 
 ### Key Services
 
-1. **hil-server** - Main HIL Server (Relay/Direct modes)
+1. **hitl-server** - Main HITL Server (Relay/Direct modes)
 2. **devcloud-worker** - Intranet worker for Relay mode
 3. **forward-service** - Reverse message forwarding (user-triggered → target URL)
 4. **mcp-server-py** - Python MCP client (`uvx hil-mcp`)
@@ -39,7 +39,7 @@ hil-mcp/
 
 ## Development Commands
 
-### Python Services (hil-server, forward-service, devcloud-worker)
+### Python Services (hitl-server, forward-service, devcloud-worker)
 
 ```bash
 # Install dependencies (using uv - modern Python package manager)
@@ -77,8 +77,8 @@ pnpm run typecheck
 ### Running Tests
 
 ```bash
-# HIL Server tests
-cd packages/hil-server
+# HITL Server tests
+cd packages/hitl-server
 uv run pytest tests/ -v
 
 # Run single test
@@ -91,7 +91,7 @@ uv run pytest tests/test_storage.py::test_create_session -v
 # 同步代码到 Pro 服务器
 ./scripts/sync_to_pro.sh          # 同步所有服务
 ./scripts/sync_to_pro.sh forward  # 只同步 forward-service
-./scripts/sync_to_pro.sh hil      # 只同步 hil-server
+./scripts/sync_to_pro.sh hil      # 只同步 hitl-server
 ```
 
 **⚠️ 重要**: Pro 服务器使用 **main** 分支代码，必须通过 Git 部署，**禁止使用 rsync 直接同步代码**！
@@ -106,20 +106,20 @@ cd /data/projects/hitl && git pull origin main && sudo systemctl restart hil-ser
 
 ## Architecture Patterns
 
-### Dual Mode Operation (HIL Server)
+### Dual Mode Operation (HITL Server)
 
-The HIL Server supports two operation modes that automatically switch based on configuration:
+The HITL Server supports two operation modes that automatically switch based on configuration:
 
 **Relay Mode** (Public network deployment):
 ```
-MCP Client → HIL Server (public) ←WebSocket→ Worker (intranet) → fly-pigeon API → WeChat
+MCP Client → HITL Server (public) ←WebSocket→ Worker (intranet) → fly-pigeon API → WeChat
 ```
 - Use when MCP is on public network, fly-pigeon API only accessible from intranet
-- Worker actively connects to HIL Server to penetrate intranet
+- Worker actively connects to HITL Server to penetrate intranet
 
 **Direct Mode** (Intranet deployment):
 ```
-MCP Client → HIL Server (intranet) → fly-pigeon API → WeChat
+MCP Client → HITL Server (intranet) → fly-pigeon API → WeChat
 ```
 - Use when all components are in intranet
 - No Worker needed, simplified deployment
@@ -131,7 +131,7 @@ MCP Client → HIL Server (intranet) → fly-pigeon API → WeChat
 
 ### Database Configuration Pattern
 
-Both HIL Server and Forward Service support dual configuration storage:
+Both HITL Server and Forward Service support dual configuration storage:
 
 **JSON File** (default):
 - Storage: `data/*.json`
@@ -163,7 +163,7 @@ await config.reload_config()  # Async in database mode
 - `fly-pigeon>=1.0.9` - Tencent fly-pigeon API (internal mirror required)
 - `greenlet>=3.0.0,<3.1.0` - Version locked to avoid compilation failures
 - `mcp>=1.0.0` - Model Context Protocol
-- `alembic>=1.13.0` - Database migration tool (hil-server, forward-service)
+- `alembic>=1.13.0` - Database migration tool (hitl-server, forward-service)
 
 **Tencent Mirror Configuration** (.uvrc or pyproject.toml):
 ```toml
@@ -172,7 +172,7 @@ extra-index-url = ["http://mirrors.tencent.com/repository/pypi/tencent_pypi/simp
 
 ### Database Schema
 
-**hil-server (2 张表)**:
+**hitl-server (2 张表)**:
 ```sql
 -- hil_sessions: HIL 会话表
 id, session_id (unique), short_id, chat_id, chat_type, message,
@@ -212,7 +212,7 @@ id, key (unique), value (JSON), description, created_at, updated_at
 id, tunnel_id (unique), name, target_url, status, connected_at
 ```
 
-### Session Management (HIL Server)
+### Session Management (HITL Server)
 
 - **Timeout**: Default 20 minutes (configurable)
 - **Quote Reply Matching**: Multi-session concurrency via `[#short_id]` tags
@@ -232,7 +232,7 @@ Supported variables: `{user_name}`, `{chat_id}`, `{chat_type}`, `{timestamp}`
 
 ## Environment Variables
 
-### HIL Server
+### HITL Server
 - `HIL_PORT` - Service port (default: 8081)
 - `HIL_MODE` - Operation mode: auto/relay/direct (default: auto)
 - `BOT_KEY` - fly-pigeon bot key (required for direct mode)
@@ -247,7 +247,7 @@ Supported variables: `{user_name}`, `{chat_id}`, `{chat_type}`, `{timestamp}`
 - `DEFAULT_BOT_KEY` - Default bot key
 
 ### DevCloud Worker
-- `HIL_URL` - HIL Server WebSocket address (default: ws://localhost:8081/ws)
+- `HIL_URL` - HITL Server WebSocket address (default: ws://localhost:8081/ws)
 - `HIL_TOKEN` - Connection authentication token
 - `BOT_KEY` - fly-pigeon webhook key (required)
 
@@ -272,13 +272,13 @@ python migrate_to_database.py --force
 本项目使用 **Alembic** 管理数据库 schema 版本，支持平滑升级和回滚。
 
 **支持的服务**:
-- `hil-server` - 2 张表 (hil_sessions, hil_replies)
+- `hitl-server` - 2 张表 (hil_sessions, hil_replies)
 - `forward-service` - 7 张表 (chatbots, chat_access_rules, user_sessions, forward_logs, processing_sessions, system_config, tunnels)
 
 **常用命令**:
 ```bash
 # 进入服务目录
-cd packages/hil-server       # 或 cd packages/forward-service
+cd packages/hitl-server       # 或 cd packages/forward-service
 
 # 查看当前数据库版本
 alembic current
@@ -337,11 +337,11 @@ alembic upgrade head
 ```
 
 **环境变量**:
-- `hil-server`: `HIL_DATABASE_URL` - 默认 `sqlite+aiosqlite:///./data/hil_server.db`
+- `hitl-server`: `HIL_DATABASE_URL` - 默认 `sqlite+aiosqlite:///./data/hitl_server.db`
 - `forward-service`: `DATABASE_URL` - 默认 `sqlite+aiosqlite:///./data/forward_service.db`
 
 **详细文档**:
-- `packages/hil-server/ALEMBIC_GUIDE.md`
+- `packages/hitl-server/ALEMBIC_GUIDE.md`
 - `packages/forward-service/ALEMBIC_GUIDE.md` (if exists)
 
 ---
@@ -363,7 +363,7 @@ alembic upgrade head
 
 | 服务 | Systemd 单元 | 端口 |
 |------|-------------|------|
-| HIL Server | `hil-service.service` | 8081 |
+| HITL Server | `hil-service.service` | 8081 |
 | AS-Dispatch | `as-dispatch.service` | 8083 |
 
 #### 数据库
@@ -446,9 +446,9 @@ curl -X PUT http://localhost:8083/admin/config \
 ```bash
 # 1. 修改 models.py
 # 例如：添加新字段
-cd packages/hil-server  # 或 packages/forward-service
+cd packages/hitl-server  # 或 packages/forward-service
 
-# 编辑 hil_server/models.py (或 forward_service/models.py)
+# 编辑 hitl_server/models.py (或 forward_service/models.py)
 # 添加新的 Column 或修改现有字段定义
 
 # 2. 生成迁移脚本
@@ -522,7 +522,7 @@ USE_DATABASE=true python -m <service>.app
 - `docs/API.md` - API 接口文档
 - `docs/DATABASE_MIGRATION.md` - Data migration guide (JSON → Database)
 - `DEPLOY_BOT_MANAGEMENT.md` - Bot management deployment
-- `packages/hil-server/ALEMBIC_GUIDE.md` - HIL Server 数据库迁移指南
+- `packages/hitl-server/ALEMBIC_GUIDE.md` - HITL Server 数据库迁移指南
 
 ---
 
@@ -530,8 +530,8 @@ USE_DATABASE=true python -m <service>.app
 
 **Local Development (JSON mode)**:
 ```bash
-cd packages/hil-server
-uv run python -m hil_server.app
+cd packages/hitl-server
+uv run python -m hitl_server.app
 ```
 
 **Local Development (Database mode)**:

@@ -7,19 +7,19 @@
 ```
 hil-mcp/
 ├── packages/                    # 核心服务（Monorepo）
-│   ├── hil-server/              # HIL 服务器（腾讯内网 / 自托管）
+│   ├── hitl-server/              # HITL 服务器（腾讯内网 / 自托管）
 │   ├── devcloud-worker/         # DevCloud Worker（腾讯飞鸽传书）
-│   ├── mcp-server-py/           # MCP Server - Python（对接 HIL Server）
-│   ├── mcp-server-ts/           # MCP Server - TypeScript（对接 HIL Server）
-│   ├── mcp-server-wecom-aibot/  # MCP Server - 企业微信智能机器人（独立，无需 HIL Server）
-│   └── mcp-server-ilink/        # MCP Server - 微信 ClawBot/iLink（独立，无需 HIL Server）
+│   ├── mcp-server-py/           # MCP Server - Python（对接 HITL Server）
+│   ├── mcp-server-ts/           # MCP Server - TypeScript（对接 HITL Server）
+│   ├── mcp-server-wecom-aibot/  # MCP Server - 企业微信智能机器人（独立，无需 HITL Server）
+│   └── mcp-server-ilink/        # MCP Server - 微信 ClawBot/iLink（独立，无需 HITL Server）
 ├── docs/                        # 项目文档
 └── scripts/                     # 部署和工具脚本
 ```
 
 ## 渠道选择指南
 
-| 包 | 适用场景 | 需要 HIL Server | 是否需要公网 IP |
+| 包 | 适用场景 | 需要 HITL Server | 是否需要公网 IP |
 |----|---------|----------------|---------------|
 | `mcp-server-py` / `mcp-server-ts` | 腾讯内部或自托管企业微信 | ✅ 需要 | 视部署而定 |
 | `mcp-server-wecom-aibot` | 任意企业的企业微信智能机器人 | ❌ 不需要 | ❌ 不需要 |
@@ -45,11 +45,11 @@ hil-mcp/
 
 ### 模式一：Relay 模式（公网部署）
 
-当 HIL Server 部署在公网时，通过 WebSocket 连接内网的 Worker 来调用飞鸽 API。
+当 HITL Server 部署在公网时，通过 WebSocket 连接内网的 Worker 来调用飞鸽 API。
 
 ```
 ┌─────────────────┐      HTTPS       ┌─────────────────┐
-│   MCP Server    │ ────────────────▶│   HIL Server    │
+│   MCP Server    │ ────────────────▶│   HITL Server    │
 │ (本地 AI Agent)  │ ◀────────────────│   (公网服务器)   │
 └─────────────────┘                  └────────┬────────┘
                                               │ WebSocket
@@ -72,23 +72,23 @@ hil-mcp/
 
 ### 模式二：Direct 模式（内网部署）
 
-当 HIL Server 部署在内网时，可以直接调用飞鸽 API，无需 Worker。
+当 HITL Server 部署在内网时，可以直接调用飞鸽 API，无需 Worker。
 
 ```
 ┌─────────────────┐      HTTP       ┌─────────────────┐     fly-pigeon    ┌─────────────────┐
-│   MCP Server    │ ───────────────▶│   HIL Server    │ ─────────────────▶│   企业微信       │
+│   MCP Server    │ ───────────────▶│   HITL Server    │ ─────────────────▶│   企业微信       │
 │  (内网 Agent)    │ ◀───────────────│   (内网部署)     │ ◀─────────────────│   (飞鸽传书)     │
 └─────────────────┘                 └─────────────────┘      回调          └─────────────────┘
 ```
 
 **适用场景：**
-- MCP Server 和 HIL Server 都在内网
+- MCP Server 和 HITL Server 都在内网
 - 可以直接访问飞鸽 API
 - 简化部署，无需 Worker
 
 ### 模式自动切换
 
-HIL Server 通过配置自动选择模式：
+HITL Server 通过配置自动选择模式：
 
 | 条件 | 模式 |
 |------|------|
@@ -291,7 +291,7 @@ pnpm run build
 
 | 参数 | 说明 | 是否必填 | 默认值 |
 |------|------|----------|--------|
-| `--service-url` | HIL Server 地址（如 `http://hitl.woa.com/api`） | ✅ 必填 | `http://localhost:8081` |
+| `--service-url` | HITL Server 地址（如 `http://hitl.woa.com/api`） | ✅ 必填 | `http://localhost:8081` |
 | `--chat-id` | 默认 Chat ID（群聊或私聊） | ✅ 必填 | - |
 | `--project-name` | 项目名称，用于标识消息来源 | 可选 | - |
 | `--timeout` | 等待回复超时时间（秒） | 可选 | `1200` (20 分钟) |
@@ -317,7 +317,7 @@ pnpm run build
 
 适用于 MCP Server 运行在公网的场景。
 
-#### 第一步：部署 HIL Server（公网服务器）
+#### 第一步：部署 HITL Server（公网服务器）
 
 ```bash
 # 1. 克隆代码到公网服务器
@@ -334,7 +334,7 @@ export HIL_PORT=8081
 export HIL_WORKER_TOKEN=your-secret-token  # 用于 Worker 鉴权，请自定义
 
 # 4. 启动服务（后台运行）
-nohup python -m hil_server.app >> hil.log 2>&1 &
+nohup python -m hitl_server.app >> hil.log 2>&1 &
 ```
 
 #### 第二步：配置 Nginx 反向代理（推荐）
@@ -342,7 +342,7 @@ nohup python -m hil_server.app >> hil.log 2>&1 &
 为了支持 HTTPS 和 WebSocket，建议使用 Nginx 作为反向代理：
 
 ```nginx
-# /etc/nginx/sites-available/hil-server
+# /etc/nginx/sites-available/hitl-server
 server {
     listen 80;
     server_name your-domain.com;  # 替换为你的域名
@@ -379,7 +379,7 @@ server {
 启用配置：
 
 ```bash
-sudo ln -s /etc/nginx/sites-available/hil-server /etc/nginx/sites-enabled/
+sudo ln -s /etc/nginx/sites-available/hitl-server /etc/nginx/sites-enabled/
 sudo nginx -t
 sudo systemctl reload nginx
 ```
@@ -399,7 +399,7 @@ export HIL_URL=wss://your-domain.com/ws  # 使用域名，wss 表示 HTTPS
 # 或使用 IP（如果没有域名）
 # export HIL_URL=ws://your-server-ip:80/ws
 
-export HIL_TOKEN=your-secret-token    # 与 HIL Server 一致
+export HIL_TOKEN=your-secret-token    # 与 HITL Server 一致
 export BOT_KEY=your-wecom-bot-key     # 飞鸽机器人 Key
 export CALLBACK_PORT=8082
 
@@ -420,7 +420,7 @@ http://your-devcloud-server:8082/callback
 #### 第五步：验证部署
 
 ```bash
-# 检查 HIL Server 状态（应显示 mode: relay, worker_connected: true）
+# 检查 HITL Server 状态（应显示 mode: relay, worker_connected: true）
 curl https://your-domain.com/health
 
 # 检查 Worker 状态
@@ -429,7 +429,7 @@ curl http://localhost:8082/health
 
 ### Direct 模式部署
 
-适用于 MCP Server 和 HIL Server 都在内网的场景。
+适用于 MCP Server 和 HITL Server 都在内网的场景。
 
 ```bash
 # 1. 克隆代码
@@ -448,7 +448,7 @@ export BOT_KEY=your-wecom-bot-key  # 有 BOT_KEY 自动切换到 direct 模式
 # export HIL_MODE=direct
 
 # 4. 启动服务
-nohup python -m hil_server.app >> hil.log 2>&1 &
+nohup python -m hitl_server.app >> hil.log 2>&1 &
 ```
 
 配置飞鸽传书回调地址：
@@ -472,20 +472,20 @@ curl http://localhost:8080/health
 
 | 组件 | 部署位置 | 端口 | 说明 |
 |------|----------|------|------|
-| HIL Server | 公网服务器 | 8081 (Nginx 80/443) | 接收 MCP 请求，管理 Worker 连接 |
-| DevCloud Worker | 内网/DevCloud | 8082 | 连接 HIL Server，调用飞鸽 API |
+| HITL Server | 公网服务器 | 8081 (Nginx 80/443) | 接收 MCP 请求，管理 Worker 连接 |
+| DevCloud Worker | 内网/DevCloud | 8082 | 连接 HITL Server，调用飞鸽 API |
 
 ### Direct 模式
 
 | 组件 | 部署位置 | 端口 | 说明 |
 |------|----------|------|------|
-| HIL Server | 内网服务器 | 8080 | 直接调用飞鸽 API |
+| HITL Server | 内网服务器 | 8080 | 直接调用飞鸽 API |
 
 ---
 
 ## 环境变量说明
 
-### HIL Server
+### HITL Server
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
@@ -504,8 +504,8 @@ curl http://localhost:8080/health
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `HIL_URL` | HIL Server 的 WebSocket 地址（Worker 模式） | `ws://localhost:8081/ws` |
-| `HIL_TOKEN` | 连接 HIL Server 的鉴权 Token | 可选 |
+| `HIL_URL` | HITL Server 的 WebSocket 地址（Worker 模式） | `ws://localhost:8081/ws` |
+| `HIL_TOKEN` | 连接 HITL Server 的鉴权 Token | 可选 |
 | `BOT_KEY` | 飞鸽机器人 Webhook Key | 必填 |
 | `CALLBACK_PORT` | 回调服务监听端口 | 8082 |
 | `CALLBACK_AUTH_KEY` | 回调鉴权 Header 名称 | 可选 |
@@ -515,7 +515,7 @@ curl http://localhost:8080/health
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `SERVICE_URL` | HIL Server 地址（如 `http://hitl.woa.com/api`） | `http://localhost:8081` |
+| `SERVICE_URL` | HITL Server 地址（如 `http://hitl.woa.com/api`） | `http://localhost:8081` |
 | `DEFAULT_CHAT_ID` | 默认 Chat ID | 必填 |
 | `DEFAULT_PROJECT_NAME` | 默认项目名称 | 可选 |
 | `DEFAULT_TIMEOUT` | 超时时间（秒） | `1200` (20 分钟) |
@@ -742,7 +742,7 @@ export FORWARD_URL="https://default-api.com/handle"  # 默认 URL
 
 ```
 hil-mcp/
-├── hil_server/             # HIL Server（公网/内网均可）
+├── hitl_server/             # HITL Server（公网/内网均可）
 │   ├── app.py              # FastAPI 应用
 │   ├── config.py           # 配置管理（支持双模式）
 │   ├── storage.py          # 会话存储与回调处理
@@ -778,7 +778,7 @@ hil-mcp/
 │   ├── config.py           # 配置管理
 │   └── sender.py           # 消息发送
 │
-├── deploy_hil.sh           # HIL Server 部署脚本（示例）
+├── deploy_hil.sh           # HITL Server 部署脚本（示例）
 ├── deploy_worker.sh        # DevCloud Worker 部署脚本（示例）
 ├── deploy_forward.sh       # Forward Service 部署脚本（示例）
 ├── requirements.txt        # Python 依赖
@@ -800,7 +800,7 @@ hil-mcp/
 **原因**：通常是 Nginx 无法连接到后端服务，或设置了 HTTP 代理。
 
 **解决方案**：
-1. 确保 HIL Server 正在运行：`curl http://127.0.0.1:8081/health`
+1. 确保 HITL Server 正在运行：`curl http://127.0.0.1:8081/health`
 2. 在 MCP 配置中禁用代理：
 ```json
 "env": {
@@ -810,7 +810,7 @@ hil-mcp/
 }
 ```
 
-### Q: Worker 无法连接 HIL Server
+### Q: Worker 无法连接 HITL Server
 
 **可能原因**：
 1. 防火墙阻止了出站连接
@@ -841,7 +841,7 @@ Worker 会自动重连（指数退避），通常几秒内就能恢复连接。
 ### Q: 如何检查服务状态？
 
 ```bash
-# HIL Server（显示运行模式和 Worker 连接状态）
+# HITL Server（显示运行模式和 Worker 连接状态）
 curl https://your-domain.com/health
 # 返回示例：
 # {"status":"healthy","mode":"relay","worker_connected":true,"worker_count":1}
@@ -864,7 +864,7 @@ curl http://localhost:8082/health
 
 ---
 
-## 独立 MCP Server（无需 HIL Server）
+## 独立 MCP Server（无需 HITL Server）
 
 ### 企业微信智能机器人（mcp-server-wecom-aibot）
 
