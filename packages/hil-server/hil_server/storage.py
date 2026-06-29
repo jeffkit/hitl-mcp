@@ -537,7 +537,54 @@ class RelayStorage:
                     )
             
             return True
-    
+
+    async def update_chat_id(self, session_id: str, chat_id: str) -> bool:
+        """
+        更新会话的 chat_id（用于 iLink/wecom-aibot 等在发送时未知收件人、
+        由 Worker 解析后回传实际收件人 openid 的场景）。
+
+        维护 _chat_id_map 索引，使后续 handle_callback 能按 chat_id 回退匹配。
+        """
+        if not chat_id:
+            return False
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            if session.chat_id == chat_id:
+                return True
+
+            # 从旧 chat_id 索引移除
+            if session.chat_id in self._chat_id_map:
+                try:
+                    self._chat_id_map[session.chat_id].remove(session_id)
+                except ValueError:
+                    pass
+
+            logger.info(
+                f"更新会话 chat_id: {session_id[:8]} "
+                f"{session.chat_id or '(空)'} -> {chat_id[:16]}..."
+            )
+            session.chat_id = chat_id
+
+            # 加入新 chat_id 索引
+            if chat_id not in self._chat_id_map:
+                self._chat_id_map[chat_id] = []
+            if session_id not in self._chat_id_map[chat_id]:
+                self._chat_id_map[chat_id].append(session_id)
+
+            # 更新数据库（如果启用）
+            if self._db_manager:
+                from .models import HILSession
+                async with self._db_manager.session() as db:
+                    await db.execute(
+                        update(HILSession)
+                        .where(HILSession.session_id == session_id)
+                        .values(chat_id=chat_id, updated_at=datetime.now())
+                    )
+
+            return True
+
     # ========== 回调处理 ==========
     
     async def handle_callback(self, data: dict) -> dict:

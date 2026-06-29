@@ -202,14 +202,21 @@ export class WecomAibotEngine implements Engine {
     });
   }
 
-  async sendAndWait(recipient: string, text: string, timeoutSec: number, _projectName?: string): Promise<SendResult> {
-    const shortId = _genShortId();
-    const promise = sessionManager.create(shortId, recipient, timeoutSec * 1000);
+  async sendAndWait(
+    recipient: string,
+    text: string,
+    timeoutSec: number,
+    _projectName?: string,
+    shortId?: string,
+  ): Promise<SendResult> {
+    // 复用 server 嵌入消息文本的 shortId，保证引用回复可精确匹配。
+    const sid = shortId ?? _genShortId();
+    const promise = sessionManager.create(sid, recipient, timeoutSec * 1000);
 
     try {
       await this._send(recipient, text);
     } catch (e) {
-      sessionManager.cancel(shortId);
+      sessionManager.cancel(sid);
       return { status: 'error', message: `发送失败: ${e}` };
     }
 

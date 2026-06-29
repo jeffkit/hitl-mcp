@@ -20,6 +20,8 @@ export interface Config {
   defaultProjectName: string;
   /** 等待回复超时（秒） */
   defaultTimeout: number;
+  /** bot_key：ilink/wecom-aibot 走 HIL Server 时的路由键 */
+  botKey: string;
 
   // ── HIL Server 引擎 ─────────────────────────────────────────────────────────
   serviceUrl: string;
@@ -46,6 +48,7 @@ export function createConfig(opts: Partial<Config>): Config {
     defaultRecipient:     opts.defaultRecipient     ?? '',
     defaultProjectName:   opts.defaultProjectName   ?? '',
     defaultTimeout:       opts.defaultTimeout       ?? 1200,
+    botKey:               opts.botKey               ?? '',
     serviceUrl:           opts.serviceUrl           ?? 'http://localhost:8081',
     pollInterval:         opts.pollInterval         ?? 2,
     wecomBotId:           opts.wecomBotId           ?? '',

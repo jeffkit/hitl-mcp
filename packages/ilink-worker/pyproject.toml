@@ -1,0 +1,19 @@
+[project]
+name = "ilink-worker"
+version = "0.1.0"
+description = "iLink Worker - 把微信 ClawBot/iLink 长轮询接入 HIL Server"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27.0",
+    "websockets>=12.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ilink_worker"]

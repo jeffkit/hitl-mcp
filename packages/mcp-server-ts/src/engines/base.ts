@@ -15,12 +15,16 @@ export interface Engine {
   start(): Promise<void>;
   /** 停止引擎 */
   stop(): Promise<void>;
-  /** 发消息并等待回复 */
+  /** 发消息并等待回复
+   *  shortId：由 server 统一生成、嵌入消息文本的会话标识，引擎用它注册本地待匹配会话。
+   *          未提供时引擎可内部生成（向后兼容），但会与消息文本中的 [#id] 不一致，不推荐。
+   */
   sendAndWait(
     recipient: string,
     text: string,
     timeoutSec: number,
     projectName?: string,
+    shortId?: string,
   ): Promise<SendResult>;
   /** 仅发消息，不等待回复 */
   sendOnly(
