@@ -24,9 +24,8 @@ jobs:
           - os: darwin-arm64
             runner: macos-14
             archive: hitl-server-darwin-arm64.tar.gz
-          - os: darwin-x86_64
-            runner: macos-13
-            archive: hitl-server-darwin-x86_64.tar.gz
+          # Intel macOS 暂不发布预构建包（GitHub 托管 Intel macOS runner 已逐步退场，
+          # 多数仓库无法 provision）。如需 Intel，可在本地执行 packaging/build.sh 自行构建。
           - os: linux-x86_64
             runner: ubuntu-22.04
             archive: hitl-server-linux-x86_64.tar.gz
@@ -121,11 +120,9 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#hitl-server/v}"
           ARM_SHA="${{ steps.sha.outputs['hitl-server-darwin-arm64.tar.gz'] }}"
-          X64_SHA="${{ steps.sha.outputs['hitl-server-darwin-x86_64.tar.gz'] }}"
           mkdir -p release
           sed -e "s|__VERSION__|${VERSION}|g" \
               -e "s|__ARM64_SHA256__|${ARM_SHA}|g" \
-              -e "s|__X86_64_SHA256__|${X64_SHA}|g" \
               packages/hitl-server/packaging/hitl-server.rb.template \
               > release/hitl-server.rb
           cat release/hitl-server.rb
