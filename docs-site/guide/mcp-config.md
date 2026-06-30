@@ -86,7 +86,7 @@
 ::: warning iLink 的 token-store 用绝对路径
 iLink 引擎的 `--token-store` 默认是相对路径 `./data/ilink_store.json`，MCP 客户端的工作目录可能变化，建议改成绝对路径，例如 `~/.hil-mcp/ilink_store.json`，否则每次重启可能都要重新扫码。
 
-不过更推荐的做法是用 `ilink-setup` 一键安装（它会自动用 `~/.hitl/` 下的绝对路径并服务化），见 [iLink 一键安装](../engines/ilink#一键安装推荐)。
+不过更推荐的做法是直接用 Homebrew / deb / rpm 安装 hitl-server（服务配置已用 `~/.hitl/` 下的绝对路径并服务化），见 [iLink 引擎 → 安装](../engines/ilink#第-1-步-安装并启动-hitl-server)。
 :::
 
 ## 禁用代理（重要）

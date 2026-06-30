@@ -5,7 +5,7 @@ outline: [2, 3]
 
 # hitl-mcp 一键安装 Skill
 
-本页是一份 **Skill**：让 Agent 读取这一页（或本站点的 [SKILL.md 原始文件](/hitl-mcp/SKILL.md)），它就会按下面的步骤自动帮你把 hitl-mcp 装好、配置好，并验证你的手机真的能收到消息。
+本页是一份 **Skill**：让 Agent 读取这一页，它就会按下面的步骤自动帮你把 hitl-mcp 装好、配置好，并验证你的手机真的能收到消息。
 
 ## 怎么用
 
@@ -13,14 +13,10 @@ outline: [2, 3]
 
 > 请读取 https://jeffkit.github.io/hitl-mcp/skill/skill ，帮我安装并配置 hitl-mcp，验证能收到消息。
 
-或者让 Agent 直接读原始 Skill 文件：
-
-> 请读取 https://raw.githubusercontent.com/jeffkit/hitl-mcp/main/docs-site/public/SKILL.md ，按里面的步骤帮我安装 hitl-mcp。
-
 Agent 会自动按下面的流程引导你完成。
 
-::: tip 两种读取方式等价
-本页是渲染后的可读版，`SKILL.md` 是带 frontmatter 的原始版。Agent 读任一即可，内容一致。
+::: tip 这是一份 HTML 页
+`https://jeffkit.github.io/hitl-mcp/skill/skill` 是本页的渲染版，Agent 用 WebFetch 读取后会自动转成 Markdown，内容与下方完全一致，可直接照执行。
 :::
 
 ---
@@ -49,70 +45,73 @@ Agent 会自动按下面的流程引导你完成。
 
 ## 2. 检查环境
 
-用 Bash 工具检查：`node -v`（需 ≥ 18）、`python3 --version`（需 ≥ 3.10）、`uv --version`。
+用 Bash 工具检查：`node -v`（需 ≥ 18）。
 
-- 缺 uv：提示 `curl -LsSf https://astral.sh/uv/install.sh | sh`，装好后继续。
 - 缺 node：提示用户安装 Node.js 18+。
-- macOS 或 Linux 才能用一键服务化；其他系统按手动流程走。
+- hitl-server 是自包含二进制，**不需要** Python / uv。
+- macOS 用 Homebrew 装最省心；Linux 用 deb/rpm；都没有就用 tar.gz 二进制。
 
 ## 3. 安装并启动 hitl-server
 
-### 3.1 拿到代码
+hitl-server 每个版本都有跨平台预构建产物，**不要从源码安装**。根据系统选一种：
+
+### 3.1 macOS（Homebrew，推荐）
 
 ```bash
-git clone https://github.com/jeffkit/hitl-mcp.git
-cd hitl-mcp/packages/hitl-server
-uv sync
+curl -L -o hitl-server.rb \
+  https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server.rb
+brew install --formula hitl-server.rb
+brew services start hitl-server
 ```
 
-### 3.2 macOS：推荐用一键服务化
+Homebrew plist 已默认启用 iLink 引擎（`ILINK_BOT_KEY=ilink-bot-1`）。
 
-在 **仓库根目录** 执行（根据用户选的引擎调整参数）：
+### 3.2 Linux（deb / rpm，推荐）
 
-**ilink：**
+从 https://github.com/jeffkit/hitl-mcp/releases/latest 下载最新包后：
 
 ```bash
-npx -y hitl-mcp ilink-setup --service-url http://localhost:8081 --bot-key ilink-bot-1
+# deb
+sudo dpkg -i hitl-server_*_amd64.deb
+sudo systemctl enable --now hitl-server
+# 或 rpm
+sudo rpm -i hitl-server-*.x86_64.rpm
+sudo systemctl enable --now hitl-server
 ```
 
-该命令会建 venv、注册 launchd 服务、拉二维码引导扫码登录、打印 Cursor 配置。
+systemd unit 已默认启用 iLink 引擎。
 
-**wecom-aibot：**
+### 3.3 tar.gz 二进制（无包管理器时）
 
 ```bash
-npx -y hitl-mcp ilink-setup --service-url http://localhost:8081 \
-  --enable-wecom-aibot \
-  --wecom-bot-id <BotID> --wecom-bot-secret <BotSecret> \
-  --wecom-bot-key wecom-aibot-1
+# macOS Apple Silicon
+curl -L https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server-darwin-arm64.tar.gz | tar xz
+ENABLE_ILINK_ENGINE=true ILINK_BOT_KEY=ilink-bot-1 ./hitl-server/hitl-server
+# Linux x86_64
+curl -L https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server-linux-x86_64.tar.gz | tar xz
+ENABLE_ILINK_ENGINE=true ILINK_BOT_KEY=ilink-bot-1 ./hitl-server/hitl-server
 ```
 
-（向用户要 Bot ID / Bot Secret，一次只问一个。）
+### 3.4 启用企微引擎（仅当用户选 wecom-aibot）
 
-> 注：该命令也会启用 iLink 引擎，但未扫码时它不影响企微引擎工作。
+推荐在管理台 `http://localhost:8081/console` 的「引擎」页面填 Bot ID / Secret（落盘后重启自动恢复）。或用环境变量：
 
-### 3.3 Linux / 想手动掌控：前台启动
+```
+ENABLE_WECOM_AIBOT_ENGINE=true
+WECOM_AIBOT_BOT_KEY=wecom-aibot-1
+WECOM_AIBOT_BOT_ID=<BotID>
+WECOM_AIBOT_BOT_SECRET=<BotSecret>
+```
+
+macOS 改 brew plist / Linux 改 `/etc/systemd/system/hitl-server.service` 后重启服务。
+
+### 3.5 验证服务可达
 
 ```bash
-cd packages/hitl-server
+curl http://localhost:8081/api/ilink/login_status?bot_key=ilink-bot-1
 ```
 
-ilink：
-
-```bash
-ENABLE_ILINK_ENGINE=true ILINK_BOT_KEY=ilink-bot-1 \
-ILINK_TOKEN_STORE_PATH=~/.hitl/ilink_store.json \
-uv run python -m hitl_server.app
-```
-
-wecom-aibot：
-
-```bash
-ENABLE_WECOM_AIBOT_ENGINE=true WECOM_AIBOT_BOT_KEY=wecom-aibot-1 \
-WECOM_AIBOT_BOT_ID=<BotID> WECOM_AIBOT_BOT_SECRET=<BotSecret> \
-uv run python -m hitl_server.app
-```
-
-验证服务可达：`curl http://localhost:8081/api/ilink/login_status?bot_key=ilink-bot-1` 应返回 JSON。
+应返回 JSON。
 
 ## 4. 引擎初始化
 

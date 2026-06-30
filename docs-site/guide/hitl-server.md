@@ -2,138 +2,135 @@
 
 `hitl-server` 是 hitl-mcp 的本地后端，负责维持微信/企微的长连接、管理会话与回复匹配。它跑在你本机 `127.0.0.1:8081`，**不需要公网 IP**。
 
+每个版本都提供 **跨平台的预构建产物**，直接装就行，不用从源码编译。
+
 ## 环境要求
 
 | 依赖 | 版本 | 说明 |
 |------|------|------|
-| Python | ≥ 3.10 | 跑 hitl-server |
-| [uv](https://docs.astral.sh/uv/) | 最新 | 管理依赖与虚拟环境（推荐） |
 | Node.js | ≥ 18 | 跑 MCP 端 `npx hitl-mcp` |
-| OS | macOS / Linux | 一键服务化仅 macOS |
+| OS | macOS / Linux | 见下表选对应产物 |
 
-安装 uv（如尚未安装）：
+`hitl-server` 本身是 **自包含二进制**（PyInstaller 打包，内嵌管理台），**不依赖** Python / uv。你只需要装它，不用准备 Python 环境。
 
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+## 选哪种产物
 
-## 安装
+| 平台 | 推荐方式 | 产物 |
+|------|---------|------|
+| macOS（Apple Silicon） | Homebrew | `hitl-server.rb` |
+| Linux（x86_64） | deb / rpm | `hitl-server_*_amd64.deb` / `hitl-server-*.x86_64.rpm` |
+| 任意平台（无包管理器） | tar.gz 二进制 | `hitl-server-<os>-<arch>.tar.gz` |
 
-### 方式一：从源码安装（推荐）
+所有产物都在 [GitHub Releases](https://github.com/jeffkit/hitl-mcp/releases/latest) 页面。
 
-```bash
-git clone https://github.com/jeffkit/hitl-mcp.git
-cd hitl-mcp/packages/hitl-server
-
-# 创建虚拟环境并安装依赖
-uv sync
-```
-
-`uv sync` 会在 `packages/hitl-server/.venv` 里装好所有依赖（fastapi、uvicorn、websockets、httpx 等）。
-
-### 方式二：从 PyPI 安装
+## macOS：Homebrew（推荐）
 
 ```bash
-uv tool install hitl-server
-# 之后可直接：hitl-server
+# 1. 下载最新 Release 里的 Homebrew formula
+curl -L -o hitl-server.rb \
+  https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server.rb
+
+# 2. 安装
+brew install --formula hitl-server.rb
+
+# 3. 启动（开机自启 + 崩溃自动重启，已默认启用 iLink 引擎）
+brew services start hitl-server
 ```
 
-> 个人端默认只装 iLink + wecom-aibot 引擎所需的依赖。**无需** 安装腾讯内网的 fly-pigeon，本文档也不涉及它。
+启动后：
 
-## 启动
+- 服务地址 `http://127.0.0.1:8081`，管理台 `http://localhost:8081/console`
+- 数据/凭证目录 `~/.hitl`
+- 日志 `~/.hitl/logs/hitl-server.{out,err}.log`
 
-### 前台运行（调试用）
-
+::: details 不想用 Homebrew？用 tar.gz 二进制
 ```bash
-cd packages/hitl-server
-uv run python -m hitl_server.app
+curl -L https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server-darwin-arm64.tar.gz | tar xz
+# 默认监听 8081；如需启用引擎，加环境变量
+ENABLE_ILINK_ENGINE=true ILINK_BOT_KEY=ilink-bot-1 ./hitl-server/hitl-server
 ```
+想让它常驻？自行配 launchd（macOS）或 systemd（Linux）即可，服务配置示例见 [hitl-server 文档](./hitl-server)。
+:::
 
-看到类似下面的日志就说明起来了：
+## Linux：deb / rpm（推荐）
 
-```
-INFO:     Uvicorn running on http://127.0.0.1:8081
-INFO:     管理台: http://localhost:8081/console
-```
+从 [Releases 页](https://github.com/jeffkit/hitl-mcp/releases/latest) 下载最新版对应包：
 
-### 后台常驻（macOS，推荐）
+::: code-group
 
-iLink 引擎自带「一键服务化」命令，会把 hitl-server 注册成 launchd 服务：开机自启、崩溃自动重启、日志落到 `~/.hitl/logs/`。
-
-```bash
-npx -y hitl-mcp ilink-setup --service-url http://localhost:8081
-```
-
-> 即使你主要用 wecom-aibot，也可以借用这个命令把 hitl-server 服务化，加 `--enable-wecom-aibot` 一起启用企微引擎。详见 [iLink 一键安装](../engines/ilink#一键安装推荐)。
-
-### 后台常驻（Linux）
-
-用 systemd 自行管理，示例：
-
-```ini
-# /etc/systemd/system/hitl-server.service
-[Unit]
-Description=hitl-server
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/hitl-mcp/packages/hitl-server
-Environment=ENABLE_ILINK_ENGINE=true
-Environment=ILINK_BOT_KEY=ilink-bot-1
-ExecStart=/opt/hitl-mcp/packages/hitl-server/.venv/bin/python -m hitl_server.app
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
+```bash [deb (Debian/Ubuntu)]
+sudo dpkg -i hitl-server_*_amd64.deb
 sudo systemctl enable --now hitl-server
 ```
 
+```bash [rpm (RHEL/Fedora/CentOS)]
+sudo rpm -i hitl-server-*.x86_64.rpm
+sudo systemctl enable --now hitl-server
+```
+
+:::
+
+systemd unit 已 **默认启用 iLink 引擎**（`ENABLE_ILINK_ENGINE=true`、`ILINK_BOT_KEY=ilink-bot-1`）。企微 AI Bot 默认不启用，可在管理台运行时配置（凭证落盘后重启自动恢复），或编辑 `/etc/systemd/system/hitl-server.service` 取消注释 `WECOM_AIBOT_*` 三行后 `sudo systemctl daemon-reload && sudo systemctl restart hitl-server`。
+
+::: details 不想用包管理器？用 tar.gz 二进制
+```bash
+curl -L https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server-linux-x86_64.tar.gz | tar xz
+ENABLE_ILINK_ENGINE=true ILINK_BOT_KEY=ilink-bot-1 ./hitl-server/hitl-server
+```
+:::
+
 ## 启用引擎
 
-引擎通过环境变量开关。两个引擎可同时启用。
+装好并启动后，引擎可以通过两种方式启用，**任选其一**：
+
+1. **管理台（推荐）**：打开 `http://localhost:8081/console`，在「引擎」页面扫码登录 iLink、填写企微 Bot 凭证。凭证会落盘，重启自动恢复。
+2. **环境变量**：在启动命令或服务配置里设置（见下表）。Homebrew plist / systemd unit 已默认开了 iLink。
 
 | 环境变量 | 作用 | 默认 |
 |----------|------|------|
-| `ENABLE_ILINK_ENGINE` | 启用微信 iLink 引擎 | `false` |
+| `ENABLE_ILINK_ENGINE` | 启用微信 iLink 引擎 | `false`（brew/systemd 默认 `true`） |
 | `ILINK_BOT_KEY` | iLink 引擎的路由键（MCP 端 `--bot-key` 对应它） | `ilink-bot-1` |
-| `ILINK_BASE_URL` | iLink API 地址 | `https://ilinkai.weixin.qq.com` |
-| `ILINK_TOKEN_STORE_PATH` | iLink 凭证存储路径 | `~/.hil-mcp/ilink_store.json` |
 | `ENABLE_WECOM_AIBOT_ENGINE` | 启用企微 AI Bot 引擎 | `false` |
 | `WECOM_AIBOT_BOT_KEY` | 企微引擎的路由键 | `wecom-aibot-1` |
 | `WECOM_AIBOT_BOT_ID` | 企微 Bot ID | — |
 | `WECOM_AIBOT_BOT_SECRET` | 企微 Bot Secret | — |
-| `WECOM_AIBOT_WS_URL` | 企微 WebSocket 地址 | `wss://openws.work.weixin.qq.com` |
 | `HITL_PORT` | 服务端口 | `8081` |
-
-也可以 **不设环境变量**，启动后到管理台里手动启用并填凭证。两种方式等价。
 
 ## 管理台
 
-启动后浏览器打开：**http://localhost:8081/console**
+浏览器打开 **http://localhost:8081/console**
 
 - 默认账号 `admin` / 密码 `jarvis2026`（可在环境变量 `ADMIN_USERNAME` / `ADMIN_PASSWORD` 覆盖）。
-- 在「引擎」页面可以：扫码登录 iLink、填写/修改企微 Bot 凭证、查看连接状态、给 bot 发消息激活收件人。
+- 「引擎」页面：扫码登录 iLink、填写/修改企微 Bot 凭证、查看连接状态、给 bot 发消息激活收件人。
 
 ## 验证服务正常
 
 ```bash
-# 健康检查
 curl http://localhost:8081/api/ilink/login_status?bot_key=ilink-bot-1
 ```
 
-返回 `{"status": "..."}` 即说明服务可达（`status` 取决于是否已扫码登录）。
+返回 `{"status": "..."}` 即说明服务可达。
 
 ## 升级
 
+- Homebrew：重新执行上面的 `curl + brew install --formula`（会覆盖旧版本），然后 `brew services restart hitl-server`。
+- deb/rpm：装新版包 `sudo dpkg -i` / `sudo rpm -U`，再 `sudo systemctl restart hitl-server`。
+- tar.gz：重新下载解压覆盖即可。
+
+凭证与日志保留在 `~/.hitl`，升级不丢。
+
+## 从源码构建（可选）
+
+仅当需要自行修改代码或目标平台没有预构建产物时才需要。
+
 ```bash
-cd packages/hitl-server
-git pull
+git clone https://github.com/jeffkit/hitl-mcp.git
+cd hitl-mcp/packages/hitl-server
 uv sync
-# 重启服务
+uv run python -m hitl_server.app
 ```
+
+或一键构建二进制：`bash packaging/build.sh`（依赖 `uv` / `pnpm` / Python ≥ 3.10）。
 
 ## 下一步
 
