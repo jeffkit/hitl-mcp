@@ -57,7 +57,11 @@ jobs:
           pnpm run build
 
       - name: Sync Python deps (core, 无 fly-pigeon)
-        run: uv sync
+        # --locked：要求 uv.lock 与 pyproject.toml 完全一致，否则立即失败。
+        # 不加该标志时，lock 过期会触发重新解析，把内网 extra 包 fly-pigeon
+        # 一并拉取，在公网 CI 上报 "fly-pigeon was not found" 而难以定位。
+        # 改 pyproject 版本后请本地 `uv lock` 再提交。
+        run: uv sync --locked
 
       - name: Install PyInstaller
         run: uv pip install pyinstaller
