@@ -18,66 +18,74 @@
 ## 前置条件
 
 - **Node.js 18+**：用来跑 `npx hitl-mcp`（MCP 端）。
-- **Python 3.10+** 与 **[uv](https://docs.astral.sh/uv/)**：用来跑 `hitl-server`。
-  - 安装 uv：`curl -LsSf https://astral.sh/uv/install.sh | sh`
 - **一个 MCP 客户端**：Cursor / Claude Desktop / Claude Code 任选其一。
-- **macOS 或 Linux**：`hitl-server` 的「一键服务化」目前仅 macOS（launchd），Linux 需自行用 systemd 管理。
+- **macOS 或 Linux**：hitl-server 提供Homebrew / deb / rpm 预构建产物。
 
-## 第 1 步：拿到代码并安装 hitl-server
+> `hitl-server` 是自包含二进制，**不需要** 预装 Python 或 uv。仅在你想从源码构建时才需要它们。
 
-```bash
-git clone https://github.com/jeffkit/hitl-mcp.git
-cd hitl-mcp/packages/hitl-server
+## 第 1 步：安装并启动 hitl-server
 
-# 安装依赖（建一个 .venv）
-uv sync
+hitl-server 有跨平台预构建产物，直接装即可（自包含二进制，无需 Python）。
+
+::: code-group
+
+```bash [macOS Homebrew]
+curl -L -o hitl-server.rb \
+  https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server.rb
+brew install --formula hitl-server.rb
+brew services start hitl-server
 ```
 
-启动服务：
-
-```bash
-uv run python -m hitl_server.app
+```bash [Linux deb]
+# 从 https://github.com/jeffkit/hitl-mcp/releases/latest 下载 deb 后：
+sudo dpkg -i hitl-server_*_amd64.deb
+sudo systemctl enable --now hitl-server
 ```
 
-默认监听 `http://127.0.0.1:8081`，管理台在 `http://localhost:8081/console`。
-
-::: details 想让它常驻后台（macOS）
-iLink 引擎提供了「一键服务化」命令，会把 hitl-server 注册成 launchd 服务（开机自启 + 崩溃自动重启）：
-
-```bash
-npx -y hitl-mcp ilink-setup --service-url http://localhost:8081
+```bash [Linux rpm]
+# 从 https://github.com/jeffkit/hitl-mcp/releases/latest 下载 rpm 后：
+sudo rpm -i hitl-server-*.x86_64.rpm
+sudo systemctl enable --now hitl-server
 ```
 
-详见 [iLink 引擎文档 → 一键安装](../engines/ilink#一键安装推荐)。
+:::
+
+服务起来后监听 `http://127.0.0.1:8081`，管理台在 `http://localhost:8081/console`。iLink 引擎默认已启用。
+
+::: details 没有包管理器？用 tar.gz 二进制
+```bash
+# macOS Apple Silicon
+curl -L https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server-darwin-arm64.tar.gz | tar xz
+ENABLE_ILINK_ENGINE=true ./hitl-server/hitl-server
+# Linux x86_64
+curl -L https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server-linux-x86_64.tar.gz | tar xz
+ENABLE_ILINK_ENGINE=true ./hitl-server/hitl-server
+```
+更多见 [本地安装 hitl-server](./hitl-server)。
 :::
 
 ## 第 2 步：启用一个引擎
 
-二选一（也可以两个都开）。最快的方式是设环境变量后重启 `hitl-server`。
+二选一（也可以两个都开）。brew/systemd 安装已默认启用 iLink 引擎，所以 iLink 只需扫码登录；wecom-aibot 在管理台填凭证即可。
 
 ### 选项 A：微信 ClawBot（iLink）
 
-```bash
-ENABLE_ILINK_ENGINE=true \
-ILINK_BOT_KEY=ilink-bot-1 \
-uv run python -m hitl_server.app
-```
-
-然后打开 `http://localhost:8081/console`，在 iLink 引擎页面 **扫码登录** 微信。
+iLink 引擎默认已启用（`ILINK_BOT_KEY=ilink-bot-1`）。打开 `http://localhost:8081/console`，在 iLink 引擎页面 **扫码登录** 微信即可。
 
 详细步骤见 [微信 ClawBot 引擎](../engines/ilink)。
 
 ### 选项 B：企微 AI 机器人（wecom-aibot）
 
-```bash
-ENABLE_WECOM_AIBOT_ENGINE=true \
-WECOM_AIBOT_BOT_KEY=wecom-aibot-1 \
-WECOM_AIBOT_BOT_ID=你的BotID \
-WECOM_AIBOT_BOT_SECRET=你的BotSecret \
-uv run python -m hitl_server.app
-```
+打开 `http://localhost:8081/console`，在「引擎」页面填写 Bot ID / Bot Secret 并启动。凭证落盘后重启自动恢复。
 
-或在管理台 `http://localhost:8081/console` 里填写 Bot ID / Bot Secret。
+或编辑服务配置用环境变量启用（macOS 改 brew plist / Linux 改 `/etc/systemd/system/hitl-server.service` 后重启服务）：
+
+```
+ENABLE_WECOM_AIBOT_ENGINE=true
+WECOM_AIBOT_BOT_KEY=wecom-aibot-1
+WECOM_AIBOT_BOT_ID=你的BotID
+WECOM_AIBOT_BOT_SECRET=你的BotSecret
+```
 
 详细步骤见 [企微 AI 机器人引擎](../engines/wecom-aibot)。
 

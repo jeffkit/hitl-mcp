@@ -75,7 +75,7 @@ rm -rf ~/.hitl ~/.hil-mcp
 
 ## hitl-server 端口被占用
 
-改端口：`HITL_PORT=8082 uv run python -m hitl_server.app`，并把 MCP 配置里的 `--service-url` 改成对应地址。
+改端口：`HITL_PORT=8082 hitl-server`（或 `HITL_PORT=8082 ./hitl-server/hitl-server` 用 tar.gz 二进制），并把 MCP 配置里的 `--service-url` 改成对应地址。包管理器安装的用户改服务配置（brew plist / systemd unit）后重启服务。
 
 ## 还是不行
 
