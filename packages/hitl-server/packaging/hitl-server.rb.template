@@ -10,7 +10,7 @@ class HitlServer < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/jeffkit/hitl-mcp/releases/download/hitl-server-v__VERSION__/hitl-server-darwin-arm64.tar.gz"
+      url "https://github.com/jeffkit/hitl-mcp/releases/download/hitl-server/v__VERSION__/hitl-server-darwin-arm64.tar.gz"
       sha256 "__ARM64_SHA256__"
     end
     # Intel macOS 暂无预构建 bottle；如需可在本地 packaging/build.sh 自行构建。
