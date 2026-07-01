@@ -23,6 +23,13 @@ export interface Config {
   /** bot_key：ilink/wecom-aibot 走 HITL Server 时的路由键 */
   botKey: string;
 
+  // ── 共享部署模式 ──────────────────────────────────────────────────────────────
+  /** 共享部署模式：HITL Server 部署在服务器端、全员共用一个企微 AI Bot。
+   *  开启后：recipient(chat_id) 必填；请求带 Authorization Bearer。 */
+  shared: boolean;
+  /** 调用 HITL Server /api/* 用的 API Key（Bearer Token） */
+  apiKey: string;
+
   // ── HITL Server 引擎 ─────────────────────────────────────────────────────────
   serviceUrl: string;
   pollInterval: number;
@@ -49,6 +56,8 @@ export function createConfig(opts: Partial<Config>): Config {
     defaultProjectName:   opts.defaultProjectName   ?? '',
     defaultTimeout:       opts.defaultTimeout       ?? 1200,
     botKey:               opts.botKey               ?? '',
+    shared:               opts.shared               ?? false,
+    apiKey:               opts.apiKey               ?? '',
     serviceUrl:           opts.serviceUrl           ?? 'http://localhost:8081',
     pollInterval:         opts.pollInterval         ?? 2,
     wecomBotId:           opts.wecomBotId           ?? '',
