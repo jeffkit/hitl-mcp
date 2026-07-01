@@ -8,7 +8,6 @@ Type=simple
 # 二进制由 deb/rpm 安装到 /opt/hitl-server/hitl-server
 ExecStart=/opt/hitl-server/hitl-server
 Environment=HITL_PORT=8081
-Environment=HITL_MODE=auto
 Environment=ENABLE_ILINK_ENGINE=true
 Environment=ILINK_BOT_KEY=ilink-bot-1
 Environment=ILINK_BASE_URL=https://ilinkai.weixin.qq.com

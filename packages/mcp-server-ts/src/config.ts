@@ -4,19 +4,18 @@
  * 所有配置均通过命令行参数传入（不依赖环境变量）。
  *
  * 引擎选择（--engine）：
- *   auto        → 自动：查询管理台已注册的内置引擎，按 ilink→wecom-aibot→hil 优先级选用（默认）
- *   hil         → 对接 HITL Server（飞鸽传书 relay/direct）
+ *   auto        → 自动：查询管理台已注册的内置引擎，按 ilink→wecom-aibot 优先级选用（默认）
  *   wecom-aibot → 企业微信智能机器人（走 HITL Server 的 wecom-aibot 内置引擎）
  *   ilink       → 微信 ClawBot/iLink（走 HITL Server 的 ilink 内置引擎）
  */
 
-export type EngineType = 'auto' | 'hil' | 'wecom-aibot' | 'ilink';
+export type EngineType = 'auto' | 'wecom-aibot' | 'ilink';
 
 export interface Config {
   engine: EngineType;
 
   // ── 通用 ────────────────────────────────────────────────────────────────────
-  /** 默认收件人：chatid（hil/wecom-aibot）；ilink 引擎自动推断，通常无需设置 */
+  /** 默认收件人：chatid（wecom-aibot）；ilink 引擎自动推断，通常无需设置 */
   defaultRecipient: string;
   defaultProjectName: string;
   /** 等待回复超时（秒） */

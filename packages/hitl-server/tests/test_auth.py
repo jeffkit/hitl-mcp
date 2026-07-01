@@ -11,9 +11,9 @@ class TestJWTAuthentication:
     
     def test_create_token(self):
         """测试创建 JWT Token"""
-        from hitl_server.handlers.admin import create_token
-        
-        with patch('hitl_server.handlers.admin.config') as mock_config:
+        from hitl_server.handlers.auth import create_token
+
+        with patch('hitl_server.handlers.auth.config') as mock_config:
             mock_config.admin_token_secret = "test-secret-key-12345"
             
             token, expires_at = create_token("test_user")
@@ -25,9 +25,9 @@ class TestJWTAuthentication:
     
     def test_verify_token_valid(self):
         """测试验证有效的 Token"""
-        from hitl_server.handlers.admin import create_token, verify_token
-        
-        with patch('hitl_server.handlers.admin.config') as mock_config:
+        from hitl_server.handlers.auth import create_token, verify_token
+
+        with patch('hitl_server.handlers.auth.config') as mock_config:
             mock_config.admin_token_secret = "test-secret-key-12345"
             
             token, _ = create_token("test_user")
@@ -37,9 +37,9 @@ class TestJWTAuthentication:
     
     def test_verify_token_invalid(self):
         """测试验证无效的 Token"""
-        from hitl_server.handlers.admin import verify_token
-        
-        with patch('hitl_server.handlers.admin.config') as mock_config:
+        from hitl_server.handlers.auth import verify_token
+
+        with patch('hitl_server.handlers.auth.config') as mock_config:
             mock_config.admin_token_secret = "test-secret-key-12345"
             
             result = verify_token("invalid-token")
@@ -49,9 +49,9 @@ class TestJWTAuthentication:
     def test_verify_token_expired(self):
         """测试验证过期的 Token"""
         import jwt
-        from hitl_server.handlers.admin import verify_token, JWT_ALGORITHM
-        
-        with patch('hitl_server.handlers.admin.config') as mock_config:
+        from hitl_server.handlers.auth import verify_token, JWT_ALGORITHM
+
+        with patch('hitl_server.handlers.auth.config') as mock_config:
             mock_config.admin_token_secret = "test-secret-key-12345"
             
             # 创建一个已过期的 Token
@@ -91,51 +91,3 @@ class TestPasswordHashing:
         hash2 = hashlib.sha256(password2.encode()).hexdigest()
         
         assert hash1 != hash2
-
-
-class TestForwardRule:
-    """ForwardRule 模型测试"""
-    
-    def test_forward_rule_creation(self):
-        """测试 ForwardRule 创建"""
-        from hitl_server.handlers.forward_client import ForwardRule
-        
-        rule = ForwardRule(
-            chat_id="test-chat",
-            target_url="https://api.example.com/agent",
-            api_key="test-key",
-            timeout=60
-        )
-        
-        assert rule.chat_id == "test-chat"
-        assert rule.target_url == "https://api.example.com/agent"
-        assert rule.api_key == "test-key"
-        assert rule.timeout == 60
-    
-    def test_forward_rule_default_values(self):
-        """测试 ForwardRule 默认值"""
-        from hitl_server.handlers.forward_client import ForwardRule
-        
-        rule = ForwardRule(
-            chat_id="test-chat",
-            target_url="https://api.example.com/agent"
-        )
-        
-        assert rule.api_key == ""
-        assert rule.timeout == 60
-    
-    def test_forward_rule_model_dump(self):
-        """测试 ForwardRule 序列化"""
-        from hitl_server.handlers.forward_client import ForwardRule
-        
-        rule = ForwardRule(
-            chat_id="test-chat",
-            target_url="https://api.example.com/agent",
-            api_key="test-key"
-        )
-        
-        data = rule.model_dump()
-        
-        assert data["chat_id"] == "test-chat"
-        assert data["target_url"] == "https://api.example.com/agent"
-        assert data["api_key"] == "test-key"

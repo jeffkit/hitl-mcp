@@ -3,7 +3,6 @@
  *
  * 工具（按引擎）：
  *   auto        — send_and_wait_reply, send_message_only（启动时按管理台配置解析为下面之一）
- *   hil         — send_and_wait_reply, send_message_only
  *   wecom-aibot — send_and_wait_reply, send_message_only
  *   ilink       — send_and_wait_reply, send_message_only
  *
@@ -20,69 +19,48 @@ import {
   type Tool,
 } from '@modelcontextprotocol/sdk/types.js';
 import { getConfig, type EngineType } from './config.js';
-import { HilEngine } from './engines/hil.js';
 import { WecomAibotEngine } from './engines/wecom-aibot.js';
 import { ILinkEngine } from './engines/ilink.js';
 import type { Engine, SendResult } from './engines/base.js';
-
-function genShortId(): string {
-  return Math.random().toString(16).slice(2, 8);
-}
-
-function formatMessage(text: string, shortId: string, projectName?: string): string {
-  const headerParts = [`[#${shortId}]`];
-  if (projectName) headerParts.push(`[${projectName}]`);
-  return `${headerParts.join(' ')}\n${text}\n\n> 请引用回复此消息`;
-}
-
-function formatMessageOnly(text: string, projectName?: string): string {
-  if (projectName) return `[${projectName}]\n${text}`;
-  return text;
-}
 
 function makeEngine(engineType: EngineType): Engine {
   switch (engineType) {
     case 'wecom-aibot': return new WecomAibotEngine();
     case 'ilink':       return new ILinkEngine();
-    default:            return new HilEngine();
+    default:            throw new Error(`不支持的引擎类型: ${engineType}（auto 应在调用前已解析）`);
   }
 }
 
 /**
  * auto 模式：查询管理台 /admin/api/engines，按 ilink(logged_in) → wecom-aibot(connected)
- * → ilink(已注册) → wecom-aibot(已注册) → hil 的优先级选用通道。
- * 返回具体引擎类型与对应 bot_key（供 /api/send 路由）。
+ * → ilink(已注册) → wecom-aibot(已注册) 的优先级选用通道。
+ * 返回具体引擎类型与对应 bot_key（供 /api/send 路由）。无任何已注册引擎时抛错。
  */
 async function resolveAutoEngine(serviceUrl: string): Promise<{ engineType: EngineType; botKey: string }> {
   const base = serviceUrl.replace(/\/$/, '');
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 5000);
-    const res = await fetch(`${base}/admin/api/engines`, { signal: ctrl.signal });
-    clearTimeout(t);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = (await res.json()) as { engines?: Array<Record<string, any>> };
-    const engines = data.engines ?? [];
-    const find = (type: string, ready: (e: Record<string, any>) => boolean) =>
-      engines.find(e => e.worker_type === type && ready(e));
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 5000);
+  const res = await fetch(`${base}/admin/api/engines`, { signal: ctrl.signal });
+  clearTimeout(t);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = (await res.json()) as { engines?: Array<Record<string, any>> };
+  const engines = data.engines ?? [];
+  const find = (type: string, ready: (e: Record<string, any>) => boolean) =>
+    engines.find(e => e.worker_type === type && ready(e));
 
-    const ilinkReady = find('ilink', e => e.logged_in === true);
-    if (ilinkReady) return { engineType: 'ilink', botKey: String(ilinkReady.bot_key ?? '') };
+  const ilinkReady = find('ilink', e => e.logged_in === true);
+  if (ilinkReady) return { engineType: 'ilink', botKey: String(ilinkReady.bot_key ?? '') };
 
-    const wecomReady = find('wecom-aibot', e => e.connected === true);
-    if (wecomReady) return { engineType: 'wecom-aibot', botKey: String(wecomReady.bot_key ?? '') };
+  const wecomReady = find('wecom-aibot', e => e.connected === true);
+  if (wecomReady) return { engineType: 'wecom-aibot', botKey: String(wecomReady.bot_key ?? '') };
 
-    const ilinkAny = engines.find(e => e.worker_type === 'ilink');
-    if (ilinkAny) return { engineType: 'ilink', botKey: String(ilinkAny.bot_key ?? '') };
+  const ilinkAny = engines.find(e => e.worker_type === 'ilink');
+  if (ilinkAny) return { engineType: 'ilink', botKey: String(ilinkAny.bot_key ?? '') };
 
-    const wecomAny = engines.find(e => e.worker_type === 'wecom-aibot');
-    if (wecomAny) return { engineType: 'wecom-aibot', botKey: String(wecomAny.bot_key ?? '') };
+  const wecomAny = engines.find(e => e.worker_type === 'wecom-aibot');
+  if (wecomAny) return { engineType: 'wecom-aibot', botKey: String(wecomAny.bot_key ?? '') };
 
-    return { engineType: 'hil', botKey: '' };
-  } catch (e) {
-    console.error(`[Server] auto 解析失败（管理台不可达?），回退到 hil: ${e instanceof Error ? e.message : e}`);
-    return { engineType: 'hil', botKey: '' };
-  }
+  throw new Error('管理台无已注册的内置引擎（ilink / wecom-aibot），请先在管理台初始化引擎');
 }
 
 function jsonText(obj: unknown): { content: Array<{ type: string; [k: string]: unknown }> } {
@@ -144,18 +122,13 @@ function buildTools(cfg: ReturnType<typeof getConfig>): Tool[] {
         makeSendOnlyTool('wecom-aibot', '目标 chatid（群聊或私聊）。可选；不指定时使用最近活跃收件人（需先在企微给 bot 发条消息激活）'),
       ];
 
-    default: // hil
-      return [
-        makeSendAndWaitTool('hil', '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值'),
-        makeSendOnlyTool('hil', '目标 chatid（群聊或私聊）。不指定时使用 --chat-id 默认值'),
-      ];
+    default:
+      throw new Error(`不支持的引擎类型: ${cfg.engine}`);
   }
 }
 
 function makeSendAndWaitTool(engine: EngineType, recipientDesc: string): Tool {
-  const initNote = (engine === 'ilink' || engine === 'wecom-aibot')
-    ? '\n若引擎未初始化（未登录/未激活收件人），本工具返回 not_initialized（含管理台链接 init_url），请引导用户打开管理台完成初始化后重试。'
-    : '';
+  const initNote = '\n若引擎未初始化（未登录/未激活收件人），本工具返回 not_initialized（含管理台链接 init_url），请引导用户打开管理台完成初始化后重试。';
   return {
     name: 'send_and_wait_reply',
     description: `发送消息并等待用户回复（引擎: ${engine}）。
@@ -174,10 +147,8 @@ function makeSendAndWaitTool(engine: EngineType, recipientDesc: string): Tool {
 }
 
 function makeSendOnlyTool(engine: EngineType, recipientDesc: string): Tool {
-  const description = (engine === 'ilink' || engine === 'wecom-aibot')
-    ? `仅发送消息，不等待回复（引擎: ${engine}）。适用于通知场景。
-若引擎未初始化，本工具返回 not_initialized（含管理台链接 init_url），请引导用户打开管理台完成初始化后重试。`
-    : `仅发送消息，不等待回复（引擎: ${engine}）。适用于通知场景。`;
+  const description = `仅发送消息，不等待回复（引擎: ${engine}）。适用于通知场景。
+若引擎未初始化，本工具返回 not_initialized（含管理台链接 init_url），请引导用户打开管理台完成初始化后重试。`;
   return {
     name: 'send_message_only',
     description,
@@ -196,7 +167,7 @@ function makeSendOnlyTool(engine: EngineType, recipientDesc: string): Tool {
 export async function startServer(): Promise<void> {
   const cfg = getConfig();
 
-  // auto 模式：启动时查管理台，按 ilink→wecom-aibot→hil 优先级解析出具体引擎与 bot_key
+  // auto 模式：启动时查管理台，按 ilink→wecom-aibot 优先级解析出具体引擎与 bot_key
   if (cfg.engine === 'auto') {
     const resolved = await resolveAutoEngine(cfg.serviceUrl);
     cfg.engine = resolved.engineType;
@@ -232,20 +203,9 @@ export async function startServer(): Promise<void> {
         const recipient = String(a.recipient ?? cfg.defaultRecipient);
         const projectName = a.project_name ? String(a.project_name) : cfg.defaultProjectName || undefined;
 
-        if (!recipient && cfg.engine === 'hil') {
-          return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
-        }
-
-        // hil / ilink / wecom-aibot 引擎：shortId/头部/「请回复」全部由 HITL Server 端 (Python) 统一处理，
+        // ilink / wecom-aibot 引擎：shortId/头部/「请回复」全部由 HITL Server 端 (Python) 统一处理，
         // TS 端不生成 shortId、不格式化、也不传 shortId，避免重复添加。
-        if (cfg.engine === 'hil' || cfg.engine === 'ilink' || cfg.engine === 'wecom-aibot') {
-          const result = await engine.sendAndWait(recipient, message, cfg.defaultTimeout, projectName);
-          return resultToContent(result);
-        }
-
-        const shortId = genShortId();
-        const text = formatMessage(message, shortId, projectName);
-        const result = await engine.sendAndWait(recipient, text, cfg.defaultTimeout, projectName, shortId);
+        const result = await engine.sendAndWait(recipient, message, cfg.defaultTimeout, projectName);
         return resultToContent(result);
       }
 
@@ -254,15 +214,8 @@ export async function startServer(): Promise<void> {
         const recipient = String(a.recipient ?? cfg.defaultRecipient);
         const projectName = a.project_name ? String(a.project_name) : cfg.defaultProjectName || undefined;
 
-        if (!recipient && cfg.engine === 'hil') {
-          return jsonText({ status: 'error', message: '必须指定 recipient 或通过 --chat-id 设置默认值' });
-        }
-
-        // 同上：hil / ilink / wecom-aibot 引擎跳过 TS 端格式化，由 HITL Server 端统一处理。
-        const text = (cfg.engine === 'hil' || cfg.engine === 'ilink' || cfg.engine === 'wecom-aibot')
-          ? message
-          : formatMessageOnly(message, projectName);
-        const result = await engine.sendOnly(recipient, text, projectName);
+        // 同上：由 HITL Server 端统一处理消息头。
+        const result = await engine.sendOnly(recipient, message, projectName);
         return resultToContent(result);
       }
 

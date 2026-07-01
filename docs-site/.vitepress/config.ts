@@ -57,6 +57,12 @@ export default defineConfig({
             { text: '常见问题', link: '/guide/faq' },
           ],
         },
+        {
+          text: '使用方法',
+          items: [
+            { text: '让 AI 边做边问你（with-feedback）', link: '/guide/usage' },
+          ],
+        },
       ],
       '/engines/': [
         {

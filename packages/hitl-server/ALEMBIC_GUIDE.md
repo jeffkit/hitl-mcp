@@ -304,7 +304,6 @@ alembic upgrade head
 - [Alembic 官方文档](https://alembic.sqlalchemy.org/)
 - [SQLAlchemy 文档](https://docs.sqlalchemy.org/)
 - 项目主文档: `CLAUDE.md`
-- Forward Service 迁移指南: `packages/forward-service/ALEMBIC_GUIDE.md`
 
 ## 迁移历史
 

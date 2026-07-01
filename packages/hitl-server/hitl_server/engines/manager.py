@@ -2,8 +2,7 @@
 
 - 持有按配置启用的引擎实例，按 worker_type / bot_key 索引
 - app.py lifespan 调 start_all/stop_all
-- /api/send 与 /api/ilink/* 路由通过它查找内置引擎；命中则进程内调用，
-  未命中则回退到 WS 外部 worker（ws_manager）
+- /api/send 与 /api/ilink/* 路由通过它查找内置引擎；命中则进程内调用。
 """
 import logging
 from typing import Optional

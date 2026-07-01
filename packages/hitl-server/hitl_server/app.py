@@ -17,9 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
 from .config import config
-from .ws_manager import ws_manager
 from .storage import storage
-from .handlers import api_router, ws_router, admin_router
+from .handlers import api_router, admin_router
 
 # 配置日志
 logging.basicConfig(
@@ -30,33 +29,23 @@ logger = logging.getLogger(__name__)
 
 
 async def heartbeat_task():
-    """心跳任务"""
+    """定期清理过期会话与文件"""
     while True:
         try:
             await asyncio.sleep(config.heartbeat_interval)
-            await ws_manager.broadcast_ping()
-            await ws_manager.check_heartbeat()
             await storage.cleanup_expired()
         except asyncio.CancelledError:
             break
         except Exception as e:
-            logger.error(f"心跳任务错误: {e}", exc_info=True)
+            logger.error(f"清理任务错误: {e}", exc_info=True)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    mode = config.effective_mode
     logger.info(f"HITL Server 启动")
     logger.info(f"  端口: {config.port}")
-    logger.info(f"  模式: {mode}")
-    
-    if mode == "direct":
-        logger.info(f"  [Direct 模式] 直接调用 fly-pigeon")
-        logger.info(f"  回调地址: http://localhost:{config.port}/api/callback")
-    else:
-        logger.info(f"  [Relay 模式] 等待 Worker 连接")
-    
+
     # 初始化数据库（如果启用）
     from .storage import USE_DATABASE
     if USE_DATABASE:
@@ -65,8 +54,8 @@ async def lifespan(app: FastAPI):
         logger.info("  [数据库模式] 数据库初始化完成")
     else:
         logger.info("  [内存模式] 会话存储在内存中")
-    
-    # 启动心跳任务（Relay 模式需要）
+
+    # 启动定期清理任务
     task = asyncio.create_task(heartbeat_task())
     
     # 启动内置引擎（in-process，启用时维持长连接，消息直接进 storage）
@@ -127,7 +116,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # 停止心跳任务
+    # 停止清理任务
     task.cancel()
     try:
         await task
@@ -153,7 +142,7 @@ async def lifespan(app: FastAPI):
 # 注意：docs_url 设为 None，因为 /docs 被自定义路由使用（返回网页文档）
 app = FastAPI(
     title="HITL Server",
-    description="Human-in-the-Loop Server - 支持 Relay 和 Direct 两种模式",
+    description="Human-in-the-Loop Server - 内置 ilink + wecom-aibot 引擎",
     version="2.1.3",
     lifespan=lifespan,
     docs_url=None,
@@ -162,7 +151,6 @@ app = FastAPI(
 
 # 注册路由
 app.include_router(api_router)
-app.include_router(ws_router)
 app.include_router(admin_router)
 
 # 查找仓库根目录（兼容不同部署结构）
@@ -211,17 +199,12 @@ async def root():
         return FileResponse(str(index_file))
     
     # 如果首页不存在，返回 API 信息
-    mode = config.effective_mode
     result = {
         "service": "HITL Server",
         "version": "2.1.3",
         "status": "running",
-        "mode": mode,
     }
-    
-    if mode == "relay":
-        result["worker_connected"] = ws_manager.has_worker
-    
+
     return result
 
 
@@ -253,17 +236,9 @@ async def docs_page():
 @app.get("/health")
 async def health():
     """健康检查"""
-    mode = config.effective_mode
-    result = {
+    return {
         "status": "healthy",
-        "mode": mode,
     }
-    
-    if mode == "relay":
-        result["worker_connected"] = ws_manager.has_worker
-        result["worker_count"] = len(ws_manager._workers)
-    
-    return result
 
 
 if __name__ == "__main__":

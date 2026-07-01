@@ -1,8 +1,8 @@
 /**
  * 微信 iLink 引擎（HTTP 客户端版，走 HITL Server）
  *
- * 本引擎不持有任何长连接——iLink 长轮询由独立的 ilink-worker 常驻进程维持，
- * 并通过 HITL Server 注册为上游。本引擎只做：
+ * 本引擎不持有任何长连接——iLink 长轮询由 HITL Server 的内置 ilink 引擎
+ * 在进程内维持。本引擎只做：
  *   - 调 HITL Server 的 /api/send + /api/poll 完成发消息与等回复
  *   - 调 /api/ilink/qr + /api/ilink/login_status 完成扫码登录流程（方案 B）
  *   - 调 /api/ilink/activated_users 列出已激活用户
