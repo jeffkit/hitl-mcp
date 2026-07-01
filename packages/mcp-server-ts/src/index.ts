@@ -70,6 +70,10 @@ program
   .option('--project-name <name>','默认项目名称')
   .option('--timeout <seconds>',  '等待回复超时（秒，默认 1200）', parseInt)
 
+  // ── 共享部署模式（HITL Server 部署在服务器端，全员共用一个企微 AI Bot）────────
+  .option('--shared',             '共享部署模式：recipient(chat_id) 必填，请求带 API Key 鉴权')
+  .option('--api-key <key>',      'HITL Server 的 API Key（共享模式下必填，作为 Authorization Bearer）')
+
   // ── HITL Server 地址 ─────────────────────────────────────────────────────
   .option('--service-url <url>',  'HITL Server 地址（内置引擎走 /api/send、/api/poll 等）')
 
@@ -104,6 +108,8 @@ program
       defaultProjectName: opts.projectName ?? '',
       defaultTimeout:     opts.timeout,
       botKey:             opts.botKey ?? '',
+      shared:             !!opts.shared,
+      apiKey:             opts.apiKey ?? '',
       // HIL Server
       serviceUrl:         opts.serviceUrl,
       // WeCom AI Bot

@@ -107,6 +107,36 @@ class HITLConfig(BaseSettings):
         description="企微 AI Bot 凭证存储路径（默认 ~/.hil-mcp/wecom_aibot_store.json），重启后据此自动注册",
     )
 
+    # ========== 共享部署模式（一个企微 AI Bot 服务全员）==========
+    shared_mode: bool = Field(
+        default=False,
+        alias="HITL_SHARED_MODE",
+        description=(
+            "共享部署模式：HITL Server 部署在服务器端，全公司共用一个企微 AI Bot。"
+            "开启后：1) /api/* 强制鉴权（需配 HITL_API_KEY 或 HITL_API_TOKENS）；"
+            "2) wecom-aibot 引擎不再回退到全局最近活跃收件人，chat_id 为空直接拒绝；"
+            "3) 用户首次给 bot 发消息时自动回告其 chat_id，便于自助配置。"
+        ),
+    )
+    api_key: str = Field(
+        default="",
+        alias="HITL_API_KEY",
+        description=(
+            "MCP→Server 调用用的单一 API Key（Bearer Token）。"
+            "适用于单租户/可信部署：持有该 key 可对任意 chat_id 发消息。"
+            "多租户请改用 HITL_API_TOKENS 做 chat_id 白名单绑定。"
+        ),
+    )
+    api_tokens: str = Field(
+        default="",
+        alias="HITL_API_TOKENS",
+        description=(
+            '多租户 API Token 映射，JSON 字符串：{"<token>": ["<chat_id>", ...]}。'
+            "白名单为空数组表示该 token 不限制 chat_id。"
+            "与 HITL_API_KEY 二选一或并存；tokens 优先于 api_key。"
+        ),
+    )
+
     # ========== 管理台认证配置 ==========
     admin_username: str = Field(
         default="admin",

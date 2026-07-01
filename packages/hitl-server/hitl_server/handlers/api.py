@@ -5,11 +5,12 @@ HTTP API 处理器
 消息收发由内置引擎（ilink / wecom-aibot）在进程内完成。
 """
 import logging
-from fastapi import APIRouter, UploadFile, File, Query
+from fastapi import APIRouter, Depends, UploadFile, File, Query
 from pydantic import BaseModel
 
 from ..config import config
 from ..storage import storage
+from .auth import require_api_token, ensure_chat_id_allowed
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["API"])
@@ -70,8 +71,18 @@ async def health_check():
 
 
 @router.post("/send", response_model=SendMessageResponse)
-async def send_message(request: SendMessageRequest):
+async def send_message(request: SendMessageRequest, allowed_chat_ids: list[str] | None = Depends(require_api_token)):
     """发送消息——命中内置引擎则进程内调用，否则报引擎未启动。"""
+    # 共享模式：必须显式指定 chat_id，禁止回退到全局最近活跃收件人（防隐私泄漏）
+    if config.shared_mode and not request.chat_id:
+        return SendMessageResponse(
+            success=False,
+            error="shared_mode_missing_chat_id: 共享部署模式下必须指定 chat_id，请在 MCP 侧配置 --chat-id"
+        )
+
+    # chat_id 白名单校验（多租户 token 绑定）——先于引擎状态判断，确保越权请求一律 403
+    ensure_chat_id_allowed(allowed_chat_ids, request.chat_id or "")
+
     from ..engines import engine_manager
     _engine = engine_manager.get_by_bot_key(request.bot_key or "") or (
         engine_manager.get_by_type(request.upstream) if request.upstream else None
@@ -164,7 +175,7 @@ async def send_message(request: SendMessageRequest):
 
 
 @router.get("/poll/{session_id}", response_model=PollResponse)
-async def poll_replies(session_id: str):
+async def poll_replies(session_id: str, _allowed: list[str] | None = Depends(require_api_token)):
     """轮询获取用户回复"""
     session = await storage.get_session(session_id)
 
@@ -189,14 +200,14 @@ async def poll_replies(session_id: str):
 
 
 @router.post("/session/{session_id}/timeout")
-async def mark_session_timeout(session_id: str):
+async def mark_session_timeout(session_id: str, _allowed: list[str] | None = Depends(require_api_token)):
     """标记会话超时"""
     success = await storage.mark_timeout(session_id)
     return {"success": success}
 
 
 @router.post("/upload-image", response_model=UploadImageResponse)
-async def upload_image(file: UploadFile = File(...)):
+async def upload_image(file: UploadFile = File(...), _allowed: list[str] | None = Depends(require_api_token)):
     """上传图片——转换为 data URL 供消息内嵌。"""
     try:
         content = await file.read()
@@ -275,11 +286,15 @@ class WecomAibotStartRequest(BaseModel):
 
 
 @router.post("/engines/wecom-aibot/start")
-async def engines_wecom_aibot_start(request: WecomAibotStartRequest):
+async def engines_wecom_aibot_start(request: WecomAibotStartRequest, _allowed: list[str] | None = Depends(require_api_token)):
     """运行时启动企微 AI Bot 内置引擎（无需重启 HITL Server）。
 
     由 MCP 端在启动时调用，把用户在 Cursor 配置里填的 bot_id/bot_secret 注册到后端。
     幂等：同 bot_key 同凭证已运行则 no-op；凭证变化则停旧起新。
+
+    共享部署模式下：凭证由运维在服务端/管理台统一持有，普通用户 MCP 不应带
+    bot_id/bot_secret，因此不会触发本接口；同时本接口受 API Token 鉴权保护，
+    避免任意人用凭证覆盖服务端引擎（导致 WS 互踢）。
     """
     from ..engines import engine_manager, WecomAibotEngine
     if not request.bot_id or not request.bot_secret:
@@ -308,6 +323,7 @@ async def engines_wecom_aibot_start(request: WecomAibotStartRequest):
         ws_url=config.wecom_aibot_ws_url,
         heartbeat_interval=config.wecom_aibot_heartbeat_interval,
         reconnect_delay=config.wecom_aibot_reconnect_delay,
+        shared_mode=config.shared_mode,
     )
     engine.on_user_message = storage.handle_callback
     engine_manager.register(engine)

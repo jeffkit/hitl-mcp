@@ -20,8 +20,12 @@ function baseUrl(): string {
 }
 
 async function apiFetch(path: string, init?: RequestInit): Promise<Record<string, any>> {
+  const cfg = getConfig();
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (cfg.apiKey) headers['Authorization'] = `Bearer ${cfg.apiKey}`;
   const res = await fetch(`${baseUrl()}${path}`, {
     ...init,
+    headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) },
     signal: AbortSignal.timeout(30_000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
@@ -36,10 +40,27 @@ function notInitialized(reason: string): SendResult {
   };
 }
 
+/** 共享模式下 recipient(chat_id) 为空 → 直接报错，不发请求。 */
+function missingChatId(): SendResult {
+  return {
+    status: 'error',
+    message:
+      '共享部署模式（--shared）下必须指定 chat_id：请在 MCP 配置里加 --chat-id <你的chat_id>。' +
+      '首次使用时，在企业微信给 bot 发一条消息，bot 会自动回复你的 chat_id。',
+  };
+}
+
 export class WecomAibotEngine implements Engine {
   async start(): Promise<void> {
     const cfg = getConfig();
     const botKey = cfg.botKey || 'wecom-aibot-1';
+    // 共享模式：凭证由运维在服务端统一持有，普通用户不应带 --bot-id/--bot-secret。
+    if (cfg.shared && (cfg.wecomBotId || cfg.wecomBotSecret)) {
+      console.error(
+        `[WecomAibot] 共享模式(--shared)下不应携带 --bot-id/--bot-secret（凭证由服务端统一持有），忽略本地凭证。`
+      );
+      return;
+    }
     // 凭证可选：若提供则在此自动注册到 HITL Server（兜底）；未提供时假定已通过管理台配置。
     if (!cfg.wecomBotId || !cfg.wecomBotSecret) {
       console.error(`[WecomAibot] 未带 --bot-id/--bot-secret，跳过自动注册（假定已在管理台配置 bot_key=${botKey}）`);
@@ -72,6 +93,7 @@ export class WecomAibotEngine implements Engine {
     _shortId?: string,
   ): Promise<SendResult> {
     const cfg = getConfig();
+    if (cfg.shared && !recipient) return missingChatId();
 
     const sendResult: Record<string, any> = await apiFetch('/api/send', {
       method: 'POST',
@@ -91,6 +113,12 @@ export class WecomAibotEngine implements Engine {
       if (err.includes('engine_not_started') || err.includes('尚无已知收件人')) {
         return notInitialized(err);
       }
+      if (err.includes('HTTP 401')) {
+        return { status: 'error', message: 'HITL Server 鉴权失败（401）：请检查 MCP 配置的 --api-key 是否正确。' };
+      }
+      if (err.includes('HTTP 403')) {
+        return { status: 'error', message: '该 API Key 无权向此 chat_id 发消息（403）：请确认 --chat-id 与 --api-key 的绑定关系。' };
+      }
       return { status: 'error', message: `发送失败: ${err}` };
     }
 
@@ -108,6 +136,7 @@ export class WecomAibotEngine implements Engine {
     _projectName?: string,
   ): Promise<SendResult> {
     const cfg = getConfig();
+    if (cfg.shared && !recipient) return missingChatId();
 
     const sendResult: Record<string, any> = await apiFetch('/api/send', {
       method: 'POST',
@@ -125,6 +154,12 @@ export class WecomAibotEngine implements Engine {
       const err = String(sendResult.error ?? '未知错误');
       if (err.includes('engine_not_started') || err.includes('尚无已知收件人')) {
         return notInitialized(err);
+      }
+      if (err.includes('HTTP 401')) {
+        return { status: 'error', message: 'HITL Server 鉴权失败（401）：请检查 MCP 配置的 --api-key 是否正确。' };
+      }
+      if (err.includes('HTTP 403')) {
+        return { status: 'error', message: '该 API Key 无权向此 chat_id 发消息（403）：请确认 --chat-id 与 --api-key 的绑定关系。' };
       }
       return { status: 'error', message: `发送失败: ${err}` };
     }

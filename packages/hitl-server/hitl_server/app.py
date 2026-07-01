@@ -100,6 +100,7 @@ async def lifespan(app: FastAPI):
             ws_url=config.wecom_aibot_ws_url,
             heartbeat_interval=config.wecom_aibot_heartbeat_interval,
             reconnect_delay=config.wecom_aibot_reconnect_delay,
+            shared_mode=config.shared_mode,
         )
         wecom_engine.on_user_message = storage.handle_callback
         engine_manager.register(wecom_engine)

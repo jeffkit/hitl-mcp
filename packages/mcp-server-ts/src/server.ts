@@ -116,11 +116,15 @@ function buildTools(cfg: ReturnType<typeof getConfig>): Tool[] {
         makeSendOnlyTool('ilink', '目标微信用户 ID。通常留空——有且仅有一个激活用户时自动选择'),
       ];
 
-    case 'wecom-aibot':
+    case 'wecom-aibot': {
+      const recipientDesc = cfg.shared
+        ? '目标 chatid（必填）。共享模式下必须指定；首次使用时在企微给 bot 发消息即可获得自己的 chat_id'
+        : '目标 chatid（群聊或私聊）。可选；不指定时使用最近活跃收件人（需先在企微给 bot 发条消息激活）';
       return [
-        makeSendAndWaitTool('wecom-aibot', '目标 chatid（群聊或私聊）。可选；不指定时使用最近活跃收件人（需先在企微给 bot 发条消息激活）'),
-        makeSendOnlyTool('wecom-aibot', '目标 chatid（群聊或私聊）。可选；不指定时使用最近活跃收件人（需先在企微给 bot 发条消息激活）'),
+        makeSendAndWaitTool('wecom-aibot', recipientDesc),
+        makeSendOnlyTool('wecom-aibot', recipientDesc),
       ];
+    }
 
     default:
       throw new Error(`不支持的引擎类型: ${cfg.engine}`);
@@ -176,6 +180,16 @@ export async function startServer(): Promise<void> {
   }
 
   const engine = makeEngine(cfg.engine);
+
+  // 共享模式前置校验：必须有 api_key；并提醒 auto 模式在共享部署下可能误选 ilink
+  if (cfg.shared) {
+    if (!cfg.apiKey) {
+      console.error('[Server] 共享模式(--shared)下必须配置 --api-key，否则 /api/* 会被服务端 401 拒绝');
+    }
+    if (cfg.engine === 'auto') {
+      console.error('[Server] 提示：共享部署建议显式 --engine wecom-aibot，避免 auto 误选 ilink（管理员个人通道）');
+    }
+  }
 
   const server = new Server(
     { name: 'hitl-mcp', version: '0.3.0' },
@@ -234,6 +248,8 @@ export async function startServer(): Promise<void> {
 
   console.error('[Server] hitl-mcp 已启动');
   console.error(`[Server]   引擎: ${cfg.engine}`);
+  console.error(`[Server]   共享模式: ${cfg.shared ? '开启' : '关闭'}`);
+  console.error(`[Server]   API Key: ${cfg.apiKey ? '已配置' : '(未配置)'}`);
   console.error(`[Server]   默认收件人: ${cfg.defaultRecipient || '(未设置)'}`);
   console.error(`[Server]   默认项目名: ${cfg.defaultProjectName || '(未设置)'}`);
   console.error(`[Server]   超时: ${cfg.defaultTimeout}s`);
