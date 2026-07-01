@@ -31,7 +31,7 @@ class BaseEngine(ABC):
         """处理 /api/send 下行的 send_message 请求。
 
         Args:
-            payload: 与 WS worker 协议一致的 send_message payload，含
+            payload: /api/send 下行的 send_message payload，含
                 short_id / message / chat_id / project_name / wait_reply 等。
 
         Returns:

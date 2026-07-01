@@ -30,7 +30,7 @@ Agent 会自动按下面的流程引导你完成。
 - **一次只问一个问题**，等用户确认后再进入下一步。
 - 涉及写文件、改配置、起服务前，先简要说明要做什么、为什么。
 - 遇到失败优先按本文档的「排查」小节处理，不要直接放弃。
-- 不要提及 hil / pigeon / fly-pigeon 引擎——本 Skill 只覆盖 iLink 与 wecom-aibot。
+- 不要提及已移除的 hil / pigeon / fly-pigeon 引擎——本 Skill 只覆盖 iLink 与 wecom-aibot。
 
 ## 1. 确认引擎
 

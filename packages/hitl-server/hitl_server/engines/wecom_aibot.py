@@ -98,7 +98,7 @@ def _gen_req_id() -> str:
 def _format_message_with_header(
     message: str, short_id: str, project_name: Optional[str], wait_reply: bool
 ) -> str:
-    """企微 AI Bot 支持 markdown。与 devcloud-worker/hil 一致的头 + 引导回复。"""
+    """企微 AI Bot 支持 markdown。与 ilink 一致的头 + 引导回复。"""
     parts: list[str] = []
     if short_id:
         parts.append(f"[#{short_id} {project_name}]" if project_name else f"[#{short_id}]")

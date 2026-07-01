@@ -159,6 +159,7 @@ WECOM_AIBOT_BOT_SECRET=你的BotSecret
 
 ## 下一步
 
+- [使用方法：让 AI 边做边问你](./usage) — 用 Cursor 的 `with-feedback` 命令跑通「人在回路」闭环。
 - [MCP 工具说明](./tools) — `send_and_wait_reply` / `send_message_only` 的参数与返回。
 - [常见问题](./faq) — 收不到消息、502、npx 慢怎么办。
 - 深入某个引擎：[iLink](../engines/ilink) / [wecom-aibot](../engines/wecom-aibot)

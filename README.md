@@ -1,992 +1,140 @@
-# Human-in-the-Loop MCP for WeCom (企业微信)
+# hitl-mcp — Human-in-the-Loop MCP
 
-让 AI Agent 能够发送消息到企业微信并等待用户回复的 MCP 服务。
+让 AI Agent 在执行关键操作前，先通过微信 / 企业微信向你确认。
+
+AI 把「需要人确认」的请求发给 hitl-server，hitl-server 把消息推到你的手机（微信 ClawBot 或企微 AI 机器人），你回复后 AI 拿到结果继续执行。整个链路本地运行，无需公网服务器。
+
+```
+┌──────────┐  MCP(stdio)  ┌──────────┐  HTTP   ┌────────────┐  长连接   ┌──────────┐
+│ AI Agent │ ───────────▶ │ hitl-mcp │ ──────▶ │ hitl-server│ ────────▶ │ 你的手机 │
+│ Cursor   │ ◀─────────── │  (npx)   │ ◀────── │  :8081     │ ◀──────── │ 微信/企微 │
+└──────────┘              └──────────┘         └────────────┘           └──────────┘
+```
 
 ## 项目结构
 
 ```
-hil-mcp/
-├── packages/                    # 核心服务（Monorepo）
-│   ├── hitl-server/              # HITL 服务器（腾讯内网 / 自托管）
-│   ├── devcloud-worker/         # DevCloud Worker（腾讯飞鸽传书）
-│   ├── mcp-server-py/           # MCP Server - Python（对接 HITL Server）
-│   ├── mcp-server-ts/           # MCP Server - TypeScript（对接 HITL Server）
-│   ├── mcp-server-wecom-aibot/  # MCP Server - 企业微信智能机器人（独立，无需 HITL Server）
-│   └── mcp-server-ilink/        # MCP Server - 微信 ClawBot/iLink（独立，无需 HITL Server）
-├── docs/                        # 项目文档
-└── scripts/                     # 部署和工具脚本
+hitl-mcp/
+├── packages/
+│   ├── hitl-server/     # 本地后端（FastAPI + 内置引擎 + React 管理台）
+│   ├── mcp-server-py/   # MCP 客户端（Python 版，uvx hil-mcp）
+│   └── mcp-server-ts/   # MCP 客户端（TypeScript 版，npx hitl-mcp）
+├── docs/                # 设计文档
+├── docs-site/           # 用户文档站点源码
+└── scripts/             # 辅助脚本
 ```
 
-## 渠道选择指南
+## 两个引擎
 
-| 包 | 适用场景 | 需要 HITL Server | 是否需要公网 IP |
-|----|---------|----------------|---------------|
-| `mcp-server-py` / `mcp-server-ts` | 腾讯内部或自托管企业微信 | ✅ 需要 | 视部署而定 |
-| `mcp-server-wecom-aibot` | 任意企业的企业微信智能机器人 | ❌ 不需要 | ❌ 不需要 |
-| `mcp-server-ilink` | 个人微信（ClawBot）| ❌ 不需要 | ❌ 不需要 |
+两个引擎架构对等，可同时启用，互不干扰。MCP 端用 `--engine` 指定，或 `--engine auto` 按管理台状态自动选用。
 
-## 功能特性
+| | ilink 引擎 | wecom-aibot 引擎 |
+|---|---|---|
+| 通道 | 个人微信（ClawBot） | 企业微信 AI 机器人 |
+| 连接方式 | iLink 长轮询 | 企微 WebSocket |
+| 鉴权 | 微信扫码登录 | Bot ID + Bot Secret |
+| 收件人 | 给 ClawBot 发过消息的微信用户 | 企微里的群 / 用户 |
+| 启用 | `ENABLE_ILINK_ENGINE=true` | 管理台填凭证或 `ENABLE_WECOM_AIBOT_ENGINE=true` |
 
-- 🚀 **发送消息到企微群聊/私聊**
-- ⏳ **等待用户回复并返回结果**
-- 🎯 **引用回复匹配** - 通过 `[#short_id]` 精确匹配多个并发会话
-- 💬 **多会话冲突检测** - 自动提示用户使用引用回复
-- ⏰ **20分钟默认超时**
-- 📋 **自动回复 chat_id** - 方便用户获取配置信息
-- ⚙️ **空闲提示配置** - JSON 配置文件 + 热更新 + 管理台可视化配置
-- ⚡ **一键安装** - 通过 `uvx` 或 `pipx` 无需预先安装
-- 🌐 **双模式支持** - Relay 中转模式（公网）和 Direct 直连模式（内网）
+## 快速开始
 
----
+### 1. 安装并启动 hitl-server
 
-## 架构说明
+::: tip 详见 [本地安装 hitl-server](./docs-site/guide/hitl-server.md)
+:::
 
-本项目的 Relay Server 支持两种运行模式：
-
-### 模式一：Relay 模式（公网部署）
-
-当 HITL Server 部署在公网时，通过 WebSocket 连接内网的 Worker 来调用飞鸽 API。
-
-```
-┌─────────────────┐      HTTPS       ┌─────────────────┐
-│   MCP Server    │ ────────────────▶│   HITL Server    │
-│ (本地 AI Agent)  │ ◀────────────────│   (公网服务器)   │
-└─────────────────┘                  └────────┬────────┘
-                                              │ WebSocket
-                                              │ (Worker 主动连接)
-                                     ┌────────▼────────┐
-                                     │ DevCloud Worker │
-                                     │  (内网/DevCloud) │
-                                     └────────┬────────┘
-                                              │ fly-pigeon
-                                              ▼
-                                     ┌─────────────────┐
-                                     │    企业微信      │
-                                     └─────────────────┘
-```
-
-**适用场景：**
-- MCP Server 运行在公网（如个人电脑）
-- 飞鸽 API 只能在内网访问
-- 需要穿透内网限制
-
-### 模式二：Direct 模式（内网部署）
-
-当 HITL Server 部署在内网时，可以直接调用飞鸽 API，无需 Worker。
-
-```
-┌─────────────────┐      HTTP       ┌─────────────────┐     fly-pigeon    ┌─────────────────┐
-│   MCP Server    │ ───────────────▶│   HITL Server    │ ─────────────────▶│   企业微信       │
-│  (内网 Agent)    │ ◀───────────────│   (内网部署)     │ ◀─────────────────│   (飞鸽传书)     │
-└─────────────────┘                 └─────────────────┘      回调          └─────────────────┘
-```
-
-**适用场景：**
-- MCP Server 和 HITL Server 都在内网
-- 可以直接访问飞鸽 API
-- 简化部署，无需 Worker
-
-### 模式自动切换
-
-HITL Server 通过配置自动选择模式：
-
-| 条件 | 模式 |
-|------|------|
-| 配置了 `BOT_KEY` | Direct 模式 |
-| 未配置 `BOT_KEY` | Relay 模式 |
-| `HIL_MODE=direct` | 强制 Direct 模式 |
-| `HIL_MODE=relay` | 强制 Relay 模式 |
-
----
-
-## 快速开始（MCP 客户端配置）
-
-本项目提供了 **Python 版**和 **TypeScript 版**两种实现，功能完全一致，可根据环境选择：
-
-| 版本 | 推荐场景 | 安装方式 |
-|------|---------|---------|
-| **Python 版** | Python 环境友好，uvx 一键运行 | `uvx hil-mcp` |
-| **TypeScript 版** | Node.js 环境友好，npx 一键运行 | `npx @hitl/mcp-server` |
-
----
-
-### Python 版
-
-#### 方式一：使用 uvx（推荐）
-
-> `uvx` 是 Python 生态中的 `npx`，无需预先安装包，直接运行。
-
-在 Cursor 的 MCP 配置文件中添加（`~/.cursor/mcp.json`）：
-
-```json
-{
-  "mcpServers": {
-    "wecom-hil": {
-      "command": "uvx",
-      "args": [
-        "hil-mcp",
-        "--service-url", "http://hitl.woa.com/api",
-        "--chat-id", "your-chat-id",
-        "--project-name", "my-project"
-      ],
-      "env": {
-        "http_proxy": "",
-        "https_proxy": "",
-        "all_proxy": ""
-      }
-    }
-  }
-}
-```
-
-#### 方式二：使用 pipx
-
-```json
-{
-  "mcpServers": {
-    "wecom-hil": {
-      "command": "pipx",
-      "args": [
-        "run",
-        "hil-mcp",
-        "--service-url", "http://hitl.woa.com/api",
-        "--chat-id", "your-chat-id"
-      ],
-      "env": {
-        "http_proxy": "",
-        "https_proxy": "",
-        "all_proxy": ""
-      }
-    }
-  }
-}
-```
-
-#### 方式三：传统方式（pip install）
+macOS（Homebrew，已默认启用 iLink 引擎）：
 
 ```bash
-pip install hil-mcp
+curl -L -o hitl-server.rb \
+  https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server.rb
+brew install --formula hitl-server.rb
+brew services start hitl-server
 ```
 
-然后配置：
+Linux（deb / rpm）见 [Releases](https://github.com/jeffkit/hitl-mcp/releases/latest)。无包管理器时用 tar.gz 二进制：
+
+```bash
+curl -L https://github.com/jeffkit/hitl-mcp/releases/latest/download/hitl-server-darwin-arm64.tar.gz | tar xz
+ENABLE_ILINK_ENGINE=true ./hitl-server/hitl-server
+```
+
+服务起来后监听 `http://127.0.0.1:8081`，管理台在 `http://localhost:8081/console`。
+
+### 2. 启用引擎
+
+打开管理台 `http://localhost:8081/console`：
+
+- **iLink**：在引擎页面扫码登录微信，然后给 ClawBot 发一条消息激活收件人。
+- **wecom-aibot**：填写 Bot ID / Bot Secret 并启动，然后在企微给 bot 发一条消息激活收件人。
+
+凭证落盘后重启自动恢复。详见 [iLink 引擎](./docs-site/engines/ilink.md) / [企微 AI 机器人引擎](./docs-site/engines/wecom-aibot.md)。
+
+### 3. 配置 MCP 客户端
+
+以 Cursor 为例，编辑 `~/.cursor/mcp.json`：
 
 ```json
 {
   "mcpServers": {
-    "wecom-hil": {
-      "command": "hil-mcp",
-      "args": [
-        "--service-url", "http://hitl.woa.com/api",
-        "--chat-id", "your-chat-id"
-      ],
-      "env": {
-        "http_proxy": "",
-        "https_proxy": "",
-        "all_proxy": ""
-      }
-    }
-  }
-}
-```
-
----
-
-### TypeScript 版
-
-#### 方式一：使用 npx（推荐）
-
-> 无需预先安装，直接运行。适合 Node.js 环境。
-
-在 Cursor 的 MCP 配置文件中添加（`~/.cursor/mcp.json`）：
-
-```json
-{
-  "mcpServers": {
-    "wecom-hil-ts": {
+    "hitl-mcp-ilink": {
       "command": "npx",
       "args": [
-        "-y",
-        "@hitl/mcp-server",
-        "--service-url", "http://hitl.woa.com/api",
-        "--chat-id", "your-chat-id",
-        "--project-name", "my-project"
-      ],
-      "env": {
-        "http_proxy": "",
-        "https_proxy": "",
-        "all_proxy": ""
-      }
+        "-y", "hitl-mcp",
+        "--engine", "ilink",
+        "--service-url", "http://localhost:8081",
+        "--bot-key", "ilink-bot-1"
+      ]
     }
   }
 }
 ```
 
-#### 方式二：全局安装
+企微 wecom-aibot 把 `--engine` 换成 `wecom-aibot`、`--bot-key` 换成 `wecom-aibot-1`，并按需加 `--chat-id`。完整参数见 [配置 MCP 客户端](./docs-site/guide/mcp-config.md)。
+
+### 4. 重启客户端并验证
+
+完全退出并重新打开 Cursor，对 AI 说：
+
+> 请用 `send_message_only` 给我发一条消息：「测试 hitl-mcp 🎉」
+
+手机收到即链路打通。再试「等回复」：
+
+> 请用 `send_and_wait_reply` 发「请回复 OK」并等我的回复。
+
+## MCP 工具
+
+| 工具 | 作用 |
+|------|------|
+| `send_and_wait_reply` | 发消息并等待用户回复（带 `[#id]` 标识，支持引用回复精确匹配） |
+| `send_message_only` | 仅发送通知，不等待回复 |
+
+未初始化时返回 `not_initialized`（含管理台链接 `init_url`），引导用户打开管理台完成初始化后重试。详见 [工具说明](./docs-site/guide/tools.md)。
+
+## 从源码构建（可选）
+
+hitl-server 是自包含二进制，通常无需从源码构建。需要时：
 
 ```bash
-# 使用 pnpm（推荐）
-pnpm add -g @hitl/mcp-server
-
-# 或使用 npm
-npm install -g @hitl/mcp-server
+git clone https://github.com/jeffkit/hitl-mcp.git
+cd hitl-mcp/packages/hitl-server
+uv sync
+uv run python -m hitl_server.app
 ```
 
-然后配置：
-
-```json
-{
-  "mcpServers": {
-    "wecom-hil-ts": {
-      "command": "hitl-mcp",
-      "args": [
-        "--service-url", "http://hitl.woa.com/api",
-        "--chat-id", "your-chat-id"
-      ],
-      "env": {
-        "http_proxy": "",
-        "https_proxy": "",
-        "all_proxy": ""
-      }
-    }
-  }
-}
-```
-
-#### 方式三：从源码运行（开发）
-
-```bash
-git clone https://github.com/user/hil-mcp.git
-cd hil-mcp/mcp_server_ts
-pnpm install
-pnpm run build
-```
-
-然后配置：
-
-```json
-{
-  "mcpServers": {
-    "wecom-hil-ts": {
-      "command": "node",
-      "args": [
-        "/path/to/hil-mcp/mcp_server_ts/dist/index.js",
-        "--service-url", "http://hitl.woa.com/api",
-        "--chat-id", "your-chat-id"
-      ],
-      "env": {
-        "http_proxy": "",
-        "https_proxy": "",
-        "all_proxy": ""
-      }
-    }
-  }
-}
-```
-
-> 📖 TypeScript 版详细文档：[mcp_server_ts/README.md](./mcp_server_ts/README.md)
-
----
-
-### 命令行参数说明
-
-| 参数 | 说明 | 是否必填 | 默认值 |
-|------|------|----------|--------|
-| `--service-url` | HITL Server 地址（如 `http://hitl.woa.com/api`） | ✅ 必填 | `http://localhost:8081` |
-| `--chat-id` | 默认 Chat ID（群聊或私聊） | ✅ 必填 | - |
-| `--project-name` | 项目名称，用于标识消息来源 | 可选 | - |
-| `--timeout` | 等待回复超时时间（秒） | 可选 | `1200` (20 分钟) |
-
-### 获取 Chat ID
-
-**方法1**：直接在企微中 @机器人 发送任意消息，机器人会自动回复 Chat ID
-
-**方法2**：查看服务器日志，找到 `chatid` 字段
-
----
-
-## 服务端部署
-
-### 前置准备
-
-1. **公网服务器**：一台可从公网访问的服务器（云服务器/VPS）
-2. **域名（推荐）**：用于 HTTPS 访问，可使用免费 SSL 证书
-3. **内网环境**：可以访问飞鸽 API 的环境（如 DevCloud）
-4. **飞鸽机器人**：已创建并获取 `BOT_KEY`
-
-### Relay 模式部署（推荐）
-
-适用于 MCP Server 运行在公网的场景。
-
-#### 第一步：部署 HITL Server（公网服务器）
-
-```bash
-# 1. 克隆代码到公网服务器
-git clone https://github.com/user/hil-mcp.git
-cd hil-mcp
-
-# 2. 创建虚拟环境并安装依赖
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# 3. 配置环境变量
-export HIL_PORT=8081
-export HIL_WORKER_TOKEN=your-secret-token  # 用于 Worker 鉴权，请自定义
-
-# 4. 启动服务（后台运行）
-nohup python -m hitl_server.app >> hil.log 2>&1 &
-```
-
-#### 第二步：配置 Nginx 反向代理（推荐）
-
-为了支持 HTTPS 和 WebSocket，建议使用 Nginx 作为反向代理：
-
-```nginx
-# /etc/nginx/sites-available/hitl-server
-server {
-    listen 80;
-    server_name your-domain.com;  # 替换为你的域名
-    
-    # 如果使用 HTTPS，取消以下注释
-    # listen 443 ssl;
-    # ssl_certificate /path/to/cert.pem;
-    # ssl_certificate_key /path/to/key.pem;
-
-    location / {
-        proxy_pass http://127.0.0.1:8081;
-        proxy_http_version 1.1;
-        
-        # WebSocket 支持（必须）
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        
-        # 长连接支持
-        proxy_read_timeout 86400s;
-        proxy_send_timeout 86400s;
-        proxy_connect_timeout 86400s;
-        
-        # 禁用缓冲
-        proxy_buffering off;
-    }
-}
-```
-
-启用配置：
-
-```bash
-sudo ln -s /etc/nginx/sites-available/hitl-server /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-#### 第三步：部署 DevCloud Worker（内网环境）
-
-```bash
-# 1. 克隆代码到内网服务器（如 DevCloud）
-git clone https://github.com/user/hil-mcp.git
-cd hil-mcp
-
-# 2. 安装依赖
-pip install -r requirements.txt
-
-# 3. 配置环境变量
-export HIL_URL=wss://your-domain.com/ws  # 使用域名，wss 表示 HTTPS
-# 或使用 IP（如果没有域名）
-# export HIL_URL=ws://your-server-ip:80/ws
-
-export HIL_TOKEN=your-secret-token    # 与 HITL Server 一致
-export BOT_KEY=your-wecom-bot-key     # 飞鸽机器人 Key
-export CALLBACK_PORT=8082
-
-# 4. 启动服务
-nohup python -m devcloud_worker.worker >> worker.log 2>&1 &
-```
-
-#### 第四步：配置飞鸽传书回调
-
-在飞鸽传书管理后台配置回调地址：
-
-```
-http://your-devcloud-server:8082/callback
-```
-
-> ⚠️ 回调地址必须是内网可访问的地址，飞鸽会向这个地址推送用户回复。
-
-#### 第五步：验证部署
-
-```bash
-# 检查 HITL Server 状态（应显示 mode: relay, worker_connected: true）
-curl https://your-domain.com/health
-
-# 检查 Worker 状态
-curl http://localhost:8082/health
-```
-
-### Direct 模式部署
-
-适用于 MCP Server 和 HITL Server 都在内网的场景。
-
-```bash
-# 1. 克隆代码
-git clone https://github.com/user/hil-mcp.git
-cd hil-mcp
-
-# 2. 创建虚拟环境并安装依赖
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# 3. 配置环境变量
-export HIL_PORT=8080
-export BOT_KEY=your-wecom-bot-key  # 有 BOT_KEY 自动切换到 direct 模式
-# 或强制指定模式
-# export HIL_MODE=direct
-
-# 4. 启动服务
-nohup python -m hitl_server.app >> hil.log 2>&1 &
-```
-
-配置飞鸽传书回调地址：
-
-```
-http://your-server:8080/api/callback
-```
-
-验证：
-
-```bash
-# 应显示 mode: direct
-curl http://localhost:8080/health
-```
-
----
-
-## 部署清单
-
-### Relay 模式
-
-| 组件 | 部署位置 | 端口 | 说明 |
-|------|----------|------|------|
-| HITL Server | 公网服务器 | 8081 (Nginx 80/443) | 接收 MCP 请求，管理 Worker 连接 |
-| DevCloud Worker | 内网/DevCloud | 8082 | 连接 HITL Server，调用飞鸽 API |
-
-### Direct 模式
-
-| 组件 | 部署位置 | 端口 | 说明 |
-|------|----------|------|------|
-| HITL Server | 内网服务器 | 8080 | 直接调用飞鸽 API |
-
----
-
-## 环境变量说明
-
-### HITL Server
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `HIL_PORT` | 服务监听端口 | 8081 |
-| `HIL_MODE` | 运行模式：`auto`/`relay`/`direct` | auto |
-| `BOT_KEY` | 飞鸽机器人 Key（direct 模式必填） | - |
-| `HIL_WORKER_TOKEN` | Worker 连接鉴权 Token | 可选 |
-| `HEARTBEAT_INTERVAL` | 心跳间隔（秒） | 30 |
-| `HEARTBEAT_TIMEOUT` | 心跳超时（秒） | 90 |
-| `IDLE_HINT_MESSAGE_TEMPLATE` | 空闲状态提示消息模板（支持变量） | 见下方说明 |
-| `ADMIN_USERNAME` | 管理台登录用户名 | admin |
-| `ADMIN_PASSWORD` | 管理台登录密码 | jarvis2026 |
-| `ADMIN_TOKEN_SECRET` | JWT Token 密钥 | hil-mcp-secret-key-2026 |
-
-### DevCloud Worker
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `HIL_URL` | HITL Server 的 WebSocket 地址（Worker 模式） | `ws://localhost:8081/ws` |
-| `HIL_TOKEN` | 连接 HITL Server 的鉴权 Token | 可选 |
-| `BOT_KEY` | 飞鸽机器人 Webhook Key | 必填 |
-| `CALLBACK_PORT` | 回调服务监听端口 | 8082 |
-| `CALLBACK_AUTH_KEY` | 回调鉴权 Header 名称 | 可选 |
-| `CALLBACK_AUTH_VALUE` | 回调鉴权 Header 值 | 可选 |
-
-### MCP Server (MCP 客户端)
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `SERVICE_URL` | HITL Server 地址（如 `http://hitl.woa.com/api`） | `http://localhost:8081` |
-| `DEFAULT_CHAT_ID` | 默认 Chat ID | 必填 |
-| `DEFAULT_PROJECT_NAME` | 默认项目名称 | 可选 |
-| `DEFAULT_TIMEOUT` | 超时时间（秒） | `1200` (20 分钟) |
-
-### 空闲状态提示消息配置
-
-`IDLE_HINT_MESSAGE_TEMPLATE` 用于自定义当用户发送消息但机器人并非处于等待回复状态时的自动回复内容。
-
-**支持的变量：**
-- `{user_name}` - 发送消息的用户名称
-- `{chat_id}` - 当前会话的 Chat ID
-- `{chat_type}` - 会话类型（"私聊" 或 "群聊"）
-- `{timestamp}` - 当前时间戳（格式：HH:MM:SS）
-
-**默认模板：**
-```
-👋 你好 {user_name}！
-
-当前没有等待中的会话需要你回复。
-
-如果你想配置 MCP 使用此{chat_type}，请使用以下信息：
-
-📋 **Chat ID**: `{chat_id}`
-📌 **会话类型**: {chat_type}
-🕐 **时间**: {timestamp}
-
-你可以将此 Chat ID 配置到 MCP 的环境变量中：
-```
-DEFAULT_CHAT_ID={chat_id}
-```
-```
-
-**自定义示例：**
-```bash
-# 简洁版本
-export IDLE_HINT_MESSAGE_TEMPLATE="Hi {user_name}，当前无等待中的消息。Chat ID: {chat_id}"
-
-# Markdown 格式版本
-export IDLE_HINT_MESSAGE_TEMPLATE="👋 {user_name}，当前无等待消息\n\n📋 **Chat ID**: \`{chat_id}\`\n🕐 {timestamp}"
-
-# 自定义指引版本
-export IDLE_HINT_MESSAGE_TEMPLATE="嗨 {user_name}！\n\n当前没有需要处理的消息哦～\n\n💡 如需配置机器人，请联系管理员并提供：\n- Chat ID: \`{chat_id}\`\n- 类型: {chat_type}"
-```
-
-**注意事项：**
-- 如果不配置此变量，将使用默认模板
-- 消息支持 Markdown 格式（使用飞鸽传书的 `markdown` 接口）
-- 变量使用 Python 的 `str.format()` 语法，确保所有 `{变量名}` 正确闭合
-- 建议在消息中包含 `{chat_id}`，方便用户获取配置信息
-
----
-
-## 使用方法
-
-### AI Agent 调用示例
-
-```python
-# 发送消息并等待回复
-result = await send_and_wait_reply(
-    message="请确认是否继续？",
-    project_name="my-project",  # 可选，用于标识消息来源
-)
-
-# 仅发送消息，不等待回复
-result = await send_message_only(
-    message="任务已完成！"
-)
-```
-
-### 用户回复方式
-
-1. **单会话场景**：直接回复即可
-2. **多会话场景**：使用「引用回复」功能精确选择要回复的消息
-
----
-
-## 空闲提示消息配置
-
-当用户在配置的 Chat ID 中发送消息，但机器人并非处于等待回复状态时，会自动回复一条提示消息，显示当前的 Chat ID 等信息。
-
-### 核心特性
-
-- ✅ **JSON 配置文件存储** - `data/idle_hint_config.json`
-- ✅ **热更新** - 修改后立即生效，无需重启服务
-- ✅ **全局默认 + Chat ID 特定配置** - 支持为不同群组配置不同消息
-- ✅ **管理台可视化配置** - 无需手动编辑文件
-- ✅ **支持变量替换** - `{user_name}`, `{chat_id}`, `{chat_type}`, `{timestamp}`
-
-### 快速开始
-
-**通过管理台配置（推荐）：**
-
-1. 访问管理台：`http://your-server:8081/admin`
-2. 登录后点击"空闲提示配置"标签页
-3. 编辑全局默认配置或添加 Chat ID 特定配置
-4. 保存后立即生效 ✨
-
-**消息模板示例：**
-
-```
-👋 你好 {user_name}！
-
-当前没有等待中的会话需要你回复。
-
-如果你想配置 MCP 使用此{chat_type}，请使用以下信息：
-
-📋 **Chat ID**: `{chat_id}`
-📌 **会话类型**: {chat_type}
-🕐 **时间**: {timestamp}
-
-你可以将此 Chat ID 配置到 MCP 的环境变量中：
-```
-DEFAULT_CHAT_ID={chat_id}
-```
-```
-
-详细文档：[空闲提示消息配置指南](docs/idle-hint-config-guide.md)
-
----
-
-## Forward Service（消息转发服务）
-
-Forward Service 是一个独立的服务，用于处理「用户主动发消息 → 目标URL → 返回结果」的反向流程。
-
-### 架构
-
-```
-┌─────────────────┐                    ┌─────────────────┐
-│   企微机器人 B   │  ←────回调────────   │    企业微信      │
-│ (Forward 专用)  │                    │                 │
-└────────┬────────┘                    └────────┬────────┘
-         │                                      ↑
-         │ HTTP                                 │ fly-pigeon
-         ▼                                      │
-┌─────────────────┐      HTTP        ┌─────────────────┐
-│ Forward Service │ ───────────────▶ │    目标 URL     │
-│  (内网/DevCloud) │ ◀─────────────── │   (公网服务)    │
-└─────────────────┘      响应        └─────────────────┘
-```
-
-**与 HIL 链路物理隔离**：使用不同的企微机器人，互不干扰。
-
-### 部署
-
-```bash
-# 1. 配置环境变量
-export FORWARD_BOT_KEY=your-bot-key      # 新机器人的 Webhook Key
-export FORWARD_URL=https://your-api.com/handle  # 目标 URL
-export FORWARD_PORT=8083                 # 服务端口（默认 8083）
-
-# 2. 启动服务
-nohup python -m forward_service.app >> forward.log 2>&1 &
-```
-
-### 配置飞鸽回调
-
-在飞鸽传书后台为**新机器人**配置回调地址：
-
-```
-http://your-devcloud-server:8083/callback
-```
-
-### 目标 URL 接口规范
-
-Forward Service 会将用户消息转发到目标 URL，目标 URL 需要实现以下接口：
-
-**请求**：
-```json
-POST /handle
-{
-    "chat_id": "wokSFfCgAAxxxxxx",
-    "chat_type": "group",
-    "from_user": {
-        "userid": "zhangsan",
-        "name": "张三",
-        "alias": "zhangsan"
-    },
-    "msg_type": "text",
-    "content": "用户发送的消息内容",
-    "image_url": null,
-    "raw_data": { ... }
-}
-```
-
-**响应**：
-```json
-{
-    "reply": "处理结果消息",
-    "msg_type": "text"
-}
-```
-
-| 响应字段 | 类型 | 说明 |
-|---------|------|------|
-| `reply` | string | 要回复给用户的消息 |
-| `msg_type` | string | 消息类型：`text` 或 `markdown` |
-
-### 环境变量
-
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| `FORWARD_BOT_KEY` | 企微机器人 Webhook Key | 必填 |
-| `FORWARD_URL` | 默认转发目标 URL | 必填（或配置 FORWARD_RULES） |
-| `FORWARD_RULES` | chat_id → URL 映射（JSON） | 可选 |
-| `FORWARD_PORT` | 服务端口 | 8083 |
-| `FORWARD_TIMEOUT` | 转发请求超时时间（秒） | 30 |
-
-### 高级配置：多目标 URL
-
-如果不同群/私聊需要转发到不同的目标 URL，可以配置 `FORWARD_RULES`：
-
-```bash
-export FORWARD_RULES='{"chat_id_1": "https://api1.com/handle", "chat_id_2": "https://api2.com/handle"}'
-export FORWARD_URL="https://default-api.com/handle"  # 默认 URL
-```
-
-匹配优先级：
-1. `FORWARD_RULES` 中的精确匹配
-2. `FORWARD_URL` 默认 URL
-
----
-
-## 项目结构
-
-```
-hil-mcp/
-├── hitl_server/             # HITL Server（公网/内网均可）
-│   ├── app.py              # FastAPI 应用
-│   ├── config.py           # 配置管理（支持双模式）
-│   ├── storage.py          # 会话存储与回调处理
-│   ├── sender.py           # Direct 模式：消息发送
-│   ├── ws_manager.py       # Relay 模式：WebSocket 管理
-│   └── handlers/           # 请求处理器
-│       ├── api.py          # HTTP API
-│       └── websocket.py    # WebSocket 处理
-│
-├── devcloud_worker/        # DevCloud Worker（仅 Relay 模式需要）
-│   ├── worker.py           # 主程序
-│   ├── config.py           # 配置管理
-│   ├── sender.py           # 消息发送（调用 fly-pigeon）
-│   └── callback_handler.py # 回调转发
-│
-├── mcp_server/             # MCP 客户端（Python 版）
-│   ├── server.py           # MCP Server
-│   ├── config.py           # 配置管理
-│   └── wecom_client.py     # API 客户端
-│
-├── mcp_server_ts/          # MCP 客户端（TypeScript 版）
-│   ├── src/
-│   │   ├── index.ts        # 入口文件（命令行解析）
-│   │   ├── server.ts       # MCP Server 主程序
-│   │   ├── config.ts       # 配置管理
-│   │   └── wecom-client.ts # HTTP 客户端
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── README.md           # TypeScript 版详细文档
-│
-├── forward_service/        # Forward Service（消息转发服务）
-│   ├── app.py              # FastAPI 应用
-│   ├── config.py           # 配置管理
-│   └── sender.py           # 消息发送
-│
-├── deploy_hil.sh           # HITL Server 部署脚本（示例）
-├── deploy_worker.sh        # DevCloud Worker 部署脚本（示例）
-├── deploy_forward.sh       # Forward Service 部署脚本（示例）
-├── requirements.txt        # Python 依赖
-└── pyproject.toml          # Python 项目配置
-```
-
----
-
-## API 文档
-
-详细的 API 接口文档请参考：[docs/API.md](./docs/API.md)
-
----
-
-## 常见问题
-
-### Q: 出现 502 Bad Gateway 错误
-
-**原因**：通常是 Nginx 无法连接到后端服务，或设置了 HTTP 代理。
-
-**解决方案**：
-1. 确保 HITL Server 正在运行：`curl http://127.0.0.1:8081/health`
-2. 在 MCP 配置中禁用代理：
-```json
-"env": {
-  "http_proxy": "",
-  "https_proxy": "",
-  "all_proxy": ""
-}
-```
-
-### Q: Worker 无法连接 HITL Server
-
-**可能原因**：
-1. 防火墙阻止了出站连接
-2. Nginx 未正确配置 WebSocket 支持
-3. Token 不匹配
-
-**排查步骤**：
-```bash
-# 在 Worker 所在机器测试连接
-curl https://your-domain.com/health
-
-# 检查 Worker 日志
-tail -f worker.log
-```
-
-### Q: 如何获取私聊的 Chat ID？
-
-直接私聊机器人发送任意消息，机器人会自动回复 Chat ID。
-
-### Q: 多个项目同时发消息怎么区分？
-
-使用「引用回复」功能。系统会在每条消息前添加 `[#short_id project_name]` 标识，用户引用回复时会自动匹配。
-
-### Q: Relay 模式下 Worker 断线怎么办？
-
-Worker 会自动重连（指数退避），通常几秒内就能恢复连接。
-
-### Q: 如何检查服务状态？
-
-```bash
-# HITL Server（显示运行模式和 Worker 连接状态）
-curl https://your-domain.com/health
-# 返回示例：
-# {"status":"healthy","mode":"relay","worker_connected":true,"worker_count":1}
-# {"status":"healthy","mode":"direct"}
-
-# DevCloud Worker
-curl http://localhost:8082/health
-# 返回示例：
-# {"status":"healthy","ws_connected":true}
-```
-
-### Q: 没有域名可以使用吗？
-
-可以，但有限制：
-1. 使用 IP 访问时，MCP Server 配置需要指定端口：`http://1.2.3.4:80`
-2. 如果云服务器安全组仅开放 80/443 端口，需要用 Nginx 反向代理
-3. WebSocket 地址需要使用 `ws://`（而非 `wss://`）
-
-推荐使用免费域名 + Let's Encrypt 免费 SSL 证书。
-
----
-
-## 独立 MCP Server（无需 HITL Server）
-
-### 企业微信智能机器人（mcp-server-wecom-aibot）
-
-适用于**腾讯以外的所有企业**，使用企业微信官方 AI Bot API，通过 WebSocket 长连接直接接入企微服务端。无需公网 IP，无需回调 URL，直接在本地运行。
-
-**前置条件：** 在企业微信管理后台创建"智能机器人"，获取 `Bot ID` 和 `Secret`。
-
-**快速开始：**
-
-```bash
-cd packages/mcp-server-wecom-aibot
-uv pip install -e .
-
-# 设置环境变量
-export WECOM_BOT_ID="your-bot-id"
-export WECOM_BOT_SECRET="your-bot-secret"
-export DEFAULT_CHAT_ID="your-chat-id"
-
-hitl-mcp-wecom-aibot
-```
-
-**Cursor MCP 配置（`~/.cursor/mcp.json`）：**
-
-```json
-{
-  "mcpServers": {
-    "wecom-aibot-hil": {
-      "command": "hitl-mcp-wecom-aibot",
-      "env": {
-        "WECOM_BOT_ID": "your-bot-id",
-        "WECOM_BOT_SECRET": "your-bot-secret",
-        "DEFAULT_CHAT_ID": "your-chat-id"
-      }
-    }
-  }
-}
-```
-
-**架构：**
-
-```
-AI Agent（本地）
-    │ MCP
-    ▼
-mcp-server-wecom-aibot（本地）
-    │ WSS（主动出站，无需公网 IP）
-    ▼
-wss://openws.work.weixin.qq.com
-    │
-    ▼
-企业微信用户
-```
-
----
-
-### 微信 ClawBot（mcp-server-ilink）
-
-适用于**个人微信**用户，使用微信 iLink 协议，通过 HTTP 长轮询直接接入微信服务端。无需公网 IP，无需回调 URL，直接在本地运行。
-
-**前置条件：** 在 [ClawBot](https://clawbot.weixin.qq.com) 申请 Bot，然后运行登录命令完成扫码。
-
-**快速开始：**
-
-```bash
-cd packages/mcp-server-ilink
-uv pip install -e .
-
-# Step 1: 扫码登录（仅需一次，token 会持久化保存）
-hitl-mcp-ilink-login
-
-# Step 2: 让目标用户先向 ClawBot 发一条消息（激活会话）
-
-# Step 3: 启动 MCP Server
-export DEFAULT_USER_ID="target-wechat-user-id"
-hitl-mcp-ilink
-```
-
-**Cursor MCP 配置（`~/.cursor/mcp.json`）：**
-
-```json
-{
-  "mcpServers": {
-    "ilink-hil": {
-      "command": "hitl-mcp-ilink",
-      "env": {
-        "DEFAULT_USER_ID": "target-wechat-user-id",
-        "ILINK_TOKEN_STORE_PATH": "/path/to/ilink_store.json"
-      }
-    }
-  }
-}
-```
-
-**用户激活流程：**
-
-```
-1. 用户在微信中搜索你的 ClawBot 并发送任意消息
-   → 系统自动保存该用户的 context_token
-
-2. AI Agent 调用 send_and_wait_reply(user_id="xxx", message="...")
-   → MCP Server 发送消息给用户
-
-3. 用户回复后
-   → 消息通过长轮询推送给 MCP Server → 返回给 AI Agent
-```
-
-**架构：**
-
-```
-AI Agent（本地）
-    │ MCP
-    ▼
-mcp-server-ilink（本地）
-    │ HTTPS 长轮询（主动出站，无需公网 IP）
-    ▼
-https://ilinkai.weixin.qq.com
-    │
-    ▼
-微信用户
-```
-
----
+或一键构建二进制：`bash packaging/build.sh`（依赖 `uv` / `pnpm` / Python ≥ 3.10）。
+
+## 文档
+
+完整文档见 docs-site：
+
+- [整体架构](./docs-site/guide/architecture.md)
+- [5 分钟快速开始](./docs-site/guide/quickstart.md)
+- [本地安装 hitl-server](./docs-site/guide/hitl-server.md)
+- [配置 MCP 客户端](./docs-site/guide/mcp-config.md)
+- [使用方法：人在回路](./docs-site/guide/usage.md)
+- [常见问题](./docs-site/guide/faq.md)
+- 引擎：[iLink](./docs-site/engines/ilink.md) / [wecom-aibot](./docs-site/engines/wecom-aibot.md)
 
 ## License
 

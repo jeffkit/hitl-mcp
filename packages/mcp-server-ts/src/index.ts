@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * hitl-mcp — Human-in-the-Loop MCP Server（三合一版本）
+ * hitl-mcp — Human-in-the-Loop MCP Server（内置引擎版本）
  *
  * 用法：
  *   # 自动：按管理台已配置的内置引擎选用（默认，推荐）
@@ -10,7 +10,6 @@
  *   # 指定引擎（覆盖 auto）
  *   hitl-mcp --engine ilink --service-url http://localhost:8081
  *   hitl-mcp --engine wecom-aibot --service-url http://localhost:8081
- *   hitl-mcp --engine hil --service-url http://hitl.woa.com/api --chat-id xxx
  */
 
 import { program } from 'commander';
@@ -21,7 +20,7 @@ import { runSetup } from './setup.js';
 
 program
   .name('hitl-mcp')
-  .description('Human-in-the-Loop MCP Server（支持 HITL Server / 企业微信 AI Bot / 微信 iLink）')
+  .description('Human-in-the-Loop MCP Server（支持 企业微信 AI Bot / 微信 iLink 内置引擎）')
   .version('0.3.0')
 
   // ── 子命令：iLink 一键安装 + 服务化 ───────────────────────────────────────
@@ -63,16 +62,16 @@ program
   // ── 通用参数（默认行为：启动 MCP server） ────────────────────────────────
   .option(
     '--engine <type>',
-    '引擎类型: auto | hil | wecom-aibot | ilink（默认: auto，按管理台已配置引擎自动选用）',
+    '引擎类型: auto | wecom-aibot | ilink（默认: auto，按管理台已配置引擎自动选用）',
     'auto'
   )
-  .option('--chat-id <id>',       '默认 chatid（hil / wecom-aibot 引擎）')
+  .option('--chat-id <id>',       '默认 chatid（wecom-aibot 引擎）')
   .option('--bot-key <key>',     '可选。单 bot 可不传，后端按引擎类型自动路由；管理台绑定多个 bot 时用它指定')
   .option('--project-name <name>','默认项目名称')
   .option('--timeout <seconds>',  '等待回复超时（秒，默认 1200）', parseInt)
 
-  // ── HITL Server 参数 ───────────────────────────────────────────────────────
-  .option('--service-url <url>',  'HITL Server 地址（engine=hil 时使用）')
+  // ── HITL Server 地址 ─────────────────────────────────────────────────────
+  .option('--service-url <url>',  'HITL Server 地址（内置引擎走 /api/send、/api/poll 等）')
 
   // ── 企业微信 AI Bot 参数 ──────────────────────────────────────────────────
   .option('--bot-id <id>',        '企业微信 AI Bot ID（engine=wecom-aibot 时使用）')
@@ -93,13 +92,19 @@ program
   .action(() => {
     const opts = program.opts();
 
+    const engine = (opts.engine as EngineType) ?? 'auto';
+    if (engine !== 'auto' && engine !== 'ilink' && engine !== 'wecom-aibot') {
+      console.error(`[Main] 不支持的 --engine: ${opts.engine}（可选: auto | ilink | wecom-aibot）`);
+      process.exit(1);
+    }
+
     const config = createConfig({
-      engine:             (opts.engine as EngineType) ?? 'auto',
+      engine,
       defaultRecipient:   opts.chatId ?? '',
       defaultProjectName: opts.projectName ?? '',
       defaultTimeout:     opts.timeout,
       botKey:             opts.botKey ?? '',
-      // HIL
+      // HIL Server
       serviceUrl:         opts.serviceUrl,
       // WeCom AI Bot
       wecomBotId:         opts.botId,

@@ -1,11 +1,10 @@
 """iLink 内置引擎。
 
-把原本 ilink-worker 独立进程维持的 iLink 长轮询、扫码登录、发消息逻辑
-收敛进 HITL Server 进程内。收到用户消息后转成 fly-pigeon 兼容结构，
-通过 on_user_message 回调直接交给 storage.handle_callback。
+在 HITL Server 进程内维持 iLink 长轮询、扫码登录、发消息逻辑。
+收到用户消息后转成 fly-pigeon 兼容结构，通过 on_user_message 回调
+直接交给 storage.handle_callback。
 
-凭证（bot_token / get_updates_buf / context_tokens）持久化在本地 JSON 文件，
-与 ilink-worker 共用同一文件格式，可无缝迁移。
+凭证（bot_token / get_updates_buf / context_tokens）持久化在本地 JSON 文件。
 """
 from __future__ import annotations
 
@@ -359,7 +358,7 @@ class ILinkClient:
                 continue
 
 
-# ── 消息头拼接（与 ilink-worker 一致）─────────────────────────────────────
+# ── 消息头拼接 ─────────────────────────────────────────────────────────────
 
 def _format_message_with_header(
     message: str, short_id: str, project_name: Optional[str], wait_reply: bool

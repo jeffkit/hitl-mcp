@@ -1,7 +1,7 @@
 """
 HITL Server 入口（支持 `python -m hitl_server` 与 PyInstaller 打包）。
 
-读取环境变量配置（HITL_PORT / HITL_MODE / ENABLE_*_ENGINE 等），
+读取环境变量配置（HITL_PORT / ENABLE_*_ENGINE 等），
 以 uvicorn 启动。直接传入 ASGI app 对象，避免 frozen 环境下的字符串导入。
 """
 import uvicorn

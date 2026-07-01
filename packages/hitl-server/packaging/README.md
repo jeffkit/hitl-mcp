@@ -3,8 +3,8 @@
 HITL Server 是个人电脑端可安装的 Human-in-the-Loop 服务，内置 **iLink** 与 **企业微信 AI Bot** 两个引擎。
 发布形态：**自包含二进制**（PyInstaller one-dir，内嵌管理台），再封装为 macOS Homebrew 与 Linux deb/rpm。
 
-> 旧 HIL service（fly-pigeon / 飞鸽传书 Direct 模式）不在个人端发行范围；其代码保留，
-> 但 `fly-pigeon` 已转为可选依赖（`pip install "hitl-server[direct]"`），打包时不收集。
+> 旧 HIL service（fly-pigeon / 飞鸽传书 Direct 模式）与 relay/Worker 架构已移除；
+> 个人端只发行内置 ilink + wecom-aibot 引擎的本地单进程版本。
 
 ## 产物
 

@@ -1,8 +1,8 @@
 """
-Relay Server 存储模块
+HITL Server 存储模块
 
 完整的会话管理，包括：
-1. 待处理的请求（等待 Worker 响应）
+1. 待处理的请求（等待用户回复）
 2. 会话数据（等待用户回复）
 3. 回调匹配逻辑
 
@@ -38,7 +38,7 @@ class Reply:
 
 @dataclass
 class PendingRequest:
-    """待处理的请求（等待 Worker 响应）"""
+    """待处理的发送请求（等待用户回复）"""
     request_id: str
     action: str
     payload: dict
@@ -546,7 +546,7 @@ class RelayStorage:
     async def update_chat_id(self, session_id: str, chat_id: str) -> bool:
         """
         更新会话的 chat_id（用于 iLink/wecom-aibot 等在发送时未知收件人、
-        由 Worker 解析后回传实际收件人 openid 的场景）。
+        由引擎解析后回传实际收件人 openid 的场景）。
 
         维护 _chat_id_map 索引，使后续 handle_callback 能按 chat_id 回退匹配。
         """
@@ -594,7 +594,7 @@ class RelayStorage:
     
     async def handle_callback(self, data: dict) -> dict:
         """
-        处理飞鸽回调（由 Worker 转发过来）
+        处理上游回调（由内置引擎传入，结构沿用 fly-pigeon 兼容格式）
         
         Returns:
             {"success": bool, "session_id": str | None, "error": str | None}

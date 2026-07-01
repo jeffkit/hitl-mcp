@@ -10,7 +10,7 @@
 #
 # 说明：
 #   - 内嵌 hitl_server/console/dist，管理台随二进制一起分发
-#   - 排除 pigeon / fly_pigeon（Direct 模式 / 旧 HIL service 依赖，个人端不需要）
+#   - 排除 pigeon / fly_pigeon（历史 direct 模式依赖，现已不在依赖中；保留排除项作防御）
 #   - one-dir 而非 one-file：启动快、调试友好；brew/deb/rpm 安装时整体拷入
 
 import os

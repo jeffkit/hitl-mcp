@@ -156,20 +156,22 @@
             <h2 class="section-title">🏗️ 系统架构</h2>
             
             <div class="architecture-diagram">
-                <h3 style="color: var(--primary-color); margin-bottom: 2rem;">Direct 模式（内网部署）</h3>
+                <h3 style="color: var(--primary-color); margin-bottom: 2rem;">内置引擎（本地单进程）</h3>
                 <pre>
-┌─────────────────┐      HTTP       ┌─────────────────┐     fly-pigeon    ┌─────────────────┐
-│   MCP Server    │ ───────────────▶│   HITL Server    │ ─────────────────▶│   企业微信       │
-│  (AI Agent)     │ ◀───────────────│   (内网部署)     │ ◀─────────────────│   (飞鸽传书)     │
-└─────────────────┘                 └─────────────────┘      回调          └─────────────────┘
+┌──────────┐  MCP(stdio)  ┌──────────┐  HTTP   ┌────────────┐  长连接   ┌──────────┐
+│ AI Agent │ ───────────▶ │ hitl-mcp │ ──────▶ │ hitl-server│ ────────▶ │ 你的手机 │
+│ Cursor   │ ◀─────────── │  (npx)   │ ◀────── │  :8081     │ ◀──────── │ 微信/企微 │
+└──────────┘              └──────────┘         └────────────┘           └──────────┘
+                                                    ├─ ilink 引擎（个人微信）
+                                                    └─ wecom-aibot 引擎（企微 AI Bot）
                 </pre>
-                
+
                 <div style="margin-top: 2rem; color: var(--text-secondary);">
                     <p><strong style="color: var(--secondary-color);">✓ 适用场景：</strong></p>
                     <ul style="margin-left: 2rem; line-height: 2;">
-                        <li>MCP Server 和 HITL Server 都在内网运行</li>
-                        <li>可以直接访问飞鸽传书 API</li>
-                        <li>简化部署，无需额外的 Worker 组件</li>
+                        <li>本地单进程，无需公网服务器、无需额外 Worker</li>
+                        <li>hitl-server 进程内维持微信/企微长连接，MCP 端随时重启不掉线</li>
+                        <li>扫码登录与企微凭证落盘，重启自动恢复</li>
                         <li>响应速度快，架构简单</li>
                     </ul>
                 </div>
