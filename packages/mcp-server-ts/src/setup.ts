@@ -370,7 +370,7 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
     catch { return '8081'; }
   })();
 
-  const TOTAL_STEPS = 5;
+  const TOTAL_STEPS = 4;
 
   // 1. venv + 依赖
   step(1, TOTAL_STEPS, '检查 hitl-server 环境...');
@@ -402,14 +402,18 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
   step(3, TOTAL_STEPS, '等待 HITL Server 启动...');
   await waitReady(opts.serviceUrl, opts.botKey);
 
-  // 4. 扫码登录
-  step(4, TOTAL_STEPS, '微信扫码登录...');
-  await ensureLogin(opts.serviceUrl, opts.botKey);
+  // 4. 打开管理台引导后续步骤（扫码、激活都在浏览器里完成）
+  step(4, TOTAL_STEPS, '打开管理台...');
+  const consoleUrl = opts.serviceUrl.replace(/\/$/, '') + '/admin';
+  run('open', [consoleUrl]);
+  log(`管理台已打开: ${consoleUrl}`);
 
-  // 5. 等待用户激活（在微信给 bot 发一条消息）
-  step(5, TOTAL_STEPS, '等待激活收件人...');
-  await waitActivation(opts.serviceUrl, opts.botKey);
-
-  // 完成：打印 Cursor 配置
-  printCursorConfig({ serviceUrl: opts.serviceUrl, botKey: opts.botKey, projectName: opts.projectName });
+  console.error('\n========================================');
+  console.error('✅ 后台服务已就绪！接下来在浏览器管理台里：');
+  console.error('  1. 扫码登录微信（二维码会自动显示）');
+  console.error('  2. 用微信给 bot 发一条消息激活收件人');
+  console.error('  3. 管理台自动展示 Cursor MCP 配置，复制粘贴即可');
+  console.error('========================================\n');
+  console.error(`日志: ${LOG_DIR}`);
+  console.error('卸载: npx hitl-mcp ilink-setup --uninstall\n');
 }
