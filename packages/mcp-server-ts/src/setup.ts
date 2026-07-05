@@ -45,6 +45,10 @@ function log(msg: string): void {
   console.error(`[setup] ${msg}`);
 }
 
+function step(n: number, total: number, msg: string): void {
+  console.error(`\n[${n}/${total}] ${msg}`);
+}
+
 function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): { ok: boolean; stdout: string; stderr: string; code: number | null } {
   const r = spawnSync(cmd, args, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, encoding: 'utf-8' });
   return { ok: r.status === 0, stdout: r.stdout ?? '', stderr: r.stderr ?? '', code: r.status };
@@ -260,6 +264,24 @@ async function ensureLogin(serviceUrl: string, botKey: string): Promise<void> {
   throw new Error('等待扫码超时（5 分钟内未确认）。');
 }
 
+/** 等待第一个用户给 bot 发消息（激活收件人），返回 from_user_id */
+async function waitActivation(serviceUrl: string, botKey: string): Promise<string> {
+  const base = serviceUrl.replace(/\/$/, '');
+  const url = `${base}/api/ilink/login_status?bot_key=${encodeURIComponent(botKey)}`;
+  console.error('  → 现在用手机微信给 bot 发一条任意消息（例如"hi"），激活收件人后无需填 chat-id。');
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    const r = await httpGet(url, 5000);
+    const users = (r?.activated_users as Array<{ from_user_id: string }>) ?? [];
+    if (users.length > 0) {
+      log(`✅ 已激活！收件人: ${users[0].from_user_id}`);
+      return users[0].from_user_id;
+    }
+  }
+  throw new Error('等待激活超时（10 分钟内未收到用户消息）。请确保已扫码登录，然后在微信里给 bot 发一条消息后重试。');
+}
+
 /** 打印可粘贴进 Cursor 的 MCP 配置 */
 function printCursorConfig(args: { serviceUrl: string; botKey: string; projectName?: string }): void {
   const cfg = {
@@ -348,14 +370,16 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
     catch { return '8081'; }
   })();
 
+  const TOTAL_STEPS = 5;
+
   // 1. venv + 依赖
+  step(1, TOTAL_STEPS, '检查 hitl-server 环境...');
   const pythonPath = ensureHitlServerVenv();
 
-  // 2. 停旧服务
+  // 2. 停旧服务 + 安装 HITL Server
+  step(2, TOTAL_STEPS, '启动 HITL Server（launchd 服务化）...');
   stopExistingServices(parseInt(port, 10));
   await sleep(2000);
-
-  // 3. 安装 HITL Server（内置 ilink 引擎，可选 wecom-aibot）
   const env: Record<string, string> = {
     ENABLE_ILINK_ENGINE: 'true',
     ILINK_BOT_KEY: opts.botKey,
@@ -374,12 +398,18 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
   }
   installHitlServer(pythonPath, env, port);
 
-  // 4. 等就绪
+  // 3. 等 HITL Server + iLink 引擎就绪
+  step(3, TOTAL_STEPS, '等待 HITL Server 启动...');
   await waitReady(opts.serviceUrl, opts.botKey);
 
-  // 5. 扫码登录
+  // 4. 扫码登录
+  step(4, TOTAL_STEPS, '微信扫码登录...');
   await ensureLogin(opts.serviceUrl, opts.botKey);
 
-  // 6. 打印 Cursor 配置
+  // 5. 等待用户激活（在微信给 bot 发一条消息）
+  step(5, TOTAL_STEPS, '等待激活收件人...');
+  await waitActivation(opts.serviceUrl, opts.botKey);
+
+  // 完成：打印 Cursor 配置
   printCursorConfig({ serviceUrl: opts.serviceUrl, botKey: opts.botKey, projectName: opts.projectName });
 }
