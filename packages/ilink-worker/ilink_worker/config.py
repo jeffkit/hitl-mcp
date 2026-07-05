@@ -91,6 +91,16 @@ class ILinkWorkerConfig(BaseSettings):
     heartbeat_interval: int = Field(default=20, description="心跳间隔（秒）")
     heartbeat_timeout: int = Field(default=60, description="心跳超时（秒）")
 
+    # 新用户首次激活时下发的绑定成功通知，置空则不发送
+    binding_hint_message: str = Field(
+        default=_json_config.get(
+            "binding_hint_message",
+            "✅ 绑定成功！AI 助手已就绪，等待任务下发。",
+        ),
+        alias="BINDING_HINT_MESSAGE",
+        description="新用户首次激活时发送的确认消息，留空则不发送",
+    )
+
     config_file: str = Field(default=_get_config_file_path(), description="配置文件路径")
 
     class Config:

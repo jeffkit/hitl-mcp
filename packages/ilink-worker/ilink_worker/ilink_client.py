@@ -84,6 +84,8 @@ class ILinkClient:
         self.on_message: Callable[[UserMessage], Awaitable[None]] | None = None
         # 登录状态变化时触发（由 worker 注册，用于通知 HIL Server 工具列表）
         self.on_login_state_change: Callable[[], Awaitable[None]] | None = None
+        # 新用户首次激活（context_token 首次写入）时触发
+        self.on_new_user: Callable[[str], Awaitable[None]] | None = None
 
     # ── 生命周期 ───────────────────────────────────────────────
     async def start(self) -> None:
@@ -145,7 +147,10 @@ class ILinkClient:
         logger.info(f"[iLink] 收到消息: user={from_user_id}, text={text[:80]!r}")
 
         if context_token and from_user_id:
+            is_new_user = not self.store.get_context_token(from_user_id)
             self.store.set_context_token(from_user_id, context_token)
+            if is_new_user and self.on_new_user:
+                asyncio.create_task(self.on_new_user(from_user_id))
 
         if from_user_id and text and self.on_message:
             await self.on_message(UserMessage(from_user_id, context_token, text, msg))

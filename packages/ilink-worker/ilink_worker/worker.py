@@ -79,6 +79,7 @@ class ILinkWorker:
             poll_timeout=config.poll_timeout,
         )
         self.client.on_message = self._on_user_message
+        self.client.on_new_user = self._on_new_user
         self._ws = None
         self._send_lock = asyncio.Lock()
         self._running = False
@@ -126,6 +127,16 @@ class ILinkWorker:
         logger.info("WebSocket 连接成功")
         self._reconnect_delay = config.reconnect_delay
         await self._register()
+
+    # ── 新用户首次激活：发送绑定成功通知 ────────────────────
+    async def _on_new_user(self, from_user_id: str) -> None:
+        hint = config.binding_hint_message.strip()
+        if not hint:
+            return
+        logger.info(f"新用户激活: {from_user_id}，下发绑定通知")
+        ok, err = await self.client.send_message(from_user_id, hint)
+        if not ok:
+            logger.warning(f"绑定通知发送失败: {err}")
 
     # ── 上行：用户消息 → HIL Server callback ──────────────────
     async def _on_user_message(self, msg: UserMessage) -> None:
