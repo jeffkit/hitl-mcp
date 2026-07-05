@@ -14,6 +14,8 @@ import {
   ArrowRight,
   CircleDot,
   Link,
+  Copy,
+  ClipboardCheck,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -141,6 +143,8 @@ export function EnginesPage() {
   // iLink 表单
   const [ilinkBaseUrl, setIlinkBaseUrl] = useState('')
   const [ilinkBaseUrlTouched, setIlinkBaseUrlTouched] = useState(false)
+  const [copiedIlink, setCopiedIlink] = useState(false)
+  const [copiedWecom, setCopiedWecom] = useState(false)
 
   // wecom 表单
   const [wecomForm, setWecomForm] = useState({ bot_id: '', bot_secret: '', bot_key: 'wecom-aibot-1' })
@@ -405,6 +409,63 @@ export function EnginesPage() {
               </div>
             )}
 
+            {/* 就绪后展示 Cursor MCP 配置片段 */}
+            {ilinkStep.index === 4 && ilink?.bot_key && (
+              <div className="space-y-2 border border-green-500/20 bg-green-500/5 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium text-green-400">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Cursor MCP 配置（粘贴到 ~/.cursor/mcp.json）
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      const cfg = {
+                        mcpServers: {
+                          hitl: {
+                            command: 'npx',
+                            args: [
+                              '-y', 'hitl-mcp',
+                              '--engine', 'ilink',
+                              '--service-url', 'http://localhost:8081',
+                              '--bot-key', ilink.bot_key,
+                            ],
+                          },
+                        },
+                      }
+                      navigator.clipboard.writeText(JSON.stringify(cfg, null, 2)).then(() => {
+                        setCopiedIlink(true)
+                        setTimeout(() => setCopiedIlink(false), 2000)
+                      })
+                    }}
+                  >
+                    {copiedIlink ? (
+                      <><ClipboardCheck className="w-3.5 h-3.5 mr-1 text-green-400" /><span className="text-green-400">已复制</span></>
+                    ) : (
+                      <><Copy className="w-3.5 h-3.5 mr-1" />复制</>
+                    )}
+                  </Button>
+                </div>
+                <pre className="text-xs font-mono bg-muted/60 rounded p-3 overflow-x-auto text-muted-foreground leading-relaxed">
+{JSON.stringify({
+  mcpServers: {
+    hitl: {
+      command: 'npx',
+      args: [
+        '-y', 'hitl-mcp',
+        '--engine', 'ilink',
+        '--service-url', 'http://localhost:8081',
+        '--bot-key', ilink.bot_key,
+      ],
+    },
+  },
+}, null, 2)}
+                </pre>
+              </div>
+            )}
+
             {/* Base URL 配置 */}
             <div className="space-y-1.5">
               <label className="text-sm text-muted-foreground flex items-center gap-1.5">
@@ -534,6 +595,63 @@ export function EnginesPage() {
                 </Button>
               )}
             </div>
+            {/* 就绪后展示 Cursor MCP 配置片段 */}
+            {wecomStep.index === 4 && wecom?.bot_key && (
+              <div className="space-y-2 border border-green-500/20 bg-green-500/5 rounded-lg p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-sm font-medium text-green-400">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Cursor MCP 配置（粘贴到 ~/.cursor/mcp.json）
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    onClick={() => {
+                      const cfg = {
+                        mcpServers: {
+                          hitl: {
+                            command: 'npx',
+                            args: [
+                              '-y', 'hitl-mcp',
+                              '--engine', 'wecom-aibot',
+                              '--service-url', 'http://localhost:8081',
+                              '--bot-key', wecom.bot_key,
+                            ],
+                          },
+                        },
+                      }
+                      navigator.clipboard.writeText(JSON.stringify(cfg, null, 2)).then(() => {
+                        setCopiedWecom(true)
+                        setTimeout(() => setCopiedWecom(false), 2000)
+                      })
+                    }}
+                  >
+                    {copiedWecom ? (
+                      <><ClipboardCheck className="w-3.5 h-3.5 mr-1 text-green-400" /><span className="text-green-400">已复制</span></>
+                    ) : (
+                      <><Copy className="w-3.5 h-3.5 mr-1" />复制</>
+                    )}
+                  </Button>
+                </div>
+                <pre className="text-xs font-mono bg-muted/60 rounded p-3 overflow-x-auto text-muted-foreground leading-relaxed">
+{JSON.stringify({
+  mcpServers: {
+    hitl: {
+      command: 'npx',
+      args: [
+        '-y', 'hitl-mcp',
+        '--engine', 'wecom-aibot',
+        '--service-url', 'http://localhost:8081',
+        '--bot-key', wecom.bot_key,
+      ],
+    },
+  },
+}, null, 2)}
+                </pre>
+              </div>
+            )}
+
             <p className="text-xs text-muted-foreground">
               提示：启动并在企微给 bot 发条消息激活后，Cursor MCP 配置只需
               <code className="mx-1">--engine wecom-aibot --bot-key {wecomForm.bot_key || 'wecom-aibot-1'}</code>
