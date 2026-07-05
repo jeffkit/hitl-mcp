@@ -33,7 +33,8 @@ class WecomAibotEngineStartRequest(BaseModel):
 
 
 class IlinkEngineStartRequest(BaseModel):
-    bot_key: Optional[str] = None  # 缺省用 config.ilink_bot_key
+    bot_key: Optional[str] = None   # 缺省用 config.ilink_bot_key
+    base_url: Optional[str] = None  # 缺省用 config.ilink_base_url
 
 
 # ============== 页面路由 ==============
@@ -69,7 +70,7 @@ async def engines_ilink_start(request: IlinkEngineStartRequest):
     )
     engine = ILinkEngine(
         bot_key=bot_key,
-        base_url=config.ilink_base_url,
+        base_url=request.base_url or config.ilink_base_url,
         token_store_path=token_store_path,
         poll_timeout=config.ilink_poll_timeout,
     )

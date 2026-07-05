@@ -61,6 +61,7 @@ export interface EngineStatus {
   logged_in?: boolean
   login_status?: string
   activated_users?: { from_user_id: string; has_context_token: boolean }[]
+  base_url?: string
   // wecom-aibot 专属
   bot_id?: string
   connected?: boolean
@@ -81,8 +82,11 @@ export interface IlinkQrResponse {
 
 export const engineApi = {
   list: () => api.get<EnginesListResponse>('/engines'),
-  ilinkStart: (botKey?: string) =>
-    api.post<{ success: boolean; engine: EngineStatus }>('/engines/ilink/start', { bot_key: botKey ?? null }),
+  ilinkStart: (botKey?: string, baseUrl?: string) =>
+    api.post<{ success: boolean; engine: EngineStatus }>('/engines/ilink/start', {
+      bot_key: botKey ?? null,
+      base_url: baseUrl ?? null,
+    }),
   ilinkQr: (botKey?: string) =>
     api.get<IlinkQrResponse>(`/engines/ilink/qr${botKey ? `?bot_key=${botKey}` : ''}`),
   ilinkStatus: (botKey?: string) =>

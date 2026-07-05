@@ -13,12 +13,12 @@ import {
   RadioTower,
   ArrowRight,
   CircleDot,
+  Link,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import {
   engineApi,
   type EngineStatus,
@@ -131,11 +131,16 @@ export function EnginesPage() {
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  // iLink 二维码
-  const [qrOpen, setQrOpen] = useState(false)
+  // iLink 二维码（内联展示，不再用 Dialog）
   const [qr, setQr] = useState<IlinkQrResponse | null>(null)
   const [qrLoading, setQrLoading] = useState(false)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  // 防止重复自动触发
+  const autoFetchedRef = useRef(false)
+
+  // iLink 表单
+  const [ilinkBaseUrl, setIlinkBaseUrl] = useState('')
+  const [ilinkBaseUrlTouched, setIlinkBaseUrlTouched] = useState(false)
 
   // wecom 表单
   const [wecomForm, setWecomForm] = useState({ bot_id: '', bot_secret: '', bot_key: 'wecom-aibot-1' })
@@ -163,8 +168,15 @@ export function EnginesPage() {
   const ilinkStep = computeIlinkStep(ilink)
   const wecomStep = computeWecomStep(wecom)
 
-  // 已运行引擎的凭证回显：用户未手动编辑表单时，把后端返回的 bot_id / bot_key 同步进表单。
-  // secret 出于安全不在状态接口返回，无法回显（保持空，由占位提示说明）。
+  // 同步 iLink base_url 到表单（引擎运行时回显，用户未手动编辑时）
+  useEffect(() => {
+    if (ilinkBaseUrlTouched) return
+    if (ilink?.base_url && ilink.base_url !== ilinkBaseUrl) {
+      setIlinkBaseUrl(ilink.base_url)
+    }
+  }, [ilink?.base_url, ilinkBaseUrlTouched, ilinkBaseUrl])
+
+  // 同步 wecom 凭证回显
   useEffect(() => {
     if (wecomTouched) return
     if (wecom?.bot_id && wecom.bot_id !== wecomForm.bot_id) {
@@ -172,12 +184,36 @@ export function EnginesPage() {
     }
   }, [wecom, wecomTouched, wecomForm.bot_id])
 
+  // 当引擎运行且未登录时，自动加载二维码（无需点击）
+  useEffect(() => {
+    if (ilink?.running && !ilink.logged_in) {
+      if (!autoFetchedRef.current && !qrLoading && !qr) {
+        autoFetchedRef.current = true
+        fetchQr()
+      }
+    } else {
+      // 已登录或引擎停止时，重置自动触发标志
+      autoFetchedRef.current = false
+      if (ilink?.logged_in) {
+        setQr(null)
+        if (pollRef.current) {
+          clearInterval(pollRef.current)
+          pollRef.current = null
+        }
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ilink?.running, ilink?.logged_in])
+
   // ── iLink ──────────────────────────────────────────────
   const startIlink = async () => {
     setBusy('ilink-start')
     setError(null)
+    // 启动后会触发上面的 useEffect 自动拉取 QR，先清空旧的
+    setQr(null)
+    autoFetchedRef.current = false
     try {
-      await engineApi.ilinkStart(ilink?.bot_key)
+      await engineApi.ilinkStart(ilink?.bot_key, ilinkBaseUrl || undefined)
       await refresh()
     } catch (e) {
       setError((e as Error).message)
@@ -186,8 +222,7 @@ export function EnginesPage() {
     }
   }
 
-  const showQr = async () => {
-    setQrOpen(true)
+  const fetchQr = async () => {
     setQr(null)
     setQrLoading(true)
     setError(null)
@@ -212,7 +247,6 @@ export function EnginesPage() {
         if (st.login_status === 'success' || st.logged_in) {
           if (pollRef.current) clearInterval(pollRef.current)
           pollRef.current = null
-          setQrOpen(false)
           await refresh()
         }
       } catch {
@@ -236,7 +270,6 @@ export function EnginesPage() {
     setBusy('wecom-start')
     setError(null)
     try {
-      // Secret 留空时后端从持久化 store 补齐（重启场景）
       await engineApi.wecomStart(wecomForm.bot_id, wecomForm.bot_secret, wecomForm.bot_key)
       setWecomTouched(false)
       await refresh()
@@ -326,6 +359,39 @@ export function EnginesPage() {
               )}
             </div>
 
+            {/* 二维码区域：运行中且未登录时内联展示，无需弹窗 */}
+            {ilink?.running && !ilink.logged_in && (
+              <div className="flex flex-col items-center gap-3 py-3 border border-dashed border-border rounded-lg bg-muted/30">
+                {qrLoading && (
+                  <div className="flex flex-col items-center gap-2 py-8">
+                    <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+                    <span className="text-sm text-muted-foreground">正在获取二维码…</span>
+                  </div>
+                )}
+                {!qrLoading && qr?.status === 'pending' && qr.qr_base64 && (
+                  <img
+                    src={`data:image/png;base64,${qr.qr_base64}`}
+                    alt="扫码登录"
+                    className="w-52 h-52 rounded-lg border"
+                  />
+                )}
+                {!qrLoading && qr?.status === 'error' && (
+                  <div className="text-red-600 text-sm px-4 text-center">{qr.error}</div>
+                )}
+                {!qrLoading && !qr && !qrLoading && (
+                  <div className="text-sm text-muted-foreground py-4">准备加载二维码…</div>
+                )}
+                {qr?.status === 'pending' && (
+                  <div className="text-sm text-muted-foreground flex items-center gap-2">
+                    <Loader2 className="w-4 h-4 animate-spin" /> 等待扫码确认…
+                  </div>
+                )}
+                <Button variant="ghost" size="sm" onClick={fetchQr} disabled={qrLoading}>
+                  <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> 刷新二维码
+                </Button>
+              </div>
+            )}
+
             {ilink?.activated_users && ilink.activated_users.length > 0 && (
               <div className="text-sm">
                 <div className="text-muted-foreground mb-1">已激活用户（{ilink.activated_users.length}）：</div>
@@ -339,6 +405,22 @@ export function EnginesPage() {
               </div>
             )}
 
+            {/* Base URL 配置 */}
+            <div className="space-y-1.5">
+              <label className="text-sm text-muted-foreground flex items-center gap-1.5">
+                <Link className="w-3.5 h-3.5" /> iLink Base URL
+              </label>
+              <Input
+                value={ilinkBaseUrl}
+                onChange={(e) => { setIlinkBaseUrlTouched(true); setIlinkBaseUrl(e.target.value) }}
+                placeholder="https://ilinkai.weixin.qq.com"
+                className="font-mono text-sm"
+              />
+              <p className="text-xs text-muted-foreground">
+                iLink API 的基础地址，可指向兼容的私有部署地址。修改后需重启引擎生效。
+              </p>
+            </div>
+
             <div className="flex gap-3">
               {!ilink?.running ? (
                 <Button onClick={startIlink} disabled={busy === 'ilink-start'}>
@@ -346,10 +428,18 @@ export function EnginesPage() {
                   启动引擎
                 </Button>
               ) : (
-                <Button onClick={showQr} disabled={qrLoading}>
-                  {qrLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <QrCode className="w-4 h-4 mr-2" />}
-                  {ilink.logged_in ? '重新扫码' : '显示二维码登录'}
-                </Button>
+                <>
+                  {ilink.logged_in && (
+                    <Button variant="outline" onClick={fetchQr} disabled={qrLoading}>
+                      {qrLoading ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <QrCode className="w-4 h-4 mr-2" />}
+                      重新扫码
+                    </Button>
+                  )}
+                  <Button onClick={startIlink} disabled={busy === 'ilink-start'} variant="outline">
+                    {busy === 'ilink-start' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
+                    重启引擎
+                  </Button>
+                </>
               )}
             </div>
           </CardContent>
@@ -452,30 +542,6 @@ export function EnginesPage() {
           </CardContent>
         </Card>
       </div>
-
-      {/* 二维码弹窗 */}
-      <Dialog open={qrOpen} onOpenChange={(o) => { setQrOpen(o); if (!o && pollRef.current) { clearInterval(pollRef.current); pollRef.current = null } }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>扫码登录 iLink</DialogTitle>
-            <DialogDescription>用个人微信扫描下方二维码完成登录，登录成功后窗口自动关闭</DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col items-center gap-3 py-2">
-            {qrLoading && <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />}
-            {!qrLoading && qr?.status === 'pending' && qr.qr_base64 && (
-              <img src={`data:image/png;base64,${qr.qr_base64}`} alt="QR" className="w-64 h-64 rounded-lg border" />
-            )}
-            {!qrLoading && qr?.status === 'error' && (
-              <div className="text-red-600 text-sm">{qr.error}</div>
-            )}
-            {qr?.status === 'pending' && (
-              <div className="text-sm text-muted-foreground flex items-center gap-2">
-                <Loader2 className="w-4 h-4 animate-spin" /> 等待扫码确认…
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   )
 }

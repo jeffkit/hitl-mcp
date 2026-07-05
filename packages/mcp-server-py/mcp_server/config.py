@@ -29,7 +29,7 @@ class MCPConfig(BaseSettings):
     
     # 默认超时时间（秒）
     default_timeout: int = Field(
-        default=1200,  # 20 分钟
+        default=7200,  # 2 小时
         description="默认等待回复超时时间（秒）"
     )
     
