@@ -25,30 +25,19 @@ program
 
   // ── 子命令：iLink 一键安装 + 服务化 ───────────────────────────────────────
   .command('ilink-setup')
-  .description('一键安装并服务化 iLink worker（macOS launchd）：建 venv、写 plist、扫码登录、打印 Cursor 配置')
-  .option('--ilink-base-url <url>', 'iLink API 地址', 'https://ilinkai.weixin.qq.com')
-  .option('--bot-key <key>', 'worker 的 bot_key（MCP 端按此路由）', 'ilink-bot-1')
+  .description(
+    '一键安装并服务化 HITL Server（macOS launchd / Linux systemd）。\n' +
+    '无需任何参数：服务启动后自动打开管理台，在浏览器里完成扫码、激活、复制配置。'
+  )
   .option('--service-url <url>', 'HITL Server 地址', 'http://localhost:8081')
-  .option('--token-store <path>', 'iLink 凭证存储路径', '~/.hil-mcp/ilink_store.json')
-  .option('--project-name <name>', '写入 Cursor 配置的默认项目名')
-  .option('--enable-wecom-aibot', '同时启用企微 AI Bot 内置引擎')
-  .option('--wecom-bot-id <id>', '企微 AI Bot ID')
-  .option('--wecom-bot-secret <secret>', '企微 AI Bot Secret')
-  .option('--wecom-bot-key <key>', '企微 AI Bot 的 bot_key（MCP 端按此路由）', 'wecom-aibot-1')
-  .option('--uninstall', '卸载 launchd 服务（凭证保留）')
+  .option('--token-store <path>', 'iLink 凭证存储路径（跨重启保留登录态）', '~/.hitl/ilink_store.json')
+  .option('--uninstall', '卸载服务（凭证保留）')
   .action(async (opts) => {
     const tokenStore = opts.tokenStore.replace(/^~/, homedir());
     try {
       await runSetup({
-        ilinkBaseUrl: opts.ilinkBaseUrl,
-        botKey: opts.botKey,
         serviceUrl: opts.serviceUrl,
         tokenStorePath: tokenStore,
-        projectName: opts.projectName,
-        enableWecomAibot: !!opts.enableWecomAibot,
-        wecomBotId: opts.wecomBotId ?? '',
-        wecomBotSecret: opts.wecomBotSecret ?? '',
-        wecomBotKey: opts.wecomBotKey,
         uninstall: !!opts.uninstall,
       });
       process.exit(0);

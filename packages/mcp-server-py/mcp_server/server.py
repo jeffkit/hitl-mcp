@@ -384,7 +384,7 @@ def parse_args():
         "--timeout",
         dest="timeout",
         type=int,
-        help="默认等待回复超时时间（秒），默认 1200 秒（20 分钟）"
+        help="默认等待回复超时时间（秒），默认 7200 秒（2 小时）"
     )
     return parser.parse_args()
 

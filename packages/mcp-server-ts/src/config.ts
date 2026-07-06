@@ -47,7 +47,7 @@ export function createConfig(opts: Partial<Config>): Config {
     engine:               opts.engine               ?? 'auto',
     defaultRecipient:     opts.defaultRecipient     ?? '',
     defaultProjectName:   opts.defaultProjectName   ?? '',
-    defaultTimeout:       opts.defaultTimeout       ?? 1200,
+    defaultTimeout:       opts.defaultTimeout       ?? 7200,
     botKey:               opts.botKey               ?? '',
     serviceUrl:           opts.serviceUrl           ?? 'http://localhost:8081',
     pollInterval:         opts.pollInterval         ?? 2,
