@@ -178,7 +178,7 @@ export async function startServer(): Promise<void> {
   const engine = makeEngine(cfg.engine);
 
   const server = new Server(
-    { name: 'hitl-mcp', version: '0.3.0' },
+    { name: 'hitl-mcp', version: '0.5.0' },
     { capabilities: { tools: {} } }
   );
 
