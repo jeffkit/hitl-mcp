@@ -1,21 +1,19 @@
 /**
- * `hitl-mcp ilink-setup` — iLink 一键安装 + 服务化（macOS launchd，单进程模式）
+ * `hitl-mcp ilink-setup` — HITL Server 一键安装 + 服务化
  *
- * 架构：iLink 长连接作为 HITL Server 的内置引擎跑在同一个进程内，
- * 不再需要独立的 ilink-worker 进程。因此只需服务化 HITL Server 一个进程。
+ * 设计原则：CLI 只做「看不见」的事，「看得见」的步骤（扫码、激活、复制配置）
+ * 全部在管理台浏览器 UI 里完成。
  *
- * 流程：
- *   1. 确保 hitl-server venv 与依赖（httpx 等内置引擎所需）
- *   2. 停掉旧的服务：unload 现有 HITL Server / ilink-worker plist，kill 占用 :8081 的手动进程
- *   3. 生成 HITL Server 的 launchd plist（带 ENABLE_ILINK_ENGINE 等环境变量），load
- *   4. 等 HITL Server 起来 + 内置 ilink 引擎就绪
- *   5. 若未登录：拉二维码引导扫码
- *   6. 打印一段可直接粘贴进 Cursor 的 MCP 配置
+ * 支持的平台：
+ *   - macOS：launchd LaunchAgents（~/.hitl-server/...plist）
+ *   - Linux：systemd --user service（~/.config/systemd/user/...service）
  *
- * 设计取舍：
- *   - 全参数可命令行传入，不做交互式 readline（Agent 跑时 stdin 不可交互）。
- *   - hitl-server 用 venv 内 python 的绝对路径写进 plist，不依赖 shell PATH。
- *   - 仅支持 macOS（launchd 专属）。
+ * CLI 流程（全部无交互，零必填参数）：
+ *   1. 检查/安装 hitl-server venv（uv sync）
+ *   2. 写服务文件并启动（launchd / systemd）
+ *   3. 等 HITL Server HTTP 就绪
+ *   4. 打开管理台浏览器（open / xdg-open）
+ *      → 管理台引导：启动引擎 → 扫码 → 激活 → 复制 Cursor 配置
  */
 import { spawnSync } from 'child_process';
 import { existsSync, mkdirSync, writeFileSync, rmSync } from 'fs';
@@ -26,13 +24,18 @@ import { dirname, join, resolve } from 'path';
 
 const HITL_DIR = process.env.HITL_HOME || join(homedir(), '.hitl');
 const LOG_DIR = join(HITL_DIR, 'logs');
-const LAUNCH_AGENT_DIR = join(homedir(), 'Library', 'LaunchAgents');
 
+// macOS launchd
+const LAUNCH_AGENT_DIR = join(homedir(), 'Library', 'LaunchAgents');
 const HITL_SERVER_LABEL = 'com.woa.hitl-mcp.hitl-server';
 const HITL_SERVER_PLIST = join(LAUNCH_AGENT_DIR, `${HITL_SERVER_LABEL}.plist`);
-// 旧名 plist（改名前），重装时一并卸载，避免端口被旧服务占用
 const LEGACY_HITL_SERVER_PLIST = join(LAUNCH_AGENT_DIR, 'com.woa.hitl-mcp.hil-server.plist');
 const LEGACY_WORKER_PLIST = join(LAUNCH_AGENT_DIR, 'com.woa.hitl-mcp.ilink-worker.plist');
+
+// Linux systemd --user
+const SYSTEMD_USER_DIR = join(homedir(), '.config', 'systemd', 'user');
+const HITL_SERVER_SERVICE_NAME = 'hitl-mcp-server.service';
+const HITL_SERVER_SERVICE_PATH = join(SYSTEMD_USER_DIR, HITL_SERVER_SERVICE_NAME);
 
 /** monorepo 根：从本文件向上回溯 4 层（src -> mcp-server-ts -> packages -> hil-mcp） */
 const REPO_ROOT = resolve(dirname(new URL(import.meta.url).pathname), '..', '..', '..');
@@ -43,6 +46,10 @@ const HITL_SERVER_VENV_PY = join(HITL_SERVER_DIR, '.venv', 'bin', 'python');
 
 function log(msg: string): void {
   console.error(`[setup] ${msg}`);
+}
+
+function step(n: number, total: number, msg: string): void {
+  console.error(`\n[${n}/${total}] ${msg}`);
 }
 
 function run(cmd: string, args: string[], opts: { cwd?: string; env?: Record<string, string> } = {}): { ok: boolean; stdout: string; stderr: string; code: number | null } {
@@ -79,18 +86,17 @@ function pidListeningOn(port: number): number | null {
   return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
-// ── plist 生成 ────────────────────────────────────────────────────────────
+// ── 服务文件生成 ──────────────────────────────────────────────────────────
 
-function buildHitlServerPlist(args: {
+interface ServiceArgs {
   pythonPath: string;
   workingDir: string;
   port: string;
-  env: Record<string, string>;
+  tokenStorePath: string;
   logDir: string;
-}): string {
-  const envEntries = Object.entries(args.env)
-    .map(([k, v]) => `      <key>${k}</key><string>${v}</string>`)
-    .join('\n');
+}
+
+function buildHitlServerPlist(args: ServiceArgs): string {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -108,7 +114,8 @@ function buildHitlServerPlist(args: {
   <key>EnvironmentVariables</key>
   <dict>
       <key>HITL_PORT</key><string>${args.port}</string>
-${envEntries}
+      <key>ILINK_TOKEN_STORE_PATH</key><string>${args.tokenStorePath}</string>
+      <key>PATH</key><string>/usr/local/bin:/usr/bin:/bin:${homedir()}/.local/bin</string>
   </dict>
   <key>RunAtLoad</key>
   <true/>
@@ -120,6 +127,26 @@ ${envEntries}
   <string>${args.logDir}/hitl-server.err.log</string>
 </dict>
 </plist>
+`;
+}
+
+function buildHitlServerSystemdUnit(args: ServiceArgs): string {
+  return `[Unit]
+Description=HITL MCP Server
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=${args.workingDir}
+ExecStart=${args.pythonPath} -m hitl_server.app
+Restart=always
+Environment="HITL_PORT=${args.port}"
+Environment="ILINK_TOKEN_STORE_PATH=${args.tokenStorePath}"
+StandardOutput=append:${args.logDir}/hitl-server.out.log
+StandardError=append:${args.logDir}/hitl-server.err.log
+
+[Install]
+WantedBy=default.target
 `;
 }
 
@@ -152,58 +179,103 @@ function ensureHitlServerVenv(): string {
   return HITL_SERVER_VENV_PY;
 }
 
-/** 停掉旧的服务：unload 旧 plist + kill 占用端口的手动进程 */
-function stopExistingServices(port: number): void {
-  // 卸载旧的单进程 HITL Server plist（如有）
+// ── macOS launchd ─────────────────────────────────────────────────────────
+
+function stopExistingServicesMac(port: number): void {
   if (existsSync(HITL_SERVER_PLIST)) {
     run('launchctl', ['unload', HITL_SERVER_PLIST]);
     log('已卸载旧 HITL Server plist');
   }
-  // 卸载改名前的旧 label plist（com.woa.hitl-mcp.hil-server）
   if (existsSync(LEGACY_HITL_SERVER_PLIST)) {
     run('launchctl', ['unload', LEGACY_HITL_SERVER_PLIST]);
     rmSync(LEGACY_HITL_SERVER_PLIST);
     log('已卸载改名前的旧 plist（hil-server）');
   }
-  // 卸载遗留的独立 ilink-worker plist（切换到内置引擎后不再需要）
   if (existsSync(LEGACY_WORKER_PLIST)) {
     run('launchctl', ['unload', LEGACY_WORKER_PLIST]);
     rmSync(LEGACY_WORKER_PLIST);
-    log('已卸载遗留的独立 ilink-worker plist（改用内置引擎）');
+    log('已清理遗留 ilink-worker plist');
   }
-  // kill 占用端口的手动进程（非 launchd 管理的）
   const pid = pidListeningOn(port);
   if (pid) {
-    log(`检测到端口 ${port} 被手动进程 PID=${pid} 占用，停掉它以腾出版本...`);
+    log(`端口 ${port} 被手动进程 PID=${pid} 占用，停掉...`);
     run('kill', [String(pid)]);
   }
 }
 
-/** 写 HITL Server plist 并 load */
-function installHitlServer(pythonPath: string, env: Record<string, string>, port: string): void {
-  if (!existsSync(LAUNCH_AGENT_DIR)) mkdirSync(LAUNCH_AGENT_DIR, { recursive: true });
-  const plist = buildHitlServerPlist({
-    pythonPath,
-    workingDir: HITL_SERVER_DIR,
-    port,
-    env,
-    logDir: LOG_DIR,
-  });
-  writeFileSync(HITL_SERVER_PLIST, plist);
+function installHitlServerMac(args: ServiceArgs): void {
+  mkdirSync(LAUNCH_AGENT_DIR, { recursive: true });
+  writeFileSync(HITL_SERVER_PLIST, buildHitlServerPlist(args));
   log(`已写入 plist: ${HITL_SERVER_PLIST}`);
-  const load = run('launchctl', ['load', HITL_SERVER_PLIST]);
-  if (!load.ok) throw new Error(`launchctl load 失败: ${load.stderr}`);
-  log('HITL Server 已加载（开机自启 + 崩溃自动重启 + 内置 iLink 引擎）');
+  const r = run('launchctl', ['load', HITL_SERVER_PLIST]);
+  if (!r.ok) throw new Error(`launchctl load 失败: ${r.stderr}`);
+  log('HITL Server 已加载（开机自启 + 崩溃自动重启）');
 }
 
-/** 等 HITL Server 起来且 ilink 引擎就绪（login_status 可达即可） */
-async function waitReady(serviceUrl: string, botKey: string): Promise<void> {
+function uninstallMac(): void {
+  if (existsSync(HITL_SERVER_PLIST)) {
+    run('launchctl', ['unload', HITL_SERVER_PLIST]);
+    rmSync(HITL_SERVER_PLIST);
+    log('已卸载 HITL Server launchd 服务');
+  } else {
+    log('未找到 HITL Server plist，无需卸载');
+  }
+  for (const p of [LEGACY_WORKER_PLIST, LEGACY_HITL_SERVER_PLIST]) {
+    if (existsSync(p)) {
+      run('launchctl', ['unload', p]);
+      rmSync(p);
+      log(`已清理旧 plist: ${p}`);
+    }
+  }
+}
+
+// ── Linux systemd --user ──────────────────────────────────────────────────
+
+function stopExistingServicesLinux(port: number): void {
+  if (existsSync(HITL_SERVER_SERVICE_PATH)) {
+    run('systemctl', ['--user', 'stop', HITL_SERVER_SERVICE_NAME]);
+    log('已停止旧 HITL Server systemd 服务');
+  }
+  const pid = pidListeningOn(port);
+  if (pid) {
+    log(`端口 ${port} 被手动进程 PID=${pid} 占用，停掉...`);
+    run('kill', [String(pid)]);
+  }
+}
+
+function installHitlServerLinux(args: ServiceArgs): void {
+  mkdirSync(SYSTEMD_USER_DIR, { recursive: true });
+  writeFileSync(HITL_SERVER_SERVICE_PATH, buildHitlServerSystemdUnit(args));
+  log(`已写入 service: ${HITL_SERVER_SERVICE_PATH}`);
+  run('systemctl', ['--user', 'daemon-reload']);
+  run('systemctl', ['--user', 'enable', HITL_SERVER_SERVICE_NAME]);
+  const r = run('systemctl', ['--user', 'start', HITL_SERVER_SERVICE_NAME]);
+  if (!r.ok) throw new Error(`systemctl start 失败: ${r.stderr}`);
+  log('HITL Server 已启动（开机自启 + 崩溃自动重启）');
+}
+
+function uninstallLinux(): void {
+  if (existsSync(HITL_SERVER_SERVICE_PATH)) {
+    run('systemctl', ['--user', 'stop', HITL_SERVER_SERVICE_NAME]);
+    run('systemctl', ['--user', 'disable', HITL_SERVER_SERVICE_NAME]);
+    rmSync(HITL_SERVER_SERVICE_PATH);
+    run('systemctl', ['--user', 'daemon-reload']);
+    log('已卸载 HITL Server systemd user service');
+  } else {
+    log('未找到 systemd user service，无需卸载');
+  }
+}
+
+// ── 通用等待 ──────────────────────────────────────────────────────────────
+
+/** 等 HITL Server HTTP 就绪（管理台 API 可达即可，不依赖 iLink 引擎状态） */
+async function waitReady(serviceUrl: string): Promise<void> {
   const base = serviceUrl.replace(/\/$/, '');
-  const url = `${base}/api/ilink/login_status?bot_key=${encodeURIComponent(botKey)}`;
+  const url = `${base}/admin/api/engines`;
   for (let i = 0; i < 40; i++) {
     const r = await httpGet(url, 3000);
-    if (r !== null && r.status !== 'error') {
-      log(`HITL Server 就绪，内置 ilink 引擎 login_status=${r.status}`);
+    if (r !== null) {
+      log('HITL Server 就绪');
       return;
     }
     await sleep(1000);
@@ -260,6 +332,24 @@ async function ensureLogin(serviceUrl: string, botKey: string): Promise<void> {
   throw new Error('等待扫码超时（5 分钟内未确认）。');
 }
 
+/** 等待第一个用户给 bot 发消息（激活收件人），返回 from_user_id */
+async function waitActivation(serviceUrl: string, botKey: string): Promise<string> {
+  const base = serviceUrl.replace(/\/$/, '');
+  const url = `${base}/api/ilink/login_status?bot_key=${encodeURIComponent(botKey)}`;
+  console.error('  → 现在用手机微信给 bot 发一条任意消息（例如"hi"），激活收件人后无需填 chat-id。');
+  const deadline = Date.now() + 10 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await sleep(2000);
+    const r = await httpGet(url, 5000);
+    const users = (r?.activated_users as Array<{ from_user_id: string }>) ?? [];
+    if (users.length > 0) {
+      log(`✅ 已激活！收件人: ${users[0].from_user_id}`);
+      return users[0].from_user_id;
+    }
+  }
+  throw new Error('等待激活超时（10 分钟内未收到用户消息）。请确保已扫码登录，然后在微信里给 bot 发一条消息后重试。');
+}
+
 /** 打印可粘贴进 Cursor 的 MCP 配置 */
 function printCursorConfig(args: { serviceUrl: string; botKey: string; projectName?: string }): void {
   const cfg = {
@@ -283,47 +373,28 @@ function printCursorConfig(args: { serviceUrl: string; botKey: string; projectNa
   console.error('卸载: npx hitl-mcp ilink-setup --uninstall\n');
 }
 
-/** 卸载：unload HITL Server plist + 删文件（凭证保留） */
 function uninstallAll(): void {
-  if (existsSync(HITL_SERVER_PLIST)) {
-    run('launchctl', ['unload', HITL_SERVER_PLIST]);
-    rmSync(HITL_SERVER_PLIST);
-    log('已卸载 HITL Server launchd 服务');
-  } else {
-    log('未找到 HITL Server plist，无需卸载');
+  const plat = platform();
+  if (plat === 'darwin') {
+    uninstallMac();
+  } else if (plat === 'linux') {
+    uninstallLinux();
   }
-  if (existsSync(LEGACY_WORKER_PLIST)) {
-    run('launchctl', ['unload', LEGACY_WORKER_PLIST]);
-    rmSync(LEGACY_WORKER_PLIST);
-    log('已清理遗留的独立 ilink-worker plist');
-  }
-  if (existsSync(LEGACY_HITL_SERVER_PLIST)) {
-    run('launchctl', ['unload', LEGACY_HITL_SERVER_PLIST]);
-    rmSync(LEGACY_HITL_SERVER_PLIST);
-    log('已清理改名前的旧 plist（hil-server）');
-  }
-  log('注意：凭证文件未删除（' + HITL_DIR + '），如需彻底清理请手动 rm -rf ~/.hitl');
+  log(`凭证文件未删除（${HITL_DIR}），如需彻底清理请手动 rm -rf ~/.hitl`);
 }
 
 // ── 入口 ──────────────────────────────────────────────────────────────────
 
 export interface SetupOptions {
-  ilinkBaseUrl: string;
-  botKey: string;
   serviceUrl: string;
   tokenStorePath: string;
-  projectName?: string;
   uninstall: boolean;
-  // 企微 AI Bot 内置引擎（可选，与 iLink 共进程）
-  enableWecomAibot: boolean;
-  wecomBotId: string;
-  wecomBotSecret: string;
-  wecomBotKey: string;
 }
 
 export async function runSetup(opts: SetupOptions): Promise<void> {
-  if (platform() !== 'darwin') {
-    throw new Error('ilink-setup 目前仅支持 macOS（依赖 launchd）。Linux 请用 systemd 自行管理。');
+  const plat = platform();
+  if (plat !== 'darwin' && plat !== 'linux') {
+    throw new Error('ilink-setup 目前支持 macOS 和 Linux。Windows 请手动管理进程。');
   }
 
   if (opts.uninstall) {
@@ -348,38 +419,52 @@ export async function runSetup(opts: SetupOptions): Promise<void> {
     catch { return '8081'; }
   })();
 
-  // 1. venv + 依赖
-  const pythonPath = ensureHitlServerVenv();
-
-  // 2. 停旧服务
-  stopExistingServices(parseInt(port, 10));
-  await sleep(2000);
-
-  // 3. 安装 HITL Server（内置 ilink 引擎，可选 wecom-aibot）
-  const env: Record<string, string> = {
-    ENABLE_ILINK_ENGINE: 'true',
-    ILINK_BOT_KEY: opts.botKey,
-    ILINK_BASE_URL: opts.ilinkBaseUrl,
-    ILINK_TOKEN_STORE_PATH: opts.tokenStorePath,
-    PATH: `/usr/local/bin:/usr/bin:/bin:${homedir()}/.local/bin`,
+  const serviceArgs: ServiceArgs = {
+    pythonPath: '',      // 步骤 1 填充
+    workingDir: HITL_SERVER_DIR,
+    port,
+    tokenStorePath: opts.tokenStorePath,
+    logDir: LOG_DIR,
   };
-  if (opts.enableWecomAibot) {
-    if (!opts.wecomBotId || !opts.wecomBotSecret) {
-      throw new Error('启用 wecom-aibot 需要 --wecom-bot-id 和 --wecom-bot-secret');
-    }
-    env.ENABLE_WECOM_AIBOT_ENGINE = 'true';
-    env.WECOM_AIBOT_BOT_KEY = opts.wecomBotKey;
-    env.WECOM_AIBOT_BOT_ID = opts.wecomBotId;
-    env.WECOM_AIBOT_BOT_SECRET = opts.wecomBotSecret;
+
+  const TOTAL_STEPS = 4;
+
+  // 1. venv + 依赖
+  step(1, TOTAL_STEPS, '检查 hitl-server 环境...');
+  serviceArgs.pythonPath = ensureHitlServerVenv();
+
+  // 2. 停旧服务 + 写服务文件 + 启动
+  const svcLabel = plat === 'darwin' ? 'launchd' : 'systemd --user';
+  step(2, TOTAL_STEPS, `启动 HITL Server（${svcLabel} 服务化）...`);
+  if (plat === 'darwin') {
+    stopExistingServicesMac(parseInt(port, 10));
+    await sleep(2000);
+    installHitlServerMac(serviceArgs);
+  } else {
+    stopExistingServicesLinux(parseInt(port, 10));
+    await sleep(1000);
+    installHitlServerLinux(serviceArgs);
   }
-  installHitlServer(pythonPath, env, port);
 
-  // 4. 等就绪
-  await waitReady(opts.serviceUrl, opts.botKey);
+  // 3. 等 HITL Server HTTP 就绪
+  step(3, TOTAL_STEPS, '等待 HITL Server 启动...');
+  await waitReady(opts.serviceUrl);
 
-  // 5. 扫码登录
-  await ensureLogin(opts.serviceUrl, opts.botKey);
+  // 4. 打开管理台（引导扫码、激活、复制配置）
+  step(4, TOTAL_STEPS, '打开管理台...');
+  const consoleUrl = opts.serviceUrl.replace(/\/$/, '') + '/admin';
+  const opener = plat === 'darwin' ? 'open' : 'xdg-open';
+  run(opener, [consoleUrl]);
+  log(`管理台已打开: ${consoleUrl}`);
 
-  // 6. 打印 Cursor 配置
-  printCursorConfig({ serviceUrl: opts.serviceUrl, botKey: opts.botKey, projectName: opts.projectName });
+  console.error('\n========================================');
+  console.error('✅ 后台服务已就绪！接下来在浏览器管理台里：');
+  console.error('  1. 点击「启动引擎」');
+  console.error('  2. 扫码登录微信（二维码自动显示）');
+  console.error('  3. 用微信给 bot 发一条消息激活收件人');
+  console.error('  4. 管理台展示 Cursor MCP 配置 → 一键复制');
+  console.error('========================================\n');
+  console.error(`管理台: ${consoleUrl}`);
+  console.error(`日志:   ${LOG_DIR}`);
+  console.error('卸载:   npx hitl-mcp ilink-setup --uninstall\n');
 }

@@ -451,4 +451,5 @@ class ILinkEngine(BaseEngine):
             "logged_in": self.client.is_logged_in,
             "login_status": self.client.login_status,
             "activated_users": self.store.list_known_users(),
+            "base_url": self.client.base_url,
         }
