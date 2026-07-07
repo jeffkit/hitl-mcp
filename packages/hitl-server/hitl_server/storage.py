@@ -636,18 +636,17 @@ class RelayStorage:
                 session = waiting_sessions[0]
                 match_method = f"chat_id={chat_id}"
             elif len(waiting_sessions) > 1:
-                # 多个等待中的会话
-                session_ids = [s.short_id for s in waiting_sessions]
+                # 多个等待中的会话：FIFO 降级匹配最早创建的会话
+                # 当用户未使用引用回复时，无法精确匹配；取最早等待的会话（FIFO）
+                # 根本解法是在消息中包含 [#short_id]，引导用户引用回复
+                session = waiting_sessions[0]
+                short_ids = [s.short_id for s in waiting_sessions]
+                match_method = f"chat_id={chat_id}(fifo-fallback)"
                 logger.warning(
-                    f"多个等待中的会话: chat_id={chat_id[:16]}..., "
-                    f"count={len(waiting_sessions)}, short_ids={session_ids}"
+                    f"多个等待中的会话，FIFO 降级匹配最早会话: chat_id={chat_id[:16]}..., "
+                    f"count={len(waiting_sessions)}, short_ids={short_ids}, "
+                    f"matched={session.short_id}"
                 )
-                return {
-                    "success": False,
-                    "session_id": None,
-                    "error": f"multiple_sessions:{len(waiting_sessions)}",
-                    "waiting_sessions": [s.to_dict() for s in waiting_sessions]
-                }
         
         if session:
             # 更新 chat_type（使用回调中的真实值）

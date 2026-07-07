@@ -121,6 +121,35 @@ def _extract_text(msg: dict) -> str:
     return ""
 
 
+def _extract_quoted_text(msg: dict) -> str:
+    """从 iLink 消息中提取被引用的原始消息文本。
+
+    iLink 引用回复时，item_list 中会出现 refer_item 类型的 item（type=49）。
+    被引用的消息内容保存在 refer_item 内，字段名因版本而异，依次尝试：
+    content / displayname / text。
+
+    返回空字符串表示非引用回复或无法提取。
+    """
+    for item in msg.get("item_list", []) or []:
+        refer = item.get("refer_item") or {}
+        if not refer:
+            continue
+        # 尝试多个可能的字段名
+        content = (
+            refer.get("content")
+            or refer.get("displayname")
+            or refer.get("text")
+            or ""
+        )
+        if content:
+            return content
+        # 递归提取嵌套 item_list（部分版本中 refer_item 内嵌原始消息结构）
+        nested = _extract_text(refer)
+        if nested:
+            return nested
+    return ""
+
+
 def _build_text_reply(context_token: str, text: str, to_user_id: str) -> dict:
     return {
         "context_token": context_token,
@@ -215,7 +244,16 @@ class ILinkClient:
         from_user_id = msg.get("from_user_id", "") or ""
         context_token = msg.get("context_token", "") or ""
         text = _extract_text(msg)
-        logger.info(f"[ilink-engine] 收到消息: user={from_user_id}, text={text[:80]!r}")
+        quoted = _extract_quoted_text(msg)
+        quoted_preview = repr(quoted[:40]) if quoted else "(无引用)"
+        logger.info(
+            f"[ilink-engine] 收到消息: user={from_user_id}, "
+            f"text={text[:80]!r}, quoted={quoted_preview}"
+        )
+        # DEBUG: 若有引用 item，打印原始结构帮助排查字段名
+        for item in msg.get("item_list", []) or []:
+            if item.get("refer_item"):
+                logger.debug(f"[ilink-engine] refer_item 结构: {item!r}")
 
         if context_token and from_user_id:
             self.store.set_context_token(from_user_id, context_token)
@@ -380,14 +418,27 @@ def _format_message_with_header(
 
 
 def _to_callback_data(msg: UserMessage) -> dict:
-    """转成 fly-pigeon 兼容结构，供 storage.handle_callback 消费。"""
-    return {
+    """转成 fly-pigeon 兼容结构，供 storage.handle_callback 消费。
+
+    若用户使用了「引用回复」，被引用的原始消息文本会放入 quote 字段，
+    storage.handle_callback → _extract_short_id_from_quote 可从中提取 [#short_id]，
+    从而精确匹配到对应会话，避免多会话场景下的 FIFO 降级匹配错误。
+    """
+    data: dict = {
         "chatid": msg.from_user_id,
         "chattype": "single",
         "msgtype": "text",
         "text": {"content": msg.text},
         "from": {"userid": msg.from_user_id, "name": ""},
     }
+    quoted_text = _extract_quoted_text(msg.raw)
+    if quoted_text:
+        data["quote"] = {
+            "msgtype": "text",
+            "text": {"content": quoted_text},
+        }
+        logger.debug(f"[ilink-engine] 提取引用文本: {quoted_text[:80]!r}")
+    return data
 
 
 # ── 引擎 ──────────────────────────────────────────────────────────────────
