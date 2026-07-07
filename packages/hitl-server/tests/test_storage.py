@@ -345,3 +345,61 @@ class TestCallbackMatching:
         session_ids = [s.session_id for s in sessions]
         assert session1.session_id in session_ids
         assert session2.session_id in session_ids
+
+    @pytest.mark.asyncio
+    async def test_fifo_fallback_on_multiple_sessions(self, storage):
+        """多会话冲突时，无 short_id 的直接回复应 FIFO 匹配到最早创建的会话"""
+        chat_id = "user-multi-session"
+        session1 = await storage.create_session(chat_id=chat_id, message="第1条消息")
+        session2 = await storage.create_session(chat_id=chat_id, message="第2条消息")
+        session3 = await storage.create_session(chat_id=chat_id, message="第3条消息")
+
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "直接回复（不引用）"},
+            "from": {"userid": chat_id, "name": ""},
+        }
+
+        # 第一次回复 → 匹配 session1（FIFO 最早）
+        r1 = await storage.handle_callback(cb)
+        assert r1["success"] is True
+        assert r1["session_id"] == session1.session_id
+
+        # 第二次回复 → 匹配 session2
+        r2 = await storage.handle_callback(cb)
+        assert r2["success"] is True
+        assert r2["session_id"] == session2.session_id
+
+        # 第三次回复 → 匹配 session3（此时只剩一个，走普通 chat_id 匹配）
+        r3 = await storage.handle_callback(cb)
+        assert r3["success"] is True
+        assert r3["session_id"] == session3.session_id
+
+    @pytest.mark.asyncio
+    async def test_quote_reply_exact_match_over_fifo(self, storage):
+        """引用回复中含 short_id 时，应精确匹配对应会话（而不是 FIFO 匹配最早的）"""
+        chat_id = "user-quote-test"
+        session1 = await storage.create_session(chat_id=chat_id, message="老消息")
+        session2 = await storage.create_session(chat_id=chat_id, message="新消息")
+
+        # 用户引用 session2（更新的那个）进行回复
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "我要回复的是新消息"},
+            "from": {"userid": chat_id, "name": ""},
+            "quote": {
+                "msgtype": "text",
+                "text": {"content": f"[#{session2.short_id} 项目] 新消息"},
+            },
+        }
+        result = await storage.handle_callback(cb)
+        assert result["success"] is True
+        # 应精确匹配 session2，而非 session1（FIFO 最早）
+        assert result["session_id"] == session2.session_id
+
+        s1 = await storage.get_session(session1.session_id)
+        assert s1.status == "waiting"   # session1 未被消费
