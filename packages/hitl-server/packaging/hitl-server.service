@@ -8,17 +8,44 @@ Type=simple
 # 二进制由 deb/rpm 安装到 /opt/hitl-server/hitl-server
 ExecStart=/opt/hitl-server/hitl-server
 Environment=HITL_PORT=8081
-Environment=ENABLE_ILINK_ENGINE=true
-Environment=ILINK_BOT_KEY=ilink-bot-1
-Environment=ILINK_BASE_URL=https://ilinkai.weixin.qq.com
-# 如需开机即启用企微 AI Bot，取消下行注释并填凭证（否则在管理台运行时启动）
-# Environment=ENABLE_WECOM_AIBOT_ENGINE=true
-# Environment=WECOM_AIBOT_BOT_ID=
-# Environment=WECOM_AIBOT_BOT_SECRET=
+# 默认仅本机访问；服务器部署建议保持 127.0.0.1，由前置 nginx 反代到公网/HTTPS
+Environment=HITL_HOST=127.0.0.1
 Environment=HITL_HOME=%h/.hitl
 WorkingDirectory=/opt/hitl-server
 Restart=on-failure
 RestartSec=5
+
+# ── 会话持久化（多用户/服务器部署强烈建议开启）──────────────────────────
+# 不开启则内存模式，重启后所有等待中的会话丢失
+Environment=HIL_USE_DATABASE=true
+Environment=HIL_DATABASE_PATH=%h/.hitl/hitl_server.db
+# 如用 Postgres，改用：Environment=HIL_DATABASE_URL=postgresql+asyncpg://user:pwd@host/db
+
+# ── iLink 引擎（个人微信，按需开启）─────────────────────────────────────
+# Environment=ENABLE_ILINK_ENGINE=true
+# Environment=ILINK_BOT_KEY=ilink-bot-1
+# Environment=ILINK_BASE_URL=https://ilinkai.weixin.qq.com
+
+# ── 企微 AI Bot 引擎（服务器共享部署通常启用这个）──────────────────────
+# 凭证也可不在 unit 里写，启动后在管理台 /console 填写并落盘，重启自动恢复
+# Environment=ENABLE_WECOM_AIBOT_ENGINE=true
+# Environment=WECOM_AIBOT_BOT_ID=
+# Environment=WECOM_AIBOT_BOT_SECRET=
+# Environment=WECOM_AIBOT_BOT_KEY=wecom-aibot-1
+
+# ── 共享部署模式（一个 bot 服务全员，必配鉴权）──────────────────────────
+# 开启后：/api/* 强制 Bearer 鉴权；wecom-aibot 不再回退全局最近活跃收件人
+#（chat_id 必填，避免把 A 的确认请求发到 B）；用户首次给 bot 发消息会自动回告 chat_id
+# Environment=HITL_SHARED_MODE=true
+# 单一 API Key（持有者可对任意 chat_id 发消息，适合可信单租户）
+# Environment=HITL_API_KEY=
+# 多租户 token→chat_id 白名单（JSON）：{"tokenTom":["tom_userid"],"tokenGroupA":["grp_chatid"]}
+# Environment=HITL_API_TOKENS=
+
+# ── 管理台登录（服务器部署务必改掉默认值）──────────────────────────────
+# Environment=ADMIN_USERNAME=admin
+# Environment=ADMIN_PASSWORD=
+# Environment=ADMIN_TOKEN_SECRET=
 
 [Install]
 WantedBy=default.target
