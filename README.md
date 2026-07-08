@@ -2,7 +2,11 @@
 
 让 AI Agent 在执行关键操作前，先通过微信 / 企业微信向你确认。
 
-AI 把「需要人确认」的请求发给 hitl-server，hitl-server 把消息推到你的手机（微信 ClawBot 或企微 AI 机器人），你回复后 AI 拿到结果继续执行。整个链路本地运行，无需公网服务器。
+AI 把「需要人确认」的请求发给 hitl-server，hitl-server 把消息推到你的手机（微信 ClawBot 或企微 AI 机器人），你回复后 AI 拿到结果继续执行。
+
+两种部署形态：
+- **本地单用户**：hitl-server 跑在自己机器上，整个链路无需公网服务器（默认）。
+- **服务器共享部署**：hitl-server 跑在一台服务器上，全公司共用一个企微 AI Bot，每人用自己的 `chat_id` + API Key 收发消息。详见下文[服务器共享部署](#服务器共享部署多人共用一个企微-bot)。
 
 ```
 ┌──────────┐  MCP(stdio)  ┌──────────┐  HTTP   ┌────────────┐  长连接   ┌──────────┐
@@ -101,6 +105,56 @@ ENABLE_ILINK_ENGINE=true ./hitl-server/hitl-server
 手机收到即链路打通。再试「等回复」：
 
 > 请用 `send_and_wait_reply` 发「请回复 OK」并等我的回复。
+
+## 服务器共享部署（多人共用一个企微 bot）
+
+把 hitl-server 部署到一台服务器，全员共用一个企微 AI Bot。运维在服务端持有 bot 凭证，普通用户只需在 MCP 侧配置自己的 `chat_id` + API Key。
+
+### 服务端配置
+
+关键环境变量（`.env` 或 systemd unit）：
+
+| 变量 | 说明 |
+|---|---|
+| `HITL_SHARED_MODE=true` | 开启共享模式：`/api/*` 强制 Bearer 鉴权；wecom-aibot 不再回退全局最近活跃收件人（`chat_id` 必填，避免把 A 的确认请求发到 B） |
+| `HITL_API_KEY=<key>` | 单一 API Key，持有者可对任意 `chat_id` 发消息（可信单租户） |
+| `HITL_API_TOKENS=<json>` | 多租户白名单：`{"tokenTom":["tom_userid"],"tokenGroupA":["grp_chatid"]}`，把 token 绑定到允许的 `chat_id`，防越权。与 `HITL_API_KEY` 二选一或并存，tokens 优先 |
+| `HIL_USE_DATABASE=true` | 会话持久化，重启不丢（多用户强烈建议） |
+| `HIL_DATABASE_URL` | `mysql+aiomysql://user:pwd@host:3306/db?charset=utf8mb4` 或留空走 SQLite（`HIL_DATABASE_PATH`） |
+| `HITL_HOST=127.0.0.1` | 监听地址；服务器上建议保持 `127.0.0.1`，由 nginx 反代到公网/HTTPS |
+| `ADMIN_PASSWORD` / `ADMIN_TOKEN_SECRET` | 服务器部署务必改掉默认值 |
+
+`packaging/hitl-server.service` 内有完整的共享部署环境变量示例，可直接参照。用户首次在企微给 bot 发消息时，bot 会**自动回告其 `chat_id`**，方便自助配置。
+
+### 安全网关
+
+`/api/*` 由应用层 Bearer Token 鉴权；管理面（`/console`、`/admin/*`）默认无应用层登录，服务器暴露公网时建议在 nginx 层加 basic auth 保护 `/console` 与 `/admin/`，并上 HTTPS。
+
+### MCP 客户端配置（共享模式）
+
+用户在 Cursor 的 `mcp.json` 里带上 `--shared` / `--api-key` / `--chat-id`：
+
+```json
+{
+  "mcpServers": {
+    "hitl-mcp-shared": {
+      "command": "npx",
+      "args": [
+        "-y", "hitl-mcp",
+        "--engine", "wecom-aibot",
+        "--service-url", "https://hitl.example.com",
+        "--shared",
+        "--api-key", "<你的 API Key>",
+        "--chat-id", "<你的 chat_id>"
+      ]
+    }
+  }
+}
+```
+
+`--chat-id` 留空时 MCP 端直接报错引导，不会发请求。401/403 会给出中文提示。
+
+> 注意：企微同凭证只允许一条 WebSocket 长连接，hitl-server **不能多副本水平扩展**（多连接互踢）。要扩容需单实例 + 反代，或多 bot_id 分片。
 
 ## MCP 工具
 
