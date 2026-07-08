@@ -120,6 +120,7 @@ class WecomAibotEngine(BaseEngine):
         ws_url: str = "wss://openws.work.weixin.qq.com",
         heartbeat_interval: int = 30,
         reconnect_delay: int = 5,
+        shared_mode: bool = False,
     ):
         super().__init__(worker_type="wecom-aibot", bot_key=bot_key)
         self.bot_id = bot_id
@@ -127,6 +128,7 @@ class WecomAibotEngine(BaseEngine):
         self.ws_url = ws_url
         self.heartbeat_interval = heartbeat_interval
         self.reconnect_delay = reconnect_delay
+        self.shared_mode = shared_mode
 
         self._stopped = False
         self._ws: Optional[websockets.WebSocketClientProtocol] = None
@@ -138,6 +140,9 @@ class WecomAibotEngine(BaseEngine):
         # 已知收件人：收消息时记录，发消息时若未指定 chat_id 则取最近活跃的一个。
         # key = recipient（单聊=对方 userid，群聊=群 chatid）
         self._recipients: dict[str, dict] = {}
+        # 已回告过 chat_id 的收件人集合（避免每次首条消息都触发自动回复）。
+        # 仅 shared_mode 下使用；进程重启后会丢失，重启后首条消息会再回告一次。
+        self._welcomed: set[str] = set()
 
     # ── 生命周期 ───────────────────────────────────────────────────────────
     async def start(self) -> None:
@@ -332,11 +337,37 @@ class WecomAibotEngine(BaseEngine):
             "from_user": body.get("from") or {},
             "last_active": time.time(),
         }
+
+        # 共享模式：首次给 bot 发消息的用户，自动回告其 chat_id，便于自助配置 --chat-id。
+        # 只对「非引用回复」的纯文本触发，避免把对 agent 的正常回复也回告一遍。
+        if self.shared_mode and not m and recipient not in self._welcomed:
+            self._welcomed.add(recipient)
+            try:
+                await self._reply_chat_id(recipient, chat_type)
+            except Exception as e:
+                logger.warning(f"[wecom-aibot-engine] 回告 chat_id 失败: {e}")
+
         if self.on_user_message:
             try:
                 await self.on_user_message(callback_data)
             except Exception as e:
                 logger.error(f"[wecom-aibot-engine] 处理用户消息失败: {e}", exc_info=True)
+
+    async def _reply_chat_id(self, chat_id: str, chat_type: str) -> None:
+        """向收件人回告其 chat_id（共享模式首条消息触发，不创建会话、不附 short_id 头）。"""
+        kind = "群聊 chatid" if chat_type == "group" else "你的 userid（单聊 chat_id）"
+        text = (
+            f"✅ 已收到你的消息。\n\n"
+            f"你的 chat_id 是：`{chat_id}`\n\n"
+            f"（{kind}）\n"
+            f"请把它填进 Cursor 的 hitl-mcp 配置：`--chat-id {chat_id}`，"
+            f"之后 AI 的确认请求会精确发到这个会话。"
+        )
+        await self.send_message({
+            "chat_id": chat_id,
+            "message": text,
+            "wait_reply": False,
+        })
 
     async def send_message(self, payload: dict) -> dict:
         chat_id = payload.get("chat_id", "") or ""
@@ -345,9 +376,15 @@ class WecomAibotEngine(BaseEngine):
         project_name = payload.get("project_name") or None
         wait_reply = bool(payload.get("wait_reply", True))
 
-        if not chat_id:
+        # 共享模式：禁止回退到全局最近活跃收件人，避免把 A 的消息发给 B。
+        if not chat_id and not self.shared_mode:
             chat_id = self.resolve_recipient() or ""
         if not chat_id:
+            if self.shared_mode:
+                return {
+                    "success": False,
+                    "error": "shared_mode_missing_chat_id: 共享模式下必须指定 chat_id",
+                }
             return {
                 "success": False,
                 "error": "尚无已知收件人。请先在企业微信里给 bot 发一条消息激活，或在请求中指定 chat_id。",
@@ -392,6 +429,7 @@ class WecomAibotEngine(BaseEngine):
             "bot_id": self.bot_id,
             "running": not self._stopped,
             "connected": self._ready.is_set(),
+            "shared_mode": self.shared_mode,
             "known_recipients": self.list_recipients(),
         }
 
