@@ -11,7 +11,8 @@ class HITLConfig(BaseSettings):
     # 服务监听配置
     host: str = Field(
         default="127.0.0.1",
-        description="服务监听地址（本地服务，默认仅本机访问）"
+        alias="HITL_HOST",
+        description="服务监听地址（默认仅本机访问；服务器部署建议保持 127.0.0.1，由 nginx 反代）"
     )
     port: int = Field(
         default=8081,

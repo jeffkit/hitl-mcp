@@ -232,7 +232,10 @@ def _ilink_engine(bot_key: str):
 
 
 @router.get("/ilink/qr")
-async def ilink_get_qr(bot_key: str = Query("", description="ilink 引擎的 bot_key")):
+async def ilink_get_qr(
+    bot_key: str = Query("", description="ilink 引擎的 bot_key"),
+    _allowed: list[str] | None = Depends(require_api_token),
+):
     """获取 iLink 扫码二维码（内置 ilink 引擎）。
 
     返回: { status, qr_url, qr_base64, qrcode_key, error? }
@@ -248,7 +251,10 @@ async def ilink_get_qr(bot_key: str = Query("", description="ilink 引擎的 bot
 
 
 @router.get("/ilink/login_status")
-async def ilink_login_status(bot_key: str = Query("", description="ilink 引擎的 bot_key")):
+async def ilink_login_status(
+    bot_key: str = Query("", description="ilink 引擎的 bot_key"),
+    _allowed: list[str] | None = Depends(require_api_token),
+):
     """查询 iLink 登录状态（内置 ilink 引擎）。
 
     返回: { status: "pending" | "success" | "expired" | "not_started" | "error" }
@@ -264,7 +270,10 @@ async def ilink_login_status(bot_key: str = Query("", description="ilink 引擎�
 
 
 @router.get("/ilink/activated_users")
-async def ilink_activated_users(bot_key: str = Query("", description="ilink 引擎的 bot_key")):
+async def ilink_activated_users(
+    bot_key: str = Query("", description="ilink 引擎的 bot_key"),
+    _allowed: list[str] | None = Depends(require_api_token),
+):
     """列出 iLink 已激活用户（内置 ilink 引擎）。"""
     engine = _ilink_engine(bot_key)
     if not engine:
