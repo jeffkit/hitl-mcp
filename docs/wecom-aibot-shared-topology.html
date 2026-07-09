@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>企微 AI Bot · HITL Server 公众机器人版（远程服务版）与 hitl-mcp 架构拓扑</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --bg2: #0f1830;
+    --card: #131c38;
+    --card2: #182447;
+    --line: #283358;
+    --text: #e6ecff;
+    --muted: #9aa7d0;
+    --accent: #4f8cff;
+    --accent2: #22d3ee;
+    --green: #34d399;
+    --amber: #fbbf24;
+    --red: #f87171;
+    --pink: #f472b6;
+    --shadow: 0 10px 30px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 80% -10%, #1b2752 0%, transparent 60%),
+                radial-gradient(900px 500px at -10% 20%, #122047 0%, transparent 55%),
+                var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.7;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  header.hero {
+    border-bottom: 1px solid var(--line);
+    padding-bottom: 28px;
+    margin-bottom: 36px;
+  }
+  .eyebrow {
+    display: inline-block;
+    font-size: 12px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--accent2);
+    background: rgba(34,211,238,.08);
+    border: 1px solid rgba(34,211,238,.25);
+    padding: 4px 10px;
+    border-radius: 999px;
+    margin-bottom: 14px;
+  }
+  h1 { font-size: 30px; margin: 0 0 10px; line-height: 1.3; }
+  h1 .sub { color: var(--muted); font-weight: 400; font-size: 18px; }
+  .lead { color: var(--muted); font-size: 15px; max-width: 880px; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 12px; }
+  .meta code { color: var(--accent2); }
+
+  h2 {
+    font-size: 22px;
+    margin: 56px 0 18px;
+    padding-left: 12px;
+    border-left: 4px solid var(--accent);
+  }
+  h3 { font-size: 17px; margin: 28px 0 12px; color: #cfe0ff; }
+
+  p { margin: 10px 0; }
+  code, .c {
+    font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    background: rgba(79,140,255,.12);
+    color: #cfe0ff;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+  pre {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    box-shadow: var(--shadow);
+  }
+  pre code { background: transparent; color: #d8e3ff; padding: 0; font-size: 13px; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  @media (max-width: 900px) {
+    .grid.cols-2, .grid.cols-3 { grid-template-columns: 1fr; }
+  }
+
+  .card {
+    background: linear-gradient(180deg, var(--card) 0%, var(--card2) 100%);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 18px 20px;
+    box-shadow: var(--shadow);
+  }
+  .card h3 { margin-top: 0; }
+  .tag {
+    display: inline-block;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    margin-right: 6px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+  .tag.blue { color: var(--accent); border-color: rgba(79,140,255,.4); background: rgba(79,140,255,.08); }
+  .tag.cyan { color: var(--accent2); border-color: rgba(34,211,238,.4); background: rgba(34,211,238,.08); }
+  .tag.green { color: var(--green); border-color: rgba(52,211,153,.4); background: rgba(52,211,153,.08); }
+  .tag.amber { color: var(--amber); border-color: rgba(251,191,36,.4); background: rgba(251,191,36,.08); }
+  .tag.pink { color: var(--pink); border-color: rgba(244,114,182,.4); background: rgba(244,114,182,.08); }
+  .tag.red { color: var(--red); border-color: rgba(248,113,113,.4); background: rgba(248,113,113,.08); }
+
+  table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--accent2); font-weight: 600; background: rgba(34,211,238,.04); }
+  tr:hover td { background: rgba(79,140,255,.05); }
+  td code, th code { white-space: nowrap; }
+
+  ul { margin: 8px 0; padding-left: 22px; }
+  li { margin: 6px 0; }
+  li::marker { color: var(--accent); }
+
+  .note {
+    border-left: 3px solid var(--amber);
+    background: rgba(251,191,36,.07);
+    padding: 12px 16px;
+    border-radius: 0 10px 10px 0;
+    margin: 16px 0;
+    color: #fde9c8;
+    font-size: 14px;
+  }
+  .note b { color: var(--amber); }
+
+  /* ── 拓扑图 ───────────────────────── */
+  .topology {
+    background: linear-gradient(180deg, #0c1430 0%, #0a1128 100%);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 28px 18px;
+    box-shadow: var(--shadow);
+    overflow-x: auto;
+  }
+  .topology svg { display: block; width: 100%; min-width: 980px; height: auto; }
+
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 16px; font-size: 13px; color: var(--muted); }
+  .legend .dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; margin-right: 6px; vertical-align: middle; }
+
+  .flow { counter-reset: step; }
+  .flow .step {
+    position: relative;
+    padding: 14px 16px 14px 52px;
+    margin: 10px 0;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+  }
+  .flow .step::before {
+    counter-increment: step;
+    content: counter(step);
+    position: absolute; left: 14px; top: 14px;
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--accent); color: #fff;
+    font-weight: 700; text-align: center; line-height: 28px;
+    font-size: 14px;
+  }
+  .flow .step b { color: #cfe0ff; }
+  .flow .step .where { color: var(--muted); font-size: 12px; }
+
+  .footer { margin-top: 64px; border-top: 1px solid var(--line); padding-top: 20px; color: var(--muted); font-size: 13px; }
+  a { color: var(--accent2); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="hero">
+    <span class="eyebrow">Architecture Topology</span>
+    <h1>企微 AI Bot · HITL Server 架构拓扑<br><span class="sub">公众机器人版（远程服务版）与 hitl-mcp 客户端</span></h1>
+    <p class="lead">
+      本文基于 <code>hil-mcp</code> monorepo 源码，描述「企业微信 AI 机器人」作为消息通道时，
+      <b>远程共享部署形态</b>（代码中即 <code>HITL_SHARED_MODE=true</code>，又称公众机器人版 / 远程服务版）
+      下的整体拓扑，以及 MCP 客户端 <code>hitl-mcp</code>（<code>npx hitl-mcp</code>）如何与之协作。
+    </p>
+    <div class="meta">
+      涉及代码：<code>packages/hitl-server</code>（Python 后端） · <code>packages/mcp-server-ts</code>（TS MCP 客户端） ·
+      引擎：<code>hitl_server/engines/wecom_aibot.py</code> · 协议参考：
+      <a href="https://developer.work.weixin.qq.com/document/path/101463" target="_blank">企微 AI Bot 接入文档</a>
+    </div>
+  </header>
+
+  <!-- ===================== 整体拓扑图 ===================== -->
+  <h2>一、整体拓扑</h2>
+  <p>
+    远程服务版与本地单机版在代码上是同一套，差异仅在 <b>部署位置</b> 与 <b>鉴权 / 路由策略</b>。
+    下图展示多人共享一台远程 <code>hitl-server</code>、共用一个企微 AI Bot 的拓扑：
+  </p>
+
+  <div class="topology">
+    <svg viewBox="0 0 1100 640" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,'PingFang SC','Microsoft YaHei',sans-serif">
+      <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#4f8cff"/>
+        </marker>
+        <marker id="arrow-back" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#22d3ee"/>
+        </marker>
+        <marker id="arrow-green" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L8,3 L0,6 Z" fill="#34d399"/>
+        </marker>
+      </defs>
+
+      <!-- 背景区块：开发者本机 -->
+      <rect x="20" y="20" width="1060" height="300" rx="14" fill="rgba(79,140,255,0.05)" stroke="#283358" stroke-dasharray="6 6"/>
+      <text x="38" y="46" fill="#9aa7d0" font-size="13">开发者本机（多人各自一台）</text>
+
+      <!-- 背景区块：远程服务器 -->
+      <rect x="20" y="350" width="1060" height="270" rx="14" fill="rgba(34,211,238,0.05)" stroke="#283358" stroke-dasharray="6 6"/>
+      <text x="38" y="376" fill="#9aa7d0" font-size="13">远程服务器（HITL Server · 单实例常驻）</text>
+
+      <!-- AI Agent -->
+      <g>
+        <rect x="60" y="80" width="180" height="80" rx="10" fill="#182447" stroke="#4f8cff"/>
+        <text x="150" y="112" fill="#e6ecff" font-size="15" text-anchor="middle" font-weight="700">AI Agent</text>
+        <text x="150" y="134" fill="#9aa7d0" font-size="12" text-anchor="middle">Cursor / Claude Code</text>
+        <text x="150" y="150" fill="#9aa7d0" font-size="11" text-anchor="middle">MCP stdio 协议</text>
+      </g>
+
+      <!-- hitl-mcp (TS) -->
+      <g>
+        <rect x="330" y="80" width="200" height="80" rx="10" fill="#182447" stroke="#22d3ee"/>
+        <text x="430" y="108" fill="#e6ecff" font-size="15" text-anchor="middle" font-weight="700">hitl-mcp</text>
+        <text x="430" y="128" fill="#9aa7d0" font-size="12" text-anchor="middle">npx hitl-mcp (TS)</text>
+        <text x="430" y="146" fill="#6b78a8" font-size="11" text-anchor="middle">--engine wecom-aibot</text>
+      </g>
+
+      <!-- 第二个开发者 -->
+      <g>
+        <rect x="60" y="200" width="180" height="80" rx="10" fill="#182447" stroke="#4f8cff" opacity="0.85"/>
+        <text x="150" y="232" fill="#e6ecff" font-size="15" text-anchor="middle" font-weight="700">AI Agent</text>
+        <text x="150" y="254" fill="#9aa7d0" font-size="12" text-anchor="middle">开发者 B</text>
+      </g>
+      <g>
+        <rect x="330" y="200" width="200" height="80" rx="10" fill="#182447" stroke="#22d3ee" opacity="0.85"/>
+        <text x="430" y="228" fill="#e6ecff" font-size="15" text-anchor="middle" font-weight="700">hitl-mcp</text>
+        <text x="430" y="248" fill="#9aa7d0" font-size="12" text-anchor="middle">--shared --api-key &lt;B&gt;</text>
+        <text x="430" y="266" fill="#6b78a8" font-size="11" text-anchor="middle">--chat-id &lt;B 的 chat_id&gt;</text>
+      </g>
+
+      <!-- HTTPS / API 鉴权 -->
+      <text x="610" y="148" fill="#fbbf24" font-size="12">HTTPS + Bearer API Key</text>
+      <text x="610" y="164" fill="#6b78a8" font-size="11">POST /api/send · GET /api/poll</text>
+
+      <!-- HITL Server 主体 -->
+      <g>
+        <rect x="600" y="80" width="460" height="240" rx="12" fill="#131c38" stroke="#4f8cff" stroke-width="1.5"/>
+        <text x="830" y="108" fill="#e6ecff" font-size="15" text-anchor="middle" font-weight="700">hitl-server (FastAPI · :8081)</text>
+
+        <!-- /api 层 -->
+        <rect x="620" y="124" width="200" height="56" rx="8" fill="#0f1830" stroke="#283358"/>
+        <text x="720" y="148" fill="#cfe0ff" font-size="12" text-anchor="middle">/api/send · /api/poll</text>
+        <text x="720" y="166" fill="#9aa7d0" font-size="11" text-anchor="middle">handlers/api.py · auth.py</text>
+
+        <!-- Storage -->
+        <rect x="840" y="124" width="200" height="56" rx="8" fill="#0f1830" stroke="#283358"/>
+        <text x="940" y="148" fill="#cfe0ff" font-size="12" text-anchor="middle">Storage 会话管理</text>
+        <text x="940" y="166" fill="#9aa7d0" font-size="11" text-anchor="middle">storage.py · SQLite/JSON</text>
+
+        <!-- Engine Manager -->
+        <rect x="620" y="200" width="200" height="56" rx="8" fill="#0f1830" stroke="#283358"/>
+        <text x="720" y="224" fill="#cfe0ff" font-size="12" text-anchor="middle">EngineManager</text>
+        <text x="720" y="242" fill="#9aa7d0" font-size="11" text-anchor="middle">engines/manager.py</text>
+
+        <!-- wecom-aibot 引擎 -->
+        <rect x="840" y="200" width="200" height="56" rx="8" fill="#0f1830" stroke="#34d399"/>
+        <text x="940" y="224" fill="#cfe0ff" font-size="12" text-anchor="middle">WecomAibotEngine</text>
+        <text x="940" y="242" fill="#9aa7d0" font-size="11" text-anchor="middle">engines/wecom_aibot.py</text>
+
+        <!-- 管理台 -->
+        <rect x="620" y="276" width="420" height="34" rx="8" fill="#0f1830" stroke="#f472b6"/>
+        <text x="830" y="297" fill="#fde0ef" font-size="12" text-anchor="middle">管理台 /console（React SPA） · /admin/api/engines · 凭证落盘</text>
+      </g>
+
+      <!-- 企业微信云 -->
+      <g>
+        <rect x="320" y="410" width="460" height="160" rx="12" fill="#0f1830" stroke="#34d399" stroke-width="1.5"/>
+        <text x="550" y="438" fill="#e6ecff" font-size="15" text-anchor="middle" font-weight="700">企业微信开放平台</text>
+        <text x="550" y="458" fill="#9aa7d0" font-size="12" text-anchor="middle">wss://openws.work.weixin.qq.com</text>
+
+        <rect x="360" y="476" width="170" height="64" rx="8" fill="#131c38" stroke="#283358"/>
+        <text x="445" y="500" fill="#cfe0ff" font-size="12" text-anchor="middle">aibot_subscribe</text>
+        <text x="445" y="518" fill="#9aa7d0" font-size="11" text-anchor="middle">aibot_msg_callback</text>
+        <text x="445" y="532" fill="#9aa7d0" font-size="11" text-anchor="middle">aibot_send_msg · ping</text>
+
+        <rect x="560" y="476" width="180" height="64" rx="8" fill="#131c38" stroke="#283358"/>
+        <text x="650" y="502" fill="#cfe0ff" font-size="12" text-anchor="middle">企微 AI Bot</text>
+        <text x="650" y="520" fill="#9aa7d0" font-size="11" text-anchor="middle">bot_id + bot_secret</text>
+        <text x="650" y="534" fill="#9aa7d0" font-size="11" text-anchor="middle">（公众机器人：全员共用）</text>
+      </g>
+
+      <!-- 手机端用户 -->
+      <g>
+        <rect x="820" y="430" width="220" height="120" rx="12" fill="#182447" stroke="#fbbf24"/>
+        <text x="930" y="458" fill="#e6ecff" font-size="15" text-anchor="middle" font-weight="700">📱 企微客户端</text>
+        <text x="930" y="482" fill="#9aa7d0" font-size="12" text-anchor="middle">开发者 A / B / 群聊</text>
+        <text x="930" y="502" fill="#9aa7d0" font-size="11" text-anchor="middle">引用回复带「...」→ short_id</text>
+        <text x="930" y="520" fill="#9aa7d0" font-size="11" text-anchor="middle">首次发消息 → 自动回告 chat_id</text>
+      </g>
+
+      <!-- 连线：Agent <-> hitl-mcp -->
+      <path d="M240 120 L330 120" stroke="#4f8cff" stroke-width="2" marker-end="url(#arrow)"/>
+      <path d="M330 138 L240 138" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow-back)"/>
+      <text x="252" y="112" fill="#6b78a8" font-size="10">MCP(stdio)</text>
+
+      <path d="M240 240 L330 240" stroke="#4f8cff" stroke-width="2" marker-end="url(#arrow)" opacity="0.7"/>
+
+      <!-- hitl-mcp -> hitl-server -->
+      <path d="M530 120 L600 152" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow)"/>
+      <path d="M600 168 L530 140" stroke="#22d3ee" stroke-width="2" marker-end="url(#arrow-back)"/>
+
+      <path d="M530 240 L600 200" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow)" opacity="0.7"/>
+
+      <!-- engine <-> 企微云 -->
+      <path d="M940 256 C 940 360, 650 380, 550 410" stroke="#34d399" stroke-width="2" marker-end="url(#arrow-green)"/>
+      <path d="M550 410 C 650 380, 940 360, 940 256" stroke="#34d399" stroke-width="2" marker-end="url(#arrow-green)" opacity="0.7"/>
+      <text x="780" y="372" fill="#34d399" font-size="12">WebSocket 长连接（订阅 / 心跳 / 收发）</text>
+
+      <!-- 企微云 <-> 手机 -->
+      <path d="M740 490 L820 490" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow)"/>
+      <path d="M820 500 L740 500" stroke="#fbbf24" stroke-width="2" marker-end="url(#arrow)" opacity="0.7"/>
+      <text x="745" y="478" fill="#6b78a8" font-size="10">消息下发 / 回复上行</text>
+    </svg>
+
+    <div class="legend">
+      <span><span class="dot" style="background:#4f8cff"></span>MCP / 请求下行</span>
+      <span><span class="dot" style="background:#22d3ee"></span>响应 / 回复上行</span>
+      <span><span class="dot" style="background:#fbbf24"></span>HTTPS + Bearer 鉴权</span>
+      <span><span class="dot" style="background:#34d399"></span>企微 WebSocket 长连接</span>
+      <span><span class="dot" style="background:#f472b6"></span>管理台</span>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>「公众机器人版 / 远程服务版」的本质</b>：仍是同一个 <code>hitl-server</code> 二进制，只是
+    ① 部署在公网 / 内网服务器上（<code>HITL_HOST</code> + nginx 反代）；
+    ② 开启 <code>HITL_SHARED_MODE=true</code>，强制 <code>/api/*</code> 鉴权、
+    <b>禁止回退到全局最近活跃收件人</b>，从而让一个企微 AI Bot 安全地服务多个开发者。
+  </div>
+
+  <!-- ===================== 三层职责 ===================== -->
+  <h2>二、三层职责划分</h2>
+  <div class="grid cols-3">
+    <div class="card">
+      <span class="tag blue">① 客户端</span>
+      <h3>AI Agent + hitl-mcp</h3>
+      <p>运行在<b>每个开发者本机</b>。Agent 通过 MCP(stdio) 调用 <code>hitl-mcp</code> 暴露的两个工具：
+      <code>send_and_wait_reply</code> 与 <code>send_message_only</code>。</p>
+      <ul>
+        <li><b>不持有</b>任何微信 / 企微长连接</li>
+        <li>把工具调用翻译为对远程 <code>hitl-server</code> 的 HTTP 请求</li>
+        <li>轮询 <code>/api/poll/&lt;session_id&gt;</code> 取回复，交回 Agent</li>
+        <li>共享模式：请求带 <code>Authorization: Bearer &lt;api-key&gt;</code>，<code>--chat-id</code> 必填</li>
+      </ul>
+      <p class="where" style="color:var(--muted);font-size:12px">代码：<code>packages/mcp-server-ts/src/</code></p>
+    </div>
+
+    <div class="card">
+      <span class="tag cyan">② 后端</span>
+      <h3>hitl-server（远程常驻）</h3>
+      <p>单进程 FastAPI 服务，是整个系统的<b>中枢</b>：</p>
+      <ul>
+        <li>进程内维持企微 AI Bot 的 <b>WebSocket 长连接</b>（订阅 / 心跳 / 断线重连）</li>
+        <li>会话管理：分配 <code>[#short_id]</code>、引用回复精确匹配、FIFO 降级、超时清理</li>
+        <li>API 鉴权：<code>HITL_API_KEY</code> 单 key 或 <code>HITL_API_TOKENS</code> 多租户白名单</li>
+        <li>管理台 <code>/console</code>：填凭证、看引擎状态、调试会话</li>
+      </ul>
+      <p class="where" style="color:var(--muted);font-size:12px">代码：<code>packages/hitl-server/hitl_server/</code></p>
+    </div>
+
+    <div class="card">
+      <span class="tag green">③ 通道</span>
+      <h3>企业微信 AI Bot</h3>
+      <p>消息通道由企微开放平台提供，<b>只有一个 Bot</b>（公众机器人），全员共用：</p>
+      <ul>
+        <li>连接：<code>wss://openws.work.weixin.qq.com</code></li>
+        <li>鉴权：<code>aibot_subscribe</code> 带 <code>bot_id</code> + <code>secret</code></li>
+        <li>收：<code>aibot_msg_callback</code> → 单聊按 <code>from.userid</code>、群聊按 <code>chatid</code></li>
+        <li>发：<code>aibot_send_msg</code>（markdown），收件人即 <code>chatid</code></li>
+      </ul>
+      <p class="where" style="color:var(--muted);font-size:12px">协议：<a href="https://developer.work.weixin.qq.com/document/path/101463" target="_blank">path/101463</a></p>
+    </div>
+  </div>
+
+  <!-- ===================== 共享模式机制 ===================== -->
+  <h2>三、公众机器人版（共享模式）的关键机制</h2>
+  <p>
+    共享部署的核心难题是：<b>一个 Bot、一台 Server，如何安全地服务 N 个开发者，且不让 A 的确认请求发到 B 的会话里</b>。
+    代码用三道闸门解决：
+  </p>
+
+  <div class="grid cols-3">
+    <div class="card">
+      <span class="tag amber">闸门 1</span>
+      <h3>API 鉴权（防冒充）</h3>
+      <p>共享模式下 <code>/api/*</code> <b>强制</b>带 Bearer Token（<code>handlers/auth.py</code>）：</p>
+      <ul>
+        <li><code>HITL_API_KEY</code>：单一 key，持有者可发任意 chat_id（可信单租户）</li>
+        <li><code>HITL_API_TOKENS</code>：JSON <code>{token: [chat_id, ...]}</code>，做 <b>chat_id 白名单</b>绑定</li>
+        <li>越权请求一律 <code>403</code>，token 缺失 / 非法 <code>401</code></li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <span class="tag red">闸门 2</span>
+      <h3>chat_id 必填（防串扰）</h3>
+      <p>非共享模式下，<code>chat_id</code> 为空会回退到「最近活跃收件人」。共享模式下<b>禁止回退</b>：</p>
+      <ul>
+        <li><code>/api/send</code>：空 <code>chat_id</code> 直接拒绝 <code>shared_mode_missing_chat_id</code></li>
+        <li><code>WecomAibotEngine.send_message</code>：<code>shared_mode</code> 下同样拒绝</li>
+        <li>MCP 端 <code>--shared</code> 且无 <code>recipient</code> → 本地直接报错，不发请求</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <span class="tag green">闸门 3</span>
+      <h3>自助获取 chat_id（防门槛）</h3>
+      <p>新用户如何知道自己的 <code>chat_id</code>？共享模式有<b>自动回告</b>机制：</p>
+      <ul>
+        <li>用户首次在企微给 bot 发<b>纯文本</b>消息（非引用回复）</li>
+        <li>引擎 <code>_reply_chat_id()</code> 把该会话的 <code>chat_id</code> 回复给用户</li>
+        <li>用户把它填进 MCP 配置 <code>--chat-id</code>，之后 AI 请求精确发到该会话</li>
+        <li><code>_welcomed</code> 集合避免重复回告（进程重启后会再回告一次）</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>凭证归属</b>：共享模式下，<code>bot_id</code> / <code>bot_secret</code> 由<b>运维</b>在服务端（环境变量或管理台）
+    统一持有。普通用户的 MCP 配置<b>不应</b>带 <code>--bot-id</code> / <code>--bot-secret</code>，
+    也不应调用 <code>/api/engines/wecom-aibot/start</code>（该接口受 API Token 鉴权保护，避免凭证覆盖导致 WS 互踢）。
+  </div>
+
+  <!-- ===================== 数据流 ===================== -->
+  <h2>四、一条消息的完整旅程</h2>
+  <p>以开发者 A 让 AI 执行 <code>send_and_wait_reply</code> 为例，从 Agent 调用到拿到回复的全链路：</p>
+
+  <div class="flow">
+    <div class="step">
+      <b>Agent 调用工具</b> <code>send_and_wait_reply({ message, recipient: chat_id_A })</code>
+      <div class="where">📍 AI Agent · MCP(stdio)</div>
+    </div>
+    <div class="step">
+      <b>hitl-mcp 转 HTTP</b>：POST <code>/api/send</code>，body 带 <code>message / chat_id / wait_reply=true / bot_key / upstream=wecom-aibot</code>，
+      header 带 <code>Authorization: Bearer &lt;A 的 api-key&gt;</code>
+      <div class="where">📍 mcp-server-ts/src/engines/wecom-aibot.ts · sendAndWait()</div>
+    </div>
+    <div class="step">
+      <b>鉴权 + 白名单校验</b>：<code>require_api_token</code> 校验 Bearer → 返回该 token 允许的 chat_id 列表；
+      <code>ensure_chat_id_allowed</code> 确认 <code>chat_id_A</code> 在白名单内，否则 403
+      <div class="where">📍 hitl-server/handlers/auth.py + api.py</div>
+    </div>
+    <div class="step">
+      <b>引擎路由 + 创建会话</b>：<code>engine_manager.get_by_bot_key/upstream</code> 找到 <code>WecomAibotEngine</code>；
+      <code>storage.create_session()</code> 生成 <code>session_id</code> 与 <code>short_id</code>（前 8 位），状态 <code>waiting</code>
+      <div class="where">📍 engines/manager.py + storage.py</div>
+    </div>
+    <div class="step">
+      <b>拼接消息头并下发</b>：引擎 <code>_format_message_with_header</code> 拼成
+      <code>[#short_id 项目名]\n消息正文\n\n&gt; 请引用回复此消息</code>，通过 <code>aibot_send_msg</code>（markdown）发到企微
+      <div class="where">📍 engines/wecom_aibot.py · send_message()</div>
+    </div>
+    <div class="step">
+      <b>hitl-mcp 开始轮询</b>：拿到 <code>session_id</code> 后循环 GET <code>/api/poll/&lt;session_id&gt;</code>（默认 2s 间隔）
+      <div class="where">📍 mcp-server-ts/src/engines/wecom-aibot.ts · _pollReply()</div>
+    </div>
+    <div class="step">
+      <b>用户在企微回复</b>（建议「引用回复」）：企微回调 <code>aibot_msg_callback</code> 经 WebSocket 进入引擎
+      <code>_on_msg_callback</code>，正则 <code>^「(.+?)」</code> 提取引用块，组装 fly-pigeon 兼容结构
+      <div class="where">📍 engines/wecom_aibot.py · _on_msg_callback()</div>
+    </div>
+    <div class="step">
+      <b>回调匹配会话</b>：<code>storage.handle_callback</code> 优先按 <code>short_id</code> 匹配；
+      匹配不到再按 <code>chat_id</code> 找等待中的会话（唯一则命中，多个则 FIFO 降级），<code>add_reply</code> 挂到 session，状态置 <code>replied</code>
+      <div class="where">📍 storage.py · handle_callback()</div>
+    </div>
+    <div class="step">
+      <b>轮询拿到回复 → 返回 Agent</b>：<code>hitl-mcp</code> 轮询到 <code>has_reply=true</code>，把回复文本包成
+      <code>{ status: 'success', replies: [...] }</code> 返回，Agent 继续执行
+      <div class="where">📍 mcp-server-ts/src/server.ts · resultToContent()</div>
+    </div>
+  </div>
+
+  <!-- ===================== 关键源码映射 ===================== -->
+  <h2>五、关键源码映射</h2>
+  <table>
+    <thead>
+      <tr><th>组件</th><th>文件</th><th>职责</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="tag cyan">MCP 入口</span></td>
+        <td><code>mcp-server-ts/src/index.ts</code></td>
+        <td>commander 解析 <code>--engine/--shared/--api-key/--chat-id/--service-url</code> 等参数，启动 MCP server</td>
+      </tr>
+      <tr>
+        <td><span class="tag cyan">MCP 工具</span></td>
+        <td><code>mcp-server-ts/src/server.ts</code></td>
+        <td>注册 <code>send_and_wait_reply</code> / <code>send_message_only</code>；<code>auto</code> 模式查 <code>/admin/api/engines</code> 按优先级解析引擎</td>
+      </tr>
+      <tr>
+        <td><span class="tag cyan">TS 引擎</span></td>
+        <td><code>mcp-server-ts/src/engines/wecom-aibot.ts</code></td>
+        <td>HTTP 客户端：调 <code>/api/send</code> + <code>/api/poll</code>；启动时可选自动注册凭证（共享模式跳过）</td>
+      </tr>
+      <tr>
+        <td><span class="tag blue">后端入口</span></td>
+        <td><code>hitl_server/app.py</code></td>
+        <td>FastAPI lifespan：从 env / 持久化 store 恢复凭证 → 注册 <code>WecomAibotEngine</code> → <code>start_all()</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag blue">API 路由</span></td>
+        <td><code>hitl_server/handlers/api.py</code></td>
+        <td><code>/api/send</code>（命中引擎进程内调用）、<code>/api/poll</code>、<code>/api/engines/wecom-aibot/start</code>（动态注册）</td>
+      </tr>
+      <tr>
+        <td><span class="tag amber">鉴权</span></td>
+        <td><code>hitl_server/handlers/auth.py</code></td>
+        <td>管理台 JWT + <code>/api/*</code> Bearer Token；<code>HITL_API_TOKENS</code> 多租户 chat_id 白名单</td>
+      </tr>
+      <tr>
+        <td><span class="tag green">企微引擎</span></td>
+        <td><code>hitl_server/engines/wecom_aibot.py</code></td>
+        <td>WS 长连接：subscribe / ping / <code>aibot_msg_callback</code> / <code>aibot_send_msg</code>；共享模式回告 chat_id；凭证 <code>WecomAibotStore</code> 落盘</td>
+      </tr>
+      <tr>
+        <td><span class="tag">引擎管理</span></td>
+        <td><code>hitl_server/engines/manager.py</code></td>
+        <td>单例 <code>EngineManager</code>：按 <code>bot_key</code> / <code>worker_type</code> 索引，<code>start_all/stop_all</code></td>
+      </tr>
+      <tr>
+        <td><span class="tag">会话存储</span></td>
+        <td><code>hitl_server/storage.py</code></td>
+        <td>会话 / 回复 / short_id 索引 / chat_id 索引；<code>handle_callback</code> 匹配；内存或 SQLite/MySQL 双模式</td>
+      </tr>
+      <tr>
+        <td><span class="tag pink">管理台</span></td>
+        <td><code>hitl_server/handlers/admin.py</code> + <code>console/</code></td>
+        <td><code>/admin/api/engines</code> 状态查询、动态启停引擎、会话调试；React SPA 挂载于 <code>/console</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- ===================== 两种部署形态对比 ===================== -->
+  <h2>六、本地单机版 vs 公众机器人版（远程服务版）</h2>
+  <p>同一套代码，通过环境变量切换形态。关键差异：</p>
+  <table>
+    <thead>
+      <tr><th>维度</th><th>本地单机版</th><th>公众机器人版（远程服务版）</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>部署位置</td>
+        <td>开发者本机 <code>127.0.0.1:8081</code>（brew/systemd 托管）</td>
+        <td>远程服务器，nginx 反代，公网或内网可达</td>
+      </tr>
+      <tr>
+        <td>Bot 归属</td>
+        <td>通常每人一个 / 自用</td>
+        <td><b>全公司共用一个企微 AI Bot</b>（公众机器人）</td>
+      </tr>
+      <tr>
+        <td><code>HITL_SHARED_MODE</code></td>
+        <td><code>false</code>（默认）</td>
+        <td><code>true</code></td>
+      </tr>
+      <tr>
+        <td><code>/api/*</code> 鉴权</td>
+        <td>可选（未配 key/tokens 则放行，向后兼容）</td>
+        <td><b>强制</b>：必须配 <code>HITL_API_KEY</code> 或 <code>HITL_API_TOKENS</code></td>
+      </tr>
+      <tr>
+        <td>chat_id 缺省行为</td>
+        <td>回退到「最近活跃收件人」</td>
+        <td><b>直接拒绝</b>，必须显式指定 <code>--chat-id</code></td>
+      </tr>
+      <tr>
+        <td>多租户隔离</td>
+        <td>无（单用户）</td>
+        <td>API Token → chat_id 白名单；会话按 short_id（全局唯一）精确匹配</td>
+      </tr>
+      <tr>
+        <td>新用户接入</td>
+        <td>管理台扫码 / 填凭证</td>
+        <td>企微给 bot 发条消息 → 自动回告 chat_id → 填进 MCP 配置即可</td>
+      </tr>
+      <tr>
+        <td>凭证持有</td>
+        <td>用户自己持有 <code>bot_id/secret</code></td>
+        <td><b>运维</b>统一持有；用户 MCP 只带 <code>--api-key</code> + <code>--chat-id</code></td>
+      </tr>
+      <tr>
+        <td>MCP 关键参数</td>
+        <td><code>--service-url http://localhost:8081</code></td>
+        <td><code>--shared --api-key &lt;key&gt; --chat-id &lt;id&gt; --service-url https://hil.example.com</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>MCP 客户端配置示例（公众机器人版）</h3>
+  <pre><code>{
+  "mcpServers": {
+    "hitl-mcp-shared": {
+      "command": "npx",
+      "args": [
+        "-y", "hitl-mcp",
+        "--engine", "wecom-aibot",
+        "--service-url", "https://hil.example.com",
+        "--shared",
+        "--api-key", "&lt;运维分配的 token&gt;",
+        "--chat-id", "&lt;你的 chat_id&gt;",
+        "--project-name", "my-project"
+      ],
+      "env": { "http_proxy": "", "https_proxy": "", "all_proxy": "" }
+    }
+  }
+}</code></pre>
+
+  <h3>服务端最小环境变量（公众机器人版）</h3>
+  <pre><code>HITL_HOST=127.0.0.1          # 由 nginx 反代到公网，不直接暴露
+HITL_PORT=8081
+ENABLE_WECOM_AIBOT_ENGINE=true
+WECOM_AIBOT_BOT_ID=&lt;公众机器人 ID&gt;
+WECOM_AIBOT_BOT_SECRET=&lt;公众机器人 Secret&gt;
+HITL_SHARED_MODE=true
+# 二选一：
+HITL_API_KEY=&lt;单一可信 key&gt;
+# 或多租户白名单：
+HITL_API_TOKENS={"tokenAlice":["alice_userid"],"tokenGroupA":["group_chatid_a"]}
+USE_DATABASE=true            # 推荐：远程部署用 SQLite/MySQL 持久化会话
+DATABASE_URL=sqlite+aiosqlite:///./data/service.db</code></pre>
+
+  <!-- ===================== 可靠性 ===================== -->
+  <h2>七、可靠性与安全要点</h2>
+  <div class="grid cols-2">
+    <div class="card">
+      <h3>连接可靠性</h3>
+      <ul>
+        <li><b>断线指数退避重连</b>：<code>_run_loop</code> 从 5s 起步，翻倍至 60s 上限</li>
+        <li><b>应用层心跳</b>：每 30s 发 <code>ping</code>，绕开 nginx 的协议级 ping 超时</li>
+        <li><b>读循环前置</b>：先启动 <code>_reader_loop</code> 再等订阅响应，避免死锁</li>
+        <li><b>disconnected_event 监控</b>：同凭证多连接互踢时仅告警，由运维排查</li>
+        <li><b>凭证落盘</b>：<code>WecomAibotStore</code> 原子写 <code>wecom_aibot_store.json</code>，重启自动恢复</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>安全边界</h3>
+      <ul>
+        <li><b>API 鉴权</b>：共享模式强制 Bearer Token，防冒充任意 chat_id</li>
+        <li><b>chat_id 白名单</b>：token 绑定可发 chat_id，越权 403</li>
+        <li><b>收件人锁定</b>：共享模式禁止回退，防 A 的消息发到 B</li>
+        <li><b>管理台</b>：JWT 账号密码保护，动态注册接口同样受 API Token 保护</li>
+        <li><b>会话隔离</b>：靠 <code>short_id</code> 全局唯一精确匹配，引用回复杜绝多会话串扰</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer">
+    源码仓库：<code>hil-mcp</code> monorepo · 生成依据：<code>packages/hitl-server</code> 与 <code>packages/mcp-server-ts</code> 实际代码 ·
+    协议：<a href="https://developer.work.weixin.qq.com/document/path/101463" target="_blank">企业微信 AI Bot 接入文档</a>
+  </div>
+
+</div>
+</body>
+</html>
