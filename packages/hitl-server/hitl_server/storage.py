@@ -609,7 +609,14 @@ class RelayStorage:
         
         # 提取回复
         reply, short_id = extract_reply_from_callback(data)
-        
+
+        # 引擎可直接在 data["short_id"] 里携带 short_id（如 iLink 从 refer_item
+        # 子树提取），优先级高于从 quote/正文解析的值，避免 refer_item 字段名
+        # 差异导致 short_id 丢失。
+        engine_short_id = (data.get("short_id") or "").strip() or None
+        if engine_short_id:
+            short_id = engine_short_id
+
         # 详细记录提取结果，便于排查消息匹配问题
         reply_preview = (reply.content or "")[:60] if reply else ""
         logger.info(
@@ -636,17 +643,22 @@ class RelayStorage:
                 session = waiting_sessions[0]
                 match_method = f"chat_id={chat_id}"
             elif len(waiting_sessions) > 1:
-                # 多个等待中的会话：FIFO 降级匹配最早创建的会话
-                # 当用户未使用引用回复时，无法精确匹配；取最早等待的会话（FIFO）
-                # 根本解法是在消息中包含 [#short_id]，引导用户引用回复
-                session = waiting_sessions[0]
+                # 多个等待中的会话且未提取到 short_id：无法确定回复目标。
+                # 不再 FIFO 猜测（会把回复错配到非用户意图的会话），改为拒绝匹配，
+                # 返回等待中的 short_id 列表，供上层引导用户使用「引用回复」精确指定。
                 short_ids = [s.short_id for s in waiting_sessions]
-                match_method = f"chat_id={chat_id}(fifo-fallback)"
                 logger.warning(
-                    f"多个等待中的会话，FIFO 降级匹配最早会话: chat_id={chat_id[:16]}..., "
-                    f"count={len(waiting_sessions)}, short_ids={short_ids}, "
-                    f"matched={session.short_id}"
+                    f"多个等待中的会话且未提取到 short_id，拒绝匹配: "
+                    f"chat_id={chat_id[:16]}..., count={len(waiting_sessions)}, "
+                    f"short_ids={short_ids}, reply_preview={reply_preview!r}"
                 )
+                return {
+                    "success": False,
+                    "session_id": None,
+                    "error": "ambiguous_reply_require_quote",
+                    "chat_id": chat_id,
+                    "waiting_short_ids": short_ids,
+                }
         
         if session:
             # 更新 chat_type（使用回调中的真实值）
