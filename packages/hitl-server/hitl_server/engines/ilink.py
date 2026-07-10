@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import random
+import re
 import threading
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
@@ -25,6 +26,9 @@ from .base import BaseEngine
 logger = logging.getLogger(__name__)
 
 UA = "Mozilla/5.0 (compatible; iLink-Bot/1.0)"
+
+# 与 storage.SESSION_ID_PATTERN 保持一致：匹配 [#short_id] 或 [#short_id 项目名]
+_ILINK_SESSION_ID_RE = re.compile(r'\[#([a-f0-9]{8})(?:\s+[^\]]+)?\]')
 
 
 # ── Token 持久化 ──────────────────────────────────────────────────────────
@@ -148,6 +152,29 @@ def _extract_quoted_text(msg: dict) -> str:
         if nested:
             return nested
     return ""
+
+
+def _extract_short_id_from_refer(msg: dict) -> str | None:
+    """从 iLink 引用回复的 refer_item 子树中提取 [#short_id]。
+
+    iLink 引用回复时，被引用的原始消息（含我们注入的 [#short_id] 头部）保存在
+    refer_item 内，但字段名因版本而异（content / displayname / text / ...），
+    _extract_quoted_text 逐字段尝试容易漏。这里对整个 refer_item 子树做 JSON
+    序列化后用正则搜索 [#short_id]，只要被引用原文完整保留了头部即可命中，
+    不依赖具体字段名。
+    """
+    for item in msg.get("item_list", []) or []:
+        refer = item.get("refer_item")
+        if not refer:
+            continue
+        try:
+            blob = json.dumps(refer, ensure_ascii=False)
+        except Exception:
+            continue
+        m = _ILINK_SESSION_ID_RE.search(blob)
+        if m:
+            return m.group(1)
+    return None
 
 
 def _build_text_reply(context_token: str, text: str, to_user_id: str) -> dict:
@@ -423,6 +450,10 @@ def _to_callback_data(msg: UserMessage) -> dict:
     若用户使用了「引用回复」，被引用的原始消息文本会放入 quote 字段，
     storage.handle_callback → _extract_short_id_from_quote 可从中提取 [#short_id]，
     从而精确匹配到对应会话，避免多会话场景下的 FIFO 降级匹配错误。
+
+    此外，iLink refer_item 的字段名不稳定，_extract_quoted_text 可能取不到
+    完整原文。这里额外用 _extract_short_id_from_refer 直接从 refer_item 子树
+    提取 short_id，放入 data["short_id"]，storage 会以最高优先级使用它。
     """
     data: dict = {
         "chatid": msg.from_user_id,
@@ -438,6 +469,16 @@ def _to_callback_data(msg: UserMessage) -> dict:
             "text": {"content": quoted_text},
         }
         logger.debug(f"[ilink-engine] 提取引用文本: {quoted_text[:80]!r}")
+
+    refer_short_id = _extract_short_id_from_refer(msg.raw)
+    if refer_short_id:
+        data["short_id"] = refer_short_id
+        logger.info(f"[ilink-engine] 从 refer_item 子树提取 short_id={refer_short_id}")
+    else:
+        # 存在引用却未提取到 short_id：打印 refer_item 结构便于排查字段名差异
+        for item in msg.raw.get("item_list", []) or []:
+            if item.get("refer_item"):
+                logger.info(f"[ilink-engine] refer_item 未提取到 short_id，原始结构: {item!r}")
     return data
 
 

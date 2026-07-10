@@ -96,7 +96,7 @@ Cursor 窗口3 ─┘                                              │
 
 ### 2.2 会话匹配统一在 Server 端
 
-三种引擎的会话匹配语义统一由 HIL Server 的 `storage.handle_callback` 承担（`[#short_id]` 精确匹配 / 正文匹配 / FIFO 兜底）。Worker 只做"收消息→上报、发消息→送上游"，不自行匹配。
+三种引擎的会话匹配语义统一由 HIL Server 的 `storage.handle_callback` 承担（`[#short_id]` 精确匹配 / 正文匹配 / 单会话 chat_id 兜底；多会话且无 short_id 时拒绝匹配并要求引用回复，不再 FIFO 猜测，避免错配）。Worker 只做"收消息→上报、发消息→送上游"，不自行匹配。iLink 引擎额外从 `refer_item` 子树提取 short_id 直接随回调上报，规避 refer_item 字段名差异。
 
 ---
 

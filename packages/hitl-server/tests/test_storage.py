@@ -347,8 +347,12 @@ class TestCallbackMatching:
         assert session2.session_id in session_ids
 
     @pytest.mark.asyncio
-    async def test_fifo_fallback_on_multiple_sessions(self, storage):
-        """多会话冲突时，无 short_id 的直接回复应 FIFO 匹配到最早创建的会话"""
+    async def test_multiple_waiting_sessions_without_short_id_rejected(self, storage):
+        """多会话且无 short_id 时应拒绝匹配，而非 FIFO 猜测最早会话。
+
+        回退到 FIFO 会把回复错配到非用户意图的会话（例如用户回复最新消息却
+        命中最早会话）。改为拒绝并返回等待中的 short_id 列表，引导用户引用回复。
+        """
         chat_id = "user-multi-session"
         session1 = await storage.create_session(chat_id=chat_id, message="第1条消息")
         session2 = await storage.create_session(chat_id=chat_id, message="第2条消息")
@@ -362,20 +366,52 @@ class TestCallbackMatching:
             "from": {"userid": chat_id, "name": ""},
         }
 
-        # 第一次回复 → 匹配 session1（FIFO 最早）
         r1 = await storage.handle_callback(cb)
-        assert r1["success"] is True
-        assert r1["session_id"] == session1.session_id
+        assert r1["success"] is False
+        assert r1["error"] == "ambiguous_reply_require_quote"
+        assert set(r1["waiting_short_ids"]) == {session1.short_id, session2.short_id, session3.short_id}
 
-        # 第二次回复 → 匹配 session2
-        r2 = await storage.handle_callback(cb)
-        assert r2["success"] is True
-        assert r2["session_id"] == session2.session_id
+        # 没有任何会话被消费
+        for s in (session1, session2, session3):
+            assert (await storage.get_session(s.session_id)).status == "waiting"
 
-        # 第三次回复 → 匹配 session3（此时只剩一个，走普通 chat_id 匹配）
-        r3 = await storage.handle_callback(cb)
-        assert r3["success"] is True
-        assert r3["session_id"] == session3.session_id
+    @pytest.mark.asyncio
+    async def test_single_waiting_session_chat_id_fallback(self, storage):
+        """仅一个等待会话时，无 short_id 仍按 chat_id 匹配（不触发拒绝）。"""
+        chat_id = "user-single-session"
+        session = await storage.create_session(chat_id=chat_id, message="唯一消息")
+
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "直接回复"},
+            "from": {"userid": chat_id, "name": ""},
+        }
+        r = await storage.handle_callback(cb)
+        assert r["success"] is True
+        assert r["session_id"] == session.session_id
+
+    @pytest.mark.asyncio
+    async def test_engine_short_id_takes_priority_over_fifo(self, storage):
+        """引擎在 data["short_id"] 直接携带 short_id 时，应精确匹配对应会话，
+        即使同一 chat_id 下有多个等待会话也不走拒绝分支。"""
+        chat_id = "user-engine-shortid"
+        session1 = await storage.create_session(chat_id=chat_id, message="老消息")
+        session2 = await storage.create_session(chat_id=chat_id, message="新消息")
+
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "回复新消息"},
+            "from": {"userid": chat_id, "name": ""},
+            "short_id": session2.short_id,
+        }
+        r = await storage.handle_callback(cb)
+        assert r["success"] is True
+        assert r["session_id"] == session2.session_id
+        assert (await storage.get_session(session1.session_id)).status == "waiting"
 
     @pytest.mark.asyncio
     async def test_quote_reply_exact_match_over_fifo(self, storage):
