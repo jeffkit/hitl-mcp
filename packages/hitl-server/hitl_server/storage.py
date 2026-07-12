@@ -61,6 +61,8 @@ class Session:
     replies: list[dict] = field(default_factory=list)
     created_at: datetime = field(default_factory=datetime.now)
     expire_at: datetime = field(default_factory=lambda: datetime.now() + timedelta(hours=1))
+    ilink_msg_id: str = ""      # iLink 发消息后返回的 msg_id（通常为空，sendmessage 响应为 {}）
+    ilink_sent_at_ms: int = 0  # 发送消息时记录的本地时间戳（ms），用于引用回复时间戳近似匹配
     
     def to_dict(self) -> dict:
         return {
@@ -490,7 +492,12 @@ class RelayStorage:
             session = self._sessions.get(session_id)
             if not session:
                 return False
-            
+
+            # 如果会话已经收到回复，不要把状态覆盖成 timeout
+            # （用户回复与 MCP 端超时存在竞争窗口，replied 优先）
+            if session.status != "waiting":
+                return False
+
             session.status = "timeout"
             
             # 更新数据库（如果启用）
@@ -590,8 +597,68 @@ class RelayStorage:
 
             return True
 
+    async def update_ilink_msg_id(self, session_id: str, ilink_msg_id: str) -> bool:
+        """记录 iLink 发消息后返回的 msg_id（目前 sendmessage 响应为空，通常用不到）。"""
+        if not ilink_msg_id:
+            return False
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            session.ilink_msg_id = ilink_msg_id
+            logger.debug(f"更新会话 ilink_msg_id: {session_id[:8]} -> {ilink_msg_id}")
+            return True
+
+    async def update_ilink_sent_at(self, session_id: str, sent_at_ms: int) -> bool:
+        """记录发消息时的本地时间戳（ms），供引用回复时间戳近似匹配使用。"""
+        if not sent_at_ms:
+            return False
+        async with self._lock:
+            session = self._sessions.get(session_id)
+            if not session:
+                return False
+            session.ilink_sent_at_ms = sent_at_ms
+            logger.debug(f"更新会话 ilink_sent_at_ms: {session_id[:8]} -> {sent_at_ms}")
+            return True
+
+    async def get_session_by_ilink_msg_id(self, ilink_msg_id: str) -> "Session | None":
+        """通过 iLink msg_id 查找等待中的会话（如果 API 未来返回 msg_id 可用）。"""
+        if not ilink_msg_id:
+            return None
+        async with self._lock:
+            for session in self._sessions.values():
+                if session.ilink_msg_id == ilink_msg_id and session.status == "waiting":
+                    return session
+        return None
+
+    async def get_session_by_ilink_time(
+        self, chat_id: str, ref_create_time_ms: int, tolerance_ms: int = 10_000
+    ) -> "Session | None":
+        """通过 iLink 引用消息的时间戳近似匹配等待中的会话。
+
+        iLink sendmessage 响应为空 {}，无法直接获取 msg_id。
+        但 ref_msg.message_item.create_time_ms 是 iLink 给被引用消息的时间戳，
+        与我们 send_message 调用时记录的 ilink_sent_at_ms 之差通常 < 1 秒。
+
+        在指定的 tolerance_ms 窗口内找到最接近的会话。
+        """
+        if not ref_create_time_ms:
+            return None
+        async with self._lock:
+            candidates = [
+                s for s in self._sessions.values()
+                if s.chat_id == chat_id
+                and s.status == "waiting"
+                and s.ilink_sent_at_ms > 0
+                and abs(s.ilink_sent_at_ms - ref_create_time_ms) <= tolerance_ms
+            ]
+        if not candidates:
+            return None
+        # 取时间差最小的
+        return min(candidates, key=lambda s: abs(s.ilink_sent_at_ms - ref_create_time_ms))
+
     # ========== 回调处理 ==========
-    
+
     async def handle_callback(self, data: dict) -> dict:
         """
         处理上游回调（由内置引擎传入，结构沿用 fly-pigeon 兼容格式）
@@ -620,33 +687,52 @@ class RelayStorage:
         
         session = None
         match_method = None
-        
-        # 优先使用 short_id 匹配
-        if short_id:
+
+        # 优先级 1：iLink 时间戳近似匹配（引用回复，sendmessage 响应不含 msg_id）
+        ref_create_time_ms = data.get("ref_create_time_ms", 0)
+        if ref_create_time_ms:
+            session = await self.get_session_by_ilink_time(chat_id, ref_create_time_ms)
+            if session:
+                match_method = f"ilink_time≈{ref_create_time_ms}"
+                delta_ms = abs(session.ilink_sent_at_ms - ref_create_time_ms)
+                logger.info(
+                    f"iLink 时间戳近似匹配会话: ref_time={ref_create_time_ms}, "
+                    f"session={session.short_id}, Δ={delta_ms}ms"
+                )
+            else:
+                logger.warning(f"ref_create_time_ms={ref_create_time_ms} 未匹配到会话")
+
+        # 优先级 2：short_id 精确匹配（wecom-aibot 引用、消息头 [#short_id]）
+        if not session and short_id:
             session = await self.get_session_by_short_id(short_id)
             if session:
                 match_method = f"short_id={short_id}"
             else:
                 logger.warning(f"short_id={short_id} 未匹配到等待中的会话")
-        
-        # 回退到 chat_id 匹配
+
+        # 优先级 3：chat_id 回退匹配
         if not session:
             waiting_sessions = await self.get_waiting_sessions_by_chat_id(chat_id)
             if len(waiting_sessions) == 1:
                 session = waiting_sessions[0]
                 match_method = f"chat_id={chat_id}"
             elif len(waiting_sessions) > 1:
-                # 多个等待中的会话：FIFO 降级匹配最早创建的会话
-                # 当用户未使用引用回复时，无法精确匹配；取最早等待的会话（FIFO）
-                # 根本解法是在消息中包含 [#short_id]，引导用户引用回复
-                session = waiting_sessions[0]
+                # 多个等待中的会话且无 short_id（用户未引用回复）：无法确定路由目标。
+                # 不做猜测（FIFO/LIFO 都不精确），返回 prompt_user 信号，
+                # 由引擎侧通知用户长按引用目标消息后再回复。
                 short_ids = [s.short_id for s in waiting_sessions]
-                match_method = f"chat_id={chat_id}(fifo-fallback)"
                 logger.warning(
-                    f"多个等待中的会话，FIFO 降级匹配最早会话: chat_id={chat_id[:16]}..., "
-                    f"count={len(waiting_sessions)}, short_ids={short_ids}, "
-                    f"matched={session.short_id}"
+                    f"多个等待中的会话，无法自动匹配（无引用）: chat_id={chat_id[:16]}..., "
+                    f"count={len(waiting_sessions)}, short_ids={short_ids}"
                 )
+                return {
+                    "success": False,
+                    "session_id": None,
+                    "error": "ambiguous_session",
+                    "chat_id": chat_id,
+                    "prompt_user": True,
+                    "waiting_short_ids": short_ids,
+                }
         
         if session:
             # 更新 chat_type（使用回调中的真实值）

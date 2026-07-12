@@ -121,12 +121,53 @@ def _extract_text(msg: dict) -> str:
     return ""
 
 
+def _extract_ref_msg_id(msg: dict) -> str:
+    """从 iLink 消息中提取引用回复所指向的原始消息 ID。
+
+    iLink 引用回复时，原始消息内容不会随回调下发，只有被引用消息的 msg_id：
+        item_list[].ref_msg.message_item.msg_id
+
+    返回字符串格式的 msg_id；非引用消息或字段缺失时返回空字符串。
+    """
+    for item in msg.get("item_list", []) or []:
+        ref_msg = item.get("ref_msg") or {}
+        message_item = ref_msg.get("message_item") or {}
+        msg_id = message_item.get("msg_id")
+        if msg_id:
+            return str(msg_id)
+    return ""
+
+
+def _extract_ref_create_time_ms(msg: dict) -> int:
+    """从 iLink 消息中提取被引用消息的创建时间戳（毫秒）。
+
+    iLink sendmessage 响应体为空 {}，无法从中获取 msg_id，
+    但引用回复的 ref_msg.message_item.create_time_ms 记录了被引用消息的时间戳。
+    将其与 session 的 ilink_sent_at_ms 做近似匹配（±容差），
+    可实现无 msg_id 场景下的精确会话定位。
+    """
+    for item in msg.get("item_list", []) or []:
+        ref_msg = item.get("ref_msg") or {}
+        message_item = ref_msg.get("message_item") or {}
+        create_time_ms = message_item.get("create_time_ms")
+        if create_time_ms:
+            return int(create_time_ms)
+    return 0
+
+
 def _extract_quoted_text(msg: dict) -> str:
     """从 iLink 消息中提取被引用的原始消息文本。
 
     iLink 引用回复时，item_list 中会出现 refer_item 类型的 item（type=49）。
-    被引用的消息内容保存在 refer_item 内，字段名因版本而异，依次尝试：
-    content / displayname / text。
+    被引用的消息内容保存在 refer_item 内，字段名因版本而异。
+
+    提取优先级（从高到低）：
+    1. refer_item.content — 大多数版本的消息正文字段
+    2. refer_item.text    — 部分旧版本的消息正文字段
+    3. 嵌套 item_list     — 部分版本 refer_item 内嵌原始消息结构
+    4. refer_item.displayname — 最后兜底（通常是发送方名称，不含 short_id）
+
+    注意：displayname 是发送方显示名，不含 [#short_id] 标签，须放在最后。
 
     返回空字符串表示非引用回复或无法提取。
     """
@@ -134,19 +175,20 @@ def _extract_quoted_text(msg: dict) -> str:
         refer = item.get("refer_item") or {}
         if not refer:
             continue
-        # 尝试多个可能的字段名
-        content = (
-            refer.get("content")
-            or refer.get("displayname")
-            or refer.get("text")
-            or ""
-        )
+
+        # 优先取实际消息正文字段
+        content = refer.get("content") or refer.get("text") or ""
+
+        # 若正文字段为空，尝试从嵌套 item_list 提取（部分版本的结构）
+        if not content:
+            content = _extract_text(refer)
+
+        # 实在没有，才退化到 displayname（发送方名称）
+        if not content:
+            content = refer.get("displayname") or ""
+
         if content:
             return content
-        # 递归提取嵌套 item_list（部分版本中 refer_item 内嵌原始消息结构）
-        nested = _extract_text(refer)
-        if nested:
-            return nested
     return ""
 
 
@@ -250,10 +292,12 @@ class ILinkClient:
             f"[ilink-engine] 收到消息: user={from_user_id}, "
             f"text={text[:80]!r}, quoted={quoted_preview}"
         )
-        # DEBUG: 若有引用 item，打印原始结构帮助排查字段名
-        for item in msg.get("item_list", []) or []:
-            if item.get("refer_item"):
-                logger.debug(f"[ilink-engine] refer_item 结构: {item!r}")
+        # 临时：打印完整原始消息结构，用于排查引用字段名
+        import json as _json
+        try:
+            logger.info(f"[ilink-engine] 原始消息结构: {_json.dumps(msg, ensure_ascii=False)[:2000]}")
+        except Exception:
+            logger.info(f"[ilink-engine] 原始消息结构(repr): {repr(msg)[:2000]}")
 
         if context_token and from_user_id:
             self.store.set_context_token(from_user_id, context_token)
@@ -262,6 +306,11 @@ class ILinkClient:
             await self.on_message(UserMessage(from_user_id, context_token, text, msg))
 
     async def send_message(self, to_user_id: str, text: str) -> tuple[bool, Optional[str]]:
+        """发送消息。返回 (success, msg_id_or_error)。
+        
+        成功时第二个元素是 iLink 返回的 msg_id（字符串），用于后续引用匹配；
+        失败时第二个元素是错误描述。
+        """
         bot_token = self.store.get_bot_token()
         if not bot_token:
             return False, "未登录（无 bot_token）"
@@ -282,11 +331,14 @@ class ILinkClient:
                 return False, f"HTTP {res.status_code}"
             raw = res.text
             if not raw.strip():
-                return True, None
+                return True, ""
             data = res.json()
+            logger.info(f"[ilink-engine] sendmessage 响应: {data}")
             if data.get("ret") not in (None, 0):
                 return False, f"ret={data.get('ret')}, errmsg={data.get('errmsg')}"
-            return True, None
+            # 提取 iLink 分配的 msg_id（字段名可能是 msg_id / message_id）
+            msg_id = str(data.get("msg_id") or data.get("message_id") or "")
+            return True, msg_id
         except Exception as e:
             return False, str(e)
 
@@ -420,9 +472,9 @@ def _format_message_with_header(
 def _to_callback_data(msg: UserMessage) -> dict:
     """转成 fly-pigeon 兼容结构，供 storage.handle_callback 消费。
 
-    若用户使用了「引用回复」，被引用的原始消息文本会放入 quote 字段，
-    storage.handle_callback → _extract_short_id_from_quote 可从中提取 [#short_id]，
-    从而精确匹配到对应会话，避免多会话场景下的 FIFO 降级匹配错误。
+    iLink 引用回复时，原始消息文本不随回调下发——只有被引用消息的 msg_id
+    （存于 item_list[].ref_msg.message_item.msg_id）。
+    因此改为通过 ref_msg_id 进行精确会话匹配，不再依赖 quote 文本提取。
     """
     data: dict = {
         "chatid": msg.from_user_id,
@@ -431,13 +483,12 @@ def _to_callback_data(msg: UserMessage) -> dict:
         "text": {"content": msg.text},
         "from": {"userid": msg.from_user_id, "name": ""},
     }
-    quoted_text = _extract_quoted_text(msg.raw)
-    if quoted_text:
-        data["quote"] = {
-            "msgtype": "text",
-            "text": {"content": quoted_text},
-        }
-        logger.debug(f"[ilink-engine] 提取引用文本: {quoted_text[:80]!r}")
+    # iLink 引用回复：sendmessage 响应为空 {}，无法存储 msg_id
+    # 改用 ref_msg.message_item.create_time_ms 做时间戳近似匹配
+    ref_create_time_ms = _extract_ref_create_time_ms(msg.raw)
+    if ref_create_time_ms:
+        data["ref_create_time_ms"] = ref_create_time_ms
+        logger.debug(f"[ilink-engine] 提取引用时间戳: {ref_create_time_ms}")
     return data
 
 
@@ -456,7 +507,21 @@ class ILinkEngine(BaseEngine):
         callback_data = _to_callback_data(msg)
         if self.on_user_message:
             try:
-                await self.on_user_message(callback_data)
+                result = await self.on_user_message(callback_data)
+                if isinstance(result, dict) and result.get("prompt_user"):
+                    # 多个等待中的会话且用户未引用回复，无法自动路由
+                    # → 发送提示，引导用户长按引用目标消息后再回复
+                    waiting_ids = result.get("waiting_short_ids", [])
+                    prompt = (
+                        f"⚠️ 有 {len(waiting_ids)} 条待回复的请求，无法自动匹配。\n"
+                        "请长按目标消息 → 引用回复，以确保路由到正确的对话：\n"
+                        + "\n".join(f"  [#{sid}]" for sid in waiting_ids)
+                    )
+                    ok, err = await self.client.send_message(msg.from_user_id, prompt)
+                    if not ok:
+                        logger.warning(f"[ilink-engine] 发送引用提示失败: {err}")
+                    else:
+                        logger.info(f"[ilink-engine] 已发送引用提示: waiting_ids={waiting_ids}")
             except Exception as e:
                 logger.error(f"[ilink-engine] 处理用户消息失败: {e}", exc_info=True)
 
@@ -481,8 +546,17 @@ class ILinkEngine(BaseEngine):
             return {"success": False, "error": "login_required"}
 
         formatted = _format_message_with_header(message, short_id, project_name, wait_reply)
-        ok, err = await self.client.send_message(chat_id, formatted)
-        return {"success": ok, "chat_id": chat_id if ok else None, "error": err}
+        import time as _time
+        sent_at_ms = int(_time.time() * 1000)
+        ok, msg_id_or_err = await self.client.send_message(chat_id, formatted)
+        if ok:
+            return {
+                "success": True,
+                "chat_id": chat_id,
+                "ilink_msg_id": msg_id_or_err or "",
+                "ilink_sent_at_ms": sent_at_ms,
+            }
+        return {"success": False, "chat_id": None, "error": msg_id_or_err}
 
     # ── ilink 专属：登录接口 ───────────────────────────────────────────────
     async def get_qr(self) -> dict:
