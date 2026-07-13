@@ -6,7 +6,7 @@ storage 层统一修复（无 short_id 时拒绝而非 FIFO）。这里覆盖：
      出 quote，storage 从中取出 [#short_id] 精确匹配。
   2. 无引用：不产生 quote。
   3. 多会话引用回复：精确匹配被引用的会话，而非最早会话。
-  4. 多会话无引用：storage 拒绝匹配（ambiguous_reply_require_quote）。
+  4. 多会话无引用：storage 拒绝匹配（ambiguous_session + prompt_user）。
 """
 import pytest
 
@@ -124,5 +124,6 @@ class TestWecomAibotStorageMatching:
         }
         r = await storage.handle_callback(callback_data)
         assert r["success"] is False
-        assert r["error"] == "ambiguous_reply_require_quote"
+        assert r["error"] == "ambiguous_session"
+        assert r["prompt_user"] is True
         assert set(r["waiting_short_ids"]) == {s1.short_id, s2.short_id}

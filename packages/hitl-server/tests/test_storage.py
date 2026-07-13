@@ -347,12 +347,8 @@ class TestCallbackMatching:
         assert session2.session_id in session_ids
 
     @pytest.mark.asyncio
-    async def test_multiple_waiting_sessions_without_short_id_rejected(self, storage):
-        """多会话且无 short_id 时应拒绝匹配，而非 FIFO 猜测最早会话。
-
-        回退到 FIFO 会把回复错配到非用户意图的会话（例如用户回复最新消息却
-        命中最早会话）。改为拒绝并返回等待中的 short_id 列表，引导用户引用回复。
-        """
+    async def test_ambiguous_session_prompt_on_multiple_sessions(self, storage):
+        """多会话并发时，无引用的直接回复应返回 prompt_user 信号，不盲目猜测"""
         chat_id = "user-multi-session"
         session1 = await storage.create_session(chat_id=chat_id, message="第1条消息")
         session2 = await storage.create_session(chat_id=chat_id, message="第2条消息")
@@ -366,12 +362,12 @@ class TestCallbackMatching:
             "from": {"userid": chat_id, "name": ""},
         }
 
-        r1 = await storage.handle_callback(cb)
-        assert r1["success"] is False
-        assert r1["error"] == "ambiguous_reply_require_quote"
-        assert set(r1["waiting_short_ids"]) == {session1.short_id, session2.short_id, session3.short_id}
+        result = await storage.handle_callback(cb)
+        assert result["success"] is False
+        assert result["error"] == "ambiguous_session"
+        assert result["prompt_user"] is True
+        assert set(result["waiting_short_ids"]) == {session1.short_id, session2.short_id, session3.short_id}
 
-        # 没有任何会话被消费
         for s in (session1, session2, session3):
             assert (await storage.get_session(s.session_id)).status == "waiting"
 
@@ -414,6 +410,32 @@ class TestCallbackMatching:
         assert (await storage.get_session(session1.session_id)).status == "waiting"
 
     @pytest.mark.asyncio
+    async def test_ilink_time_approximate_match(self, storage):
+        """iLink 引用回复通过时间戳近似匹配，即使有多个等待会话"""
+        import time
+        chat_id = "user-ilink-time-match"
+        session1 = await storage.create_session(chat_id=chat_id, message="第1条消息")
+        session2 = await storage.create_session(chat_id=chat_id, message="第2条消息")
+
+        now_ms = int(time.time() * 1000)
+        await storage.update_ilink_sent_at(session1.session_id, now_ms - 30_000)
+        await storage.update_ilink_sent_at(session2.session_id, now_ms)
+
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "我引用了第2条"},
+            "from": {"userid": chat_id, "name": ""},
+            "ref_create_time_ms": now_ms + 500,
+        }
+
+        result = await storage.handle_callback(cb)
+        assert result["success"] is True
+        assert result["session_id"] == session2.session_id
+        assert "ilink_time" in result.get("match_method", "")
+
+    @pytest.mark.asyncio
     async def test_quote_reply_exact_match_over_fifo(self, storage):
         """引用回复中含 short_id 时，应精确匹配对应会话（而不是 FIFO 匹配最早的）"""
         chat_id = "user-quote-test"
@@ -439,3 +461,61 @@ class TestCallbackMatching:
 
         s1 = await storage.get_session(session1.session_id)
         assert s1.status == "waiting"   # session1 未被消费
+
+    @pytest.mark.asyncio
+    async def test_ilink_l2_ref_text_exact_match(self, storage):
+        """iLink L2：ref_text 含 [#short_id] 时，精确匹配对应会话（优先于时间戳 L1）"""
+        import time
+        chat_id = "user-ilink-l2"
+        session1 = await storage.create_session(chat_id=chat_id, message="第1条消息")
+        session2 = await storage.create_session(chat_id=chat_id, message="第2条消息")
+
+        # 两个会话都有 ilink_sent_at_ms（时间差不大，L1 近似匹配可能有歧义）
+        now_ms = int(time.time() * 1000)
+        await storage.update_ilink_sent_at(session1.session_id, now_ms - 5_000)
+        await storage.update_ilink_sent_at(session2.session_id, now_ms)
+
+        # 用户引用了 session1（老消息），ref_text 含明确的 short_id
+        # ref_create_time_ms 偏向 session2（近似匹配会选错），但 L2 精确覆盖
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "我引用的是第1条"},
+            "from": {"userid": chat_id, "name": ""},
+            "ref_text": f"[#{session1.short_id} myproject]\n第1条消息\n\n> 请引用回复此消息",
+            "ref_create_time_ms": now_ms - 4_500,  # ≈ session1 发送时间
+        }
+
+        result = await storage.handle_callback(cb)
+        assert result["success"] is True
+        assert result["session_id"] == session1.session_id
+        assert "ilink_ref_text_short_id" in result.get("match_method", "")
+
+        s2 = await storage.get_session(session2.session_id)
+        assert s2.status == "waiting"  # session2 未被消费
+
+    @pytest.mark.asyncio
+    async def test_ilink_l2_fallback_to_l1_when_ref_text_absent(self, storage):
+        """iLink L2 无 ref_text 时，回退到 L1 时间戳近似匹配"""
+        import time
+        chat_id = "user-ilink-l1-fallback"
+        session1 = await storage.create_session(chat_id=chat_id, message="消息")
+
+        now_ms = int(time.time() * 1000)
+        await storage.update_ilink_sent_at(session1.session_id, now_ms)
+
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "回复"},
+            "from": {"userid": chat_id, "name": ""},
+            # 无 ref_text，只有时间戳
+            "ref_create_time_ms": now_ms + 800,
+        }
+
+        result = await storage.handle_callback(cb)
+        assert result["success"] is True
+        assert result["session_id"] == session1.session_id
+        assert "ilink_time" in result.get("match_method", "")

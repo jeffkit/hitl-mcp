@@ -155,10 +155,19 @@ async def send_message(request: SendMessageRequest, allowed_chat_ids: list[str] 
 
         # 引擎在未指定 chat_id 时解析出实际收件人后回传 chat_id，
         # 据此更新 session.chat_id，使后续用户回复能按 chat_id 匹配到会话。
-        if session and not request.chat_id:
-            resolved_chat_id = result.get("chat_id") if isinstance(result, dict) else None
-            if resolved_chat_id:
+        if session and isinstance(result, dict):
+            resolved_chat_id = result.get("chat_id")
+            if resolved_chat_id and not request.chat_id:
                 await storage.update_chat_id(session.session_id, resolved_chat_id)
+            # iLink 发消息时间戳，用于引用回复时间戳近似匹配
+            ilink_sent_at_ms = result.get("ilink_sent_at_ms", 0)
+            if ilink_sent_at_ms:
+                await storage.update_ilink_sent_at(session.session_id, ilink_sent_at_ms)
+                logger.info(f"记录 ilink_sent_at_ms: session={session.short_id}, ts={ilink_sent_at_ms}")
+            # msg_id（目前 sendmessage 响应为空，通常无值，保留以备将来使用）
+            ilink_msg_id = result.get("ilink_msg_id", "")
+            if ilink_msg_id:
+                await storage.update_ilink_msg_id(session.session_id, ilink_msg_id)
 
         return SendMessageResponse(
             success=True,
