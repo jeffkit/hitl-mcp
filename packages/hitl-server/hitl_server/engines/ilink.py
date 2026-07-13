@@ -16,6 +16,7 @@ import os
 import random
 import re
 import threading
+import time
 from dataclasses import dataclass
 from typing import Awaitable, Callable, Optional
 
@@ -234,16 +235,23 @@ def _extract_short_id_from_refer(msg: dict) -> str | None:
     return None
 
 
-def _build_text_reply(context_token: str, text: str, to_user_id: str) -> dict:
-    return {
+def _build_text_reply(context_token: str, text: str, to_user_id: str, message_id: int = 0) -> dict:
+    item: dict = {"type": 1, "text_item": {"text": text}}
+    msg: dict = {
         "context_token": context_token,
         "to_user_id": to_user_id,
         "from_user_id": "",
         "message_type": 2,
         "message_state": 2,
         "client_id": f"hil-{random.randint(0, 0xFFFFFFFF):x}",
-        "item_list": [{"type": 1, "text_item": {"text": text}}],
+        "item_list": [item],
     }
+    # 顶层 message_id（i64）：iLink hub 的 ensure_outbound 仅当 message_id 为空时
+    # 才自己分配；我方在此预设唯一值，hub 会保留，iLink 在用户引用回复时把它
+    # 原样回传到 ref_msg.message_item.msg_id，从而实现 msg_id → session 精确匹配。
+    if message_id:
+        msg["message_id"] = message_id
+    return msg
 
 
 @dataclass
@@ -341,10 +349,13 @@ class ILinkClient:
         if from_user_id and text and self.on_message:
             await self.on_message(UserMessage(from_user_id, context_token, text, msg))
 
-    async def send_message(self, to_user_id: str, text: str) -> tuple[bool, Optional[str]]:
+    async def send_message(self, to_user_id: str, text: str, outgoing_msg_id: int = 0) -> tuple[bool, Optional[str]]:
         """发送消息。返回 (success, msg_id_or_error)。
-        
-        成功时第二个元素是 iLink 返回的 msg_id（字符串），用于后续引用匹配；
+
+        成功时第二个元素是本条消息的 msg_id：优先回传我方设置的 outgoing_msg_id
+        （顶层 message_id，i64 整数；iLink hub 仅当 message_id 为空时才自分配，
+        我方预设后会被保留，并在用户引用回复时被 iLink 原样回传到
+        ref_msg.message_item.msg_id，供精确匹配）；若未设置则尝试从响应体提取。
         失败时第二个元素是错误描述。
         """
         bot_token = self.store.get_bot_token()
@@ -354,11 +365,12 @@ class ILinkClient:
         if not context_token:
             return False, f"用户未激活: {to_user_id}"
         try:
+            out_msg = _build_text_reply(context_token, text, to_user_id, outgoing_msg_id)
             res = await self._http.post(
                 f"{self.base_url}/ilink/bot/sendmessage",
                 headers=_ilink_headers(bot_token),
                 json={
-                    "msg": _build_text_reply(context_token, text, to_user_id),
+                    "msg": out_msg,
                     "base_info": {"channel_version": "0.3.0", "bot_agent": "hitl-server-ilink/0.1.0"},
                 },
                 timeout=15,
@@ -366,6 +378,9 @@ class ILinkClient:
             if res.status_code != 200:
                 return False, f"HTTP {res.status_code}"
             raw = res.text
+            # 我方已设置出站 message_id，直接以字符串回传（sendmessage 响应通常为空 {}）
+            if outgoing_msg_id:
+                return True, str(outgoing_msg_id)
             if not raw.strip():
                 return True, ""
             data = res.json()
@@ -509,6 +524,7 @@ def _to_callback_data(msg: UserMessage) -> dict:
     """转成 fly-pigeon 兼容结构，供 storage.handle_callback 消费。
 
     iLink 引用回复匹配策略（按优先级，由 storage 侧消费）：
+    - ref_msg_id（最强精确）：ref_msg.message_item.msg_id == 我方出站设置的 msg_id → data["ref_msg_id"]
     - engine short_id：refer_item 子树正则提取 → data["short_id"]
     - L2（精确）：ref_msg.message_item.text_item.text → ref_text 字段
     - L1（近似）：ref_msg.message_item.create_time_ms → ref_create_time_ms 字段
@@ -521,6 +537,12 @@ def _to_callback_data(msg: UserMessage) -> dict:
         "text": {"content": msg.text},
         "from": {"userid": msg.from_user_id, "name": ""},
     }
+    # 最强精确：被引用消息的 msg_id（等于我方出站时设置的 msg_id）
+    ref_msg_id = _extract_ref_msg_id(msg.raw)
+    if ref_msg_id:
+        data["ref_msg_id"] = ref_msg_id
+        logger.debug(f"[ilink-engine] 提取 ref_msg_id: {ref_msg_id}")
+
     # L2: 被引用消息文本（iLink 不稳定下发，存在时可提取 [#short_id] 精确匹配）
     ref_text = _extract_ref_text(msg.raw)
     if ref_text:
@@ -607,9 +629,15 @@ class ILinkEngine(BaseEngine):
             return {"success": False, "error": "login_required"}
 
         formatted = _format_message_with_header(message, short_id, project_name, wait_reply)
-        import time as _time
-        sent_at_ms = int(_time.time() * 1000)
-        ok, msg_id_or_err = await self.client.send_message(chat_id, formatted)
+        # 生成出站顶层 message_id（i64 整数）：iLink hub 的 ensure_outbound 仅当
+        # message_id 为空时才自分配，我方预设后会被保留，并在用户引用回复时被
+        # iLink 原样回传到 ref_msg.message_item.msg_id，据此做 msg_id → session
+        # 精确匹配（突破并发歧义）。结构对齐 hub 的 new_outbound_msg_id：
+        # unix_millis * 1_000_000 + counter，量级 ~1.78e18，远小于 i64::MAX(9.22e18)，
+        # 在 iLink 已验证会原样保留的区间内。
+        outgoing_msg_id = int(time.time() * 1000) * 1_000_000 + random.randint(0, 999_999)
+        sent_at_ms = int(time.time() * 1000)
+        ok, msg_id_or_err = await self.client.send_message(chat_id, formatted, outgoing_msg_id)
         if ok:
             return {
                 "success": True,

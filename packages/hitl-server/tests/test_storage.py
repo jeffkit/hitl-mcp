@@ -468,7 +468,62 @@ class TestCallbackMatching:
         assert (await storage.get_session(session2.session_id)).status == "waiting"
 
     @pytest.mark.asyncio
-    async def test_engine_short_id_beats_ilink_time(self, storage):
+    async def test_ilink_ref_msg_id_precise_match_over_concurrent_sessions(self, storage):
+        """ref_msg_id 精确匹配：并发多会话下，引用回复按出站 msg_id 精确命中目标"""
+        chat_id = "user-ref-msg-id"
+        session1 = await storage.create_session(chat_id=chat_id, message="第1条")
+        session2 = await storage.create_session(chat_id=chat_id, message="第2条")
+
+        # 模拟出站时为每条消息设置的 msg_id（由引擎生成、api.py 写入 session）
+        await storage.update_ilink_msg_id(session1.session_id, "hil-aaa-1111")
+        await storage.update_ilink_msg_id(session2.session_id, "hil-bbb-2222")
+
+        # 用户引用回复第2条 → ref_msg_id 等于第2条的出站 msg_id
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "回复第2条"},
+            "from": {"userid": chat_id, "name": ""},
+            "ref_msg_id": "hil-bbb-2222",
+            "ref_create_time_ms": 0,  # 即便时间戳无法区分也不影响
+        }
+
+        result = await storage.handle_callback(cb)
+        assert result["success"] is True
+        assert result["session_id"] == session2.session_id
+        assert "ilink_ref_msg_id" in result.get("match_method", "")
+        assert (await storage.get_session(session1.session_id)).status == "waiting"
+
+    @pytest.mark.asyncio
+    async def test_ilink_ref_msg_id_int_scale_matches_real_flow(self, storage):
+        """真实链路：出站 message_id 为 i64 量级整数，存为字符串；入站 ref_msg_id
+        为同值字符串 → L0 精确命中（镜像 int(time*1000)*1e6+counter 的真实生成值）"""
+        chat_id = "user-int-msgid"
+        s1 = await storage.create_session(chat_id=chat_id, message="第1条")
+        s2 = await storage.create_session(chat_id=chat_id, message="第2条")
+        mid1 = str(int(1783000000000) * 1_000_000 + 111111)
+        mid2 = str(int(1783000000500) * 1_000_000 + 222222)
+        await storage.update_ilink_msg_id(s1.session_id, mid1)
+        await storage.update_ilink_msg_id(s2.session_id, mid2)
+
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "回复第2条"},
+            "from": {"userid": chat_id, "name": ""},
+            "ref_msg_id": mid2,
+            "ref_create_time_ms": 0,
+        }
+        result = await storage.handle_callback(cb)
+        assert result["success"] is True
+        assert result["session_id"] == s2.session_id
+        assert "ilink_ref_msg_id" in result.get("match_method", "")
+        assert (await storage.get_session(s1.session_id)).status == "waiting"
+
+    @pytest.mark.asyncio
+    async def test_short_id_priority_over_time(self, storage):
         """精确 short_id 必须优先于 L1 时间戳近似（修复优先级倒置）"""
         import time
         chat_id = "user-shortid-over-time"
