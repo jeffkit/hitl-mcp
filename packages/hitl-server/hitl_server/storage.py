@@ -688,15 +688,30 @@ class RelayStorage:
         session = None
         match_method = None
 
-        # 优先级 1：iLink 时间戳近似匹配（引用回复，sendmessage 响应不含 msg_id）
+        # 优先级 0：iLink L2 — ref_text 含 [#short_id] 精确匹配
+        # iLink 有时在 ref_msg.message_item.text_item.text 中带回被引用消息的文本，
+        # 若包含 [#short_id] 标签，可直接精确定位，无需时间戳近似。
+        ref_text = data.get("ref_text", "")
+        if ref_text:
+            m = SESSION_ID_PATTERN.search(ref_text)
+            if m:
+                ref_short_id = m.group(1)
+                session = await self.get_session_by_short_id(ref_short_id, chat_id)
+                if session:
+                    match_method = f"ilink_ref_text_short_id={ref_short_id}"
+                    logger.info(f"iLink 引用文本 short_id 精确匹配(L2): short_id={ref_short_id}")
+                else:
+                    logger.warning(f"iLink ref_text 含 short_id={ref_short_id}，但未匹配到等待中的会话")
+
+        # 优先级 1：iLink L1 — 时间戳近似匹配（引用回复，sendmessage 响应不含 msg_id）
         ref_create_time_ms = data.get("ref_create_time_ms", 0)
-        if ref_create_time_ms:
+        if not session and ref_create_time_ms:
             session = await self.get_session_by_ilink_time(chat_id, ref_create_time_ms)
             if session:
                 match_method = f"ilink_time≈{ref_create_time_ms}"
                 delta_ms = abs(session.ilink_sent_at_ms - ref_create_time_ms)
                 logger.info(
-                    f"iLink 时间戳近似匹配会话: ref_time={ref_create_time_ms}, "
+                    f"iLink 时间戳近似匹配会话(L1): ref_time={ref_create_time_ms}, "
                     f"session={session.short_id}, Δ={delta_ms}ms"
                 )
             else:

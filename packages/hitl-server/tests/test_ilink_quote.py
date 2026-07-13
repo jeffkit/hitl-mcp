@@ -3,8 +3,10 @@ iLink 引用回复提取逻辑单元测试
 
 测试目标：
 - _extract_ref_msg_id：从 iLink 消息中提取 ref_msg.message_item.msg_id
-- _extract_quoted_text：验证旧字段提取（仅备用，iLink 不传文本）
-- _to_callback_data：callback 数据包含 ref_msg_id
+- _extract_ref_create_time_ms：提取被引用消息时间戳（L1 匹配）
+- _extract_ref_text：提取被引用消息文本（L2 匹配，有时缺失）
+- _extract_quoted_text：优先 L2 文本，回退旧 refer_item 格式
+- _to_callback_data：callback 数据包含 ref_text（L2）和 ref_create_time_ms（L1）
 
 基于实际抓取的 iLink 消息结构（2026-07-12）。
 """
@@ -12,6 +14,7 @@ import pytest
 from hitl_server.engines.ilink import (
     _extract_ref_msg_id,
     _extract_ref_create_time_ms,
+    _extract_ref_text,
     _extract_quoted_text,
     _to_callback_data,
     UserMessage,
@@ -85,6 +88,28 @@ QUOTE_MSG_INT_MSGID = {
             },
         }
     ],
+}
+
+# 引用回复消息：ref_msg.message_item 含 text_item（L2 场景，iLink 不稳定下发）
+QUOTE_MSG_WITH_TEXT = {
+    "seq": 871,
+    "from_user_id": "o9cq80_ZyXuz1vAtG-TMbQjwQPW8@im.wechat",
+    "item_list": [
+        {
+            "type": 1,
+            "text_item": {"text": "好的"},
+            "ref_msg": {
+                "message_item": {
+                    "create_time_ms": 1783867599000,
+                    "msg_id": "7482083004179339144",
+                    "type": 0,
+                    # L2 字段：被引用消息的文本内容（包含 [#short_id]）
+                    "text_item": {"text": "[#a1b2c3d4 myproject]\n请确认部署到生产环境\n\n> 请引用回复此消息"},
+                }
+            },
+        }
+    ],
+    "context_token": "vctx_xxx",
 }
 
 # 没有 item_list 的消息
@@ -230,3 +255,127 @@ class TestExtractRefCreateTimeMs:
 
     def test_empty_msg_returns_zero(self):
         assert _extract_ref_create_time_ms({}) == 0
+
+    def test_quote_msg_with_text_returns_create_time(self):
+        """有 text_item 的引用消息同样能提取时间戳（L1 和 L2 同时可用）"""
+        assert _extract_ref_create_time_ms(QUOTE_MSG_WITH_TEXT) == 1783867599000
+
+
+# ── _extract_ref_text 测试（L2）────────────────────────────────────────────
+
+class TestExtractRefText:
+    """测试从 ref_msg.message_item.text_item.text 提取被引用消息文本（L2）"""
+
+    def test_quote_with_text_item_returns_text(self):
+        """有 text_item 时能提取出完整的被引用消息文本"""
+        result = _extract_ref_text(QUOTE_MSG_WITH_TEXT)
+        assert result == "[#a1b2c3d4 myproject]\n请确认部署到生产环境\n\n> 请引用回复此消息"
+
+    def test_quote_without_text_item_returns_empty(self):
+        """无 text_item 时返回空（需回退到 L1 时间戳匹配）"""
+        assert _extract_ref_text(QUOTE_MSG) == ""
+
+    def test_plain_msg_returns_empty(self):
+        assert _extract_ref_text(PLAIN_MSG) == ""
+
+    def test_empty_msg_returns_empty(self):
+        assert _extract_ref_text({}) == ""
+
+    def test_empty_text_item_returns_empty(self):
+        """text_item 存在但 text 为空时，视为无文本"""
+        msg = {
+            "item_list": [{
+                "ref_msg": {"message_item": {"text_item": {"text": ""}}}
+            }]
+        }
+        assert _extract_ref_text(msg) == ""
+
+
+# ── _extract_quoted_text 更新测试 ─────────────────────────────────────────
+
+class TestExtractQuotedText:
+    """验证 _extract_quoted_text 优先使用 L2 (ref_msg.text_item)，回退 refer_item"""
+
+    def test_quote_with_text_item_returns_text(self):
+        """L2 可用时，_extract_quoted_text 返回 ref_msg.message_item.text_item.text"""
+        result = _extract_quoted_text(QUOTE_MSG_WITH_TEXT)
+        assert "[#a1b2c3d4" in result
+
+    def test_real_quote_msg_no_text_item_returns_empty(self):
+        """真实 iLink 引用消息无 text_item，L2 缺失，返回空（L1 时间戳匹配接管）"""
+        result = _extract_quoted_text(QUOTE_MSG)
+        assert result == ""
+
+    def test_plain_msg_returns_empty(self):
+        """普通消息不含引用，返回空"""
+        assert _extract_quoted_text(PLAIN_MSG) == ""
+
+    def test_hypothetical_refer_item_content(self):
+        """旧格式兜底：如果有 refer_item.content，仍能正确提取"""
+        msg = {
+            "item_list": [
+                {
+                    "refer_item": {
+                        "content": "[#abc12345] 请确认",
+                        "displayname": "ClawBot",
+                    }
+                }
+            ]
+        }
+        result = _extract_quoted_text(msg)
+        assert result == "[#abc12345] 请确认"
+
+    def test_hypothetical_refer_item_displayname_last(self):
+        """displayname 排在所有正文字段之后"""
+        msg = {
+            "item_list": [
+                {
+                    "refer_item": {
+                        "displayname": "ClawBot",
+                    }
+                }
+            ]
+        }
+        result = _extract_quoted_text(msg)
+        assert result == "ClawBot"
+
+
+# ── _to_callback_data L2 测试 ────────────────────────────────────────────────
+
+class TestToCallbackDataL2:
+    """验证 callback 数据在 L2 可用时携带 ref_text"""
+
+    def test_quote_with_text_item_has_ref_text(self):
+        """有 text_item 时，callback 包含 ref_text 字段"""
+        user_msg = UserMessage(
+            from_user_id="user@im.wechat",
+            context_token="vctx_xxx",
+            text="好的",
+            raw=QUOTE_MSG_WITH_TEXT,
+        )
+        data = _to_callback_data(user_msg)
+        assert "ref_text" in data
+        assert "[#a1b2c3d4" in data["ref_text"]
+
+    def test_quote_with_text_item_still_has_ref_create_time_ms(self):
+        """有 text_item 时，L1 时间戳也同样携带（两层都提供，storage 按优先级选用）"""
+        user_msg = UserMessage(
+            from_user_id="user@im.wechat",
+            context_token="vctx_xxx",
+            text="好的",
+            raw=QUOTE_MSG_WITH_TEXT,
+        )
+        data = _to_callback_data(user_msg)
+        assert data.get("ref_create_time_ms") == 1783867599000
+
+    def test_quote_without_text_item_no_ref_text(self):
+        """无 text_item 时，callback 不含 ref_text，只有 ref_create_time_ms"""
+        user_msg = UserMessage(
+            from_user_id="user@im.wechat",
+            context_token="vctx_xxx",
+            text="发公网",
+            raw=QUOTE_MSG,
+        )
+        data = _to_callback_data(user_msg)
+        assert "ref_text" not in data
+        assert data.get("ref_create_time_ms") == 1783867069000
