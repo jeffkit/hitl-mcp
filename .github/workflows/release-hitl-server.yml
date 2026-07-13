@@ -94,6 +94,47 @@ jobs:
             packages/hitl-server/dist/*.deb
             packages/hitl-server/dist/*.rpm
 
+  pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-22.04
+    if: startsWith(github.ref, 'refs/tags/hitl-server/v')
+    defaults:
+      run:
+        working-directory: packages/hitl-server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: packages/hitl-server/hitl_server/console/pnpm-lock.yaml
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Build console dist
+        run: |
+          cd hitl_server/console
+          pnpm install --frozen-lockfile
+          pnpm run build
+
+      - name: Sync Python deps
+        run: uv sync --locked
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Publish to PyPI
+        env:
+          UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
+        run: uv publish
+
   release:
     name: Publish GitHub Release & Brew formula
     needs: build
