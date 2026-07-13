@@ -164,10 +164,12 @@ async def send_message(request: SendMessageRequest, allowed_chat_ids: list[str] 
             if ilink_sent_at_ms:
                 await storage.update_ilink_sent_at(session.session_id, ilink_sent_at_ms)
                 logger.info(f"记录 ilink_sent_at_ms: session={session.short_id}, ts={ilink_sent_at_ms}")
-            # msg_id（目前 sendmessage 响应为空，通常无值，保留以备将来使用）
+            # 出站顶层 message_id（i64）：iLink 会原样回传到 ref_msg.message_item.msg_id，
+            # 作为引用回复 L0 精确匹配的锚点
             ilink_msg_id = result.get("ilink_msg_id", "")
             if ilink_msg_id:
                 await storage.update_ilink_msg_id(session.session_id, ilink_msg_id)
+                logger.info(f"记录 ilink_msg_id: session={session.short_id}, msg_id={ilink_msg_id}")
 
         return SendMessageResponse(
             success=True,

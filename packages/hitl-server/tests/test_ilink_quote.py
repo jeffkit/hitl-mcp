@@ -17,6 +17,7 @@ from hitl_server.engines.ilink import (
     _extract_ref_text,
     _extract_quoted_text,
     _to_callback_data,
+    _build_text_reply,
     UserMessage,
 )
 
@@ -379,3 +380,34 @@ class TestToCallbackDataL2:
         data = _to_callback_data(user_msg)
         assert "ref_text" not in data
         assert data.get("ref_create_time_ms") == 1783867069000
+
+
+# ── _build_text_reply 出站 message_id 测试 ───────────────────────────────────
+
+class TestBuildTextReplyMessageId:
+    """验证出站消息在顶层设置 i64 message_id（iLink hub 仅当 message_id 为空时
+    才自分配；我方预设后会被保留，并在用户引用回复时被 iLink 原样回传到
+    ref_msg.message_item.msg_id，供 L0 精确匹配）。"""
+
+    def test_no_message_id_when_zero(self):
+        """message_id=0 时不写入顶层 message_id（交由 hub 自分配）"""
+        msg = _build_text_reply("ctx", "hi", "user@im.wechat", 0)
+        assert "message_id" not in msg
+
+    def test_top_level_message_id_is_int(self):
+        """设置时，message_id 位于 msg 顶层且为 int（i64）"""
+        msg = _build_text_reply("ctx", "hi", "user@im.wechat", 1783000000000000000)
+        assert msg["message_id"] == 1783000000000000000
+        assert isinstance(msg["message_id"], int)
+
+    def test_item_list_has_no_msg_id(self):
+        """item_list[0] 不应再带 msg_id（hub 不识别该字段，会被丢弃）"""
+        msg = _build_text_reply("ctx", "hi", "user@im.wechat", 1783000000000000000)
+        assert "msg_id" not in msg["item_list"][0]
+
+    def test_message_id_magnitude_within_ilink_safe_range(self):
+        """生成值量级 ~1.78e18，须 < i64::MAX(9.22e18)，落在 iLink 已验证保留区间"""
+        import time
+        generated = int(time.time() * 1000) * 1_000_000 + 123456
+        assert generated < 9_220_000_000_000_000_000
+        assert generated > 1_000_000_000_000_000_000  # 至少 ~1e18 量级

@@ -735,8 +735,20 @@ class RelayStorage:
         session = None
         match_method = None
 
-        # ===== 精确层（所有基于 short_id 的精确匹配，优先于 L1 近似）=====
-        # 优先级 0：iLink L2 — ref_text 含 [#short_id] 精确匹配
+        # 优先级 0（最高）：iLink ref_msg_id 精确匹配
+        # 我方出站时在 msg 顶层设置唯一 message_id（i64），iLink hub 仅当 message_id
+        # 为空时才自分配，故我方预设值会被保留；用户引用回复时 iLink 把它原样回传到
+        # ref_msg.message_item.msg_id。完全相等即精确命中，无并发歧义。
+        ref_msg_id = (data.get("ref_msg_id") or "").strip()
+        if ref_msg_id:
+            session = await self.get_session_by_ilink_msg_id(ref_msg_id)
+            if session:
+                match_method = f"ilink_ref_msg_id={ref_msg_id}"
+                logger.info(f"iLink ref_msg_id 精确匹配: ref_msg_id={ref_msg_id}, session={session.short_id}")
+            else:
+                logger.warning(f"iLink ref_msg_id={ref_msg_id} 未匹配到等待中的会话")
+
+        # 优先级 1：iLink L2 — ref_text 含 [#short_id] 精确匹配
         # iLink 有时在 ref_msg.message_item.text_item.text 中带回被引用消息的文本，
         # 若包含 [#short_id] 标签，可直接精确定位，无需时间戳近似。
         ref_text = data.get("ref_text", "")
