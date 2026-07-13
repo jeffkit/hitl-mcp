@@ -155,38 +155,52 @@ def _extract_ref_create_time_ms(msg: dict) -> int:
     return 0
 
 
-def _extract_quoted_text(msg: dict) -> str:
-    """从 iLink 消息中提取被引用的原始消息文本。
+def _extract_ref_text(msg: dict) -> str:
+    """从 iLink 引用回复中提取被引用消息的文本内容（L2 匹配，不稳定）。
 
-    iLink 引用回复时，item_list 中会出现 refer_item 类型的 item（type=49）。
-    被引用的消息内容保存在 refer_item 内，字段名因版本而异。
+    路径：item_list[].ref_msg.message_item.text_item.text
+
+    iLink 并非每次都下发 text_item，但当它存在时，可直接从中提取
+    [#short_id] 实现精确会话匹配，优于时间戳近似匹配（L1）。
+    缺失时由调用方回退到 L1 时间戳匹配。
+    """
+    for item in msg.get("item_list", []) or []:
+        ref_msg = item.get("ref_msg") or {}
+        message_item = ref_msg.get("message_item") or {}
+        text = (message_item.get("text_item") or {}).get("text") or ""
+        if text:
+            return text
+    return ""
+
+
+def _extract_quoted_text(msg: dict) -> str:
+    """从 iLink 消息中提取被引用的原始消息文本（用于日志/调试）。
 
     提取优先级（从高到低）：
-    1. refer_item.content — 大多数版本的消息正文字段
-    2. refer_item.text    — 部分旧版本的消息正文字段
-    3. 嵌套 item_list     — 部分版本 refer_item 内嵌原始消息结构
-    4. refer_item.displayname — 最后兜底（通常是发送方名称，不含 short_id）
+    1. ref_msg.message_item.text_item.text — iLink 标准引用结构（L2，有时缺失）
+    2. refer_item.content / refer_item.text — 旧版或其他格式
+    3. 嵌套 item_list — 部分版本 refer_item 内嵌原始消息结构
+    4. refer_item.displayname — 最后兜底（发送方名称，不含 short_id）
 
     注意：displayname 是发送方显示名，不含 [#short_id] 标签，须放在最后。
-
     返回空字符串表示非引用回复或无法提取。
     """
+    # 优先尝试新格式：ref_msg.message_item.text_item.text
+    ref_text = _extract_ref_text(msg)
+    if ref_text:
+        return ref_text
+
+    # 旧格式兜底：refer_item（某些版本/平台）
     for item in msg.get("item_list", []) or []:
         refer = item.get("refer_item") or {}
         if not refer:
             continue
 
-        # 优先取实际消息正文字段
         content = refer.get("content") or refer.get("text") or ""
-
-        # 若正文字段为空，尝试从嵌套 item_list 提取（部分版本的结构）
         if not content:
             content = _extract_text(refer)
-
-        # 实在没有，才退化到 displayname（发送方名称）
         if not content:
             content = refer.get("displayname") or ""
-
         if content:
             return content
     return ""
@@ -292,12 +306,6 @@ class ILinkClient:
             f"[ilink-engine] 收到消息: user={from_user_id}, "
             f"text={text[:80]!r}, quoted={quoted_preview}"
         )
-        # 临时：打印完整原始消息结构，用于排查引用字段名
-        import json as _json
-        try:
-            logger.info(f"[ilink-engine] 原始消息结构: {_json.dumps(msg, ensure_ascii=False)[:2000]}")
-        except Exception:
-            logger.info(f"[ilink-engine] 原始消息结构(repr): {repr(msg)[:2000]}")
 
         if context_token and from_user_id:
             self.store.set_context_token(from_user_id, context_token)
@@ -472,9 +480,9 @@ def _format_message_with_header(
 def _to_callback_data(msg: UserMessage) -> dict:
     """转成 fly-pigeon 兼容结构，供 storage.handle_callback 消费。
 
-    iLink 引用回复时，原始消息文本不随回调下发——只有被引用消息的 msg_id
-    （存于 item_list[].ref_msg.message_item.msg_id）。
-    因此改为通过 ref_msg_id 进行精确会话匹配，不再依赖 quote 文本提取。
+    iLink 引用回复匹配策略（按优先级）：
+    L2（精确）：ref_msg.message_item.text_item.text 含 [#short_id] → ref_text 字段
+    L1（近似）：ref_msg.message_item.create_time_ms ≈ ilink_sent_at_ms → ref_create_time_ms 字段
     """
     data: dict = {
         "chatid": msg.from_user_id,
@@ -483,12 +491,17 @@ def _to_callback_data(msg: UserMessage) -> dict:
         "text": {"content": msg.text},
         "from": {"userid": msg.from_user_id, "name": ""},
     }
-    # iLink 引用回复：sendmessage 响应为空 {}，无法存储 msg_id
-    # 改用 ref_msg.message_item.create_time_ms 做时间戳近似匹配
+    # L2: 被引用消息文本（iLink 不稳定下发，存在时可提取 [#short_id] 精确匹配）
+    ref_text = _extract_ref_text(msg.raw)
+    if ref_text:
+        data["ref_text"] = ref_text
+        logger.debug(f"[ilink-engine] 提取引用文本(L2): {ref_text[:80]!r}")
+
+    # L1: 时间戳近似匹配（无 text_item 时的回退手段）
     ref_create_time_ms = _extract_ref_create_time_ms(msg.raw)
     if ref_create_time_ms:
         data["ref_create_time_ms"] = ref_create_time_ms
-        logger.debug(f"[ilink-engine] 提取引用时间戳: {ref_create_time_ms}")
+        logger.debug(f"[ilink-engine] 提取引用时间戳(L1): {ref_create_time_ms}")
     return data
 
 
