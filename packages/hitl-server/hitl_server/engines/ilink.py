@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 UA = "Mozilla/5.0 (compatible; iLink-Bot/1.0)"
 
 # 与 storage.SESSION_ID_PATTERN 保持一致：匹配 [#short_id] 或 [#short_id 项目名]
-_ILINK_SESSION_ID_RE = re.compile(r'\[#([a-f0-9]{8})(?:\s+[^\]]+)?\]')
+# 兼容 8~12 位 hex（历史 8 位 / 新 12 位）
+_ILINK_SESSION_ID_RE = re.compile(r'\[#([a-f0-9]{8,12})(?:\s+[^\]]+)?\]')
 
 
 # ── Token 持久化 ──────────────────────────────────────────────────────────
