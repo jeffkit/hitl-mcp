@@ -106,22 +106,27 @@ class HILSession(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(36), unique=True, nullable=False, index=True)
-    short_id = Column(String(8), nullable=False, index=True)
-    
+    short_id = Column(String(12), nullable=False, index=True)
+
     # 会话信息
     chat_id = Column(String(255), nullable=False, index=True)
     chat_type = Column(String(20), default="group")
     message = Column(Text, default="")
     project_name = Column(String(255), default="")
     images = Column(JSON, default=list)
-    
+
     # 状态
     status = Column(String(20), default="waiting", index=True)
-    
+
     # 时间戳
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     expire_at = Column(DateTime, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # iLink 引用回复匹配锚点（DB 模式下重启后仍可做 L1 时间戳近似匹配）
+    # ilink_sent_at_ms: 发消息时本地时间戳（ms）；ilink_msg_id: sendmessage 返回的 msg_id（通常为空）
+    ilink_sent_at_ms = Column(Integer, default=0, nullable=False)
+    ilink_msg_id = Column(String(64), default="", nullable=False)
     
     # 关联的回复
     replies = relationship("HILReply", back_populates="session", cascade="all, delete-orphan")

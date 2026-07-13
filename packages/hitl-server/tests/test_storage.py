@@ -124,7 +124,7 @@ class TestRelayStorageMemory:
         assert session.project_name == "test-project"
         assert session.status == "waiting"
         assert len(session.session_id) > 0
-        assert len(session.short_id) == 8
+        assert len(session.short_id) == 12
     
     @pytest.mark.asyncio
     async def test_get_session(self, storage):
@@ -434,6 +434,68 @@ class TestCallbackMatching:
         assert result["success"] is True
         assert result["session_id"] == session2.session_id
         assert "ilink_time" in result.get("match_method", "")
+
+    @pytest.mark.asyncio
+    async def test_ilink_time_multi_candidates_degraded_to_ambiguous(self, storage):
+        """L1 时间窗口内存在多个候选时，应拒绝猜测并返回 prompt_user，而非"取最近"错配"""
+        import time
+        chat_id = "user-ilink-ambiguous"
+        session1 = await storage.create_session(chat_id=chat_id, message="第1条")
+        session2 = await storage.create_session(chat_id=chat_id, message="第2条")
+
+        # 两条会话相隔 1 秒，都在 3s 容差窗口内
+        now_ms = int(time.time() * 1000)
+        await storage.update_ilink_sent_at(session1.session_id, now_ms - 1000)
+        await storage.update_ilink_sent_at(session2.session_id, now_ms)
+
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "回复某条"},
+            "from": {"userid": chat_id, "name": ""},
+            "ref_create_time_ms": now_ms,  # 落在两个候选之间
+        }
+
+        result = await storage.handle_callback(cb)
+        assert result["success"] is False
+        assert result["error"] == "ambiguous_session"
+        assert result["prompt_user"] is True
+        assert set(result["waiting_short_ids"]) == {session1.short_id, session2.short_id}
+
+        # 没有任何会话被错误消费
+        assert (await storage.get_session(session1.session_id)).status == "waiting"
+        assert (await storage.get_session(session2.session_id)).status == "waiting"
+
+    @pytest.mark.asyncio
+    async def test_engine_short_id_beats_ilink_time(self, storage):
+        """精确 short_id 必须优先于 L1 时间戳近似（修复优先级倒置）"""
+        import time
+        chat_id = "user-shortid-over-time"
+        session1 = await storage.create_session(chat_id=chat_id, message="老消息")
+        session2 = await storage.create_session(chat_id=chat_id, message="新消息")
+
+        now_ms = int(time.time() * 1000)
+        await storage.update_ilink_sent_at(session1.session_id, now_ms - 500)
+        await storage.update_ilink_sent_at(session2.session_id, now_ms)
+
+        # 引擎从 refer_item 提取出 session1 的 short_id（精确），
+        # 但 ref_create_time_ms 更接近 session2（近似会选错）
+        cb = {
+            "chatid": chat_id,
+            "chattype": "single",
+            "msgtype": "text",
+            "text": {"content": "回复老消息"},
+            "from": {"userid": chat_id, "name": ""},
+            "short_id": session1.short_id,
+            "ref_create_time_ms": now_ms,  # ≈ session2，L1 会错配
+        }
+
+        result = await storage.handle_callback(cb)
+        assert result["success"] is True
+        assert result["session_id"] == session1.session_id
+        assert "short_id" in result.get("match_method", "")
+        assert (await storage.get_session(session2.session_id)).status == "waiting"
 
     @pytest.mark.asyncio
     async def test_quote_reply_exact_match_over_fifo(self, storage):

@@ -22,7 +22,8 @@ from sqlalchemy.orm import selectinload
 logger = logging.getLogger(__name__)
 
 # 匹配消息中的会话标识 [#short_id] 或 [#short_id 项目名]
-SESSION_ID_PATTERN = re.compile(r'\[#([a-f0-9]{8})(?:\s+[^\]]+)?\]')
+# short_id 兼容 8~12 位 hex：旧数据为 8 位，新会话为 12 位（降低碰撞概率）
+SESSION_ID_PATTERN = re.compile(r'\[#([a-f0-9]{8,12})(?:\s+[^\]]+)?\]')
 
 
 @dataclass
@@ -51,7 +52,7 @@ class PendingRequest:
 class Session:
     """会话数据"""
     session_id: str
-    short_id: str  # session_id 前 8 位，用于消息标识
+    short_id: str  # session_id 前 12 位，用于消息标识（旧数据为 8 位）
     chat_id: str
     chat_type: str = "group"
     message: str = ""
@@ -76,6 +77,8 @@ class Session:
             "replies": self.replies,
             "created_at": self.created_at.isoformat(),
             "expire_at": self.expire_at.isoformat(),
+            "ilink_msg_id": self.ilink_msg_id,
+            "ilink_sent_at_ms": self.ilink_sent_at_ms,
         }
 
 
@@ -161,23 +164,38 @@ def extract_reply_from_callback(data: dict) -> tuple[Reply, str | None]:
     content = None
     image_url = None
     short_id = None
+
+    # iLink 回调特征：引用内容随 ref_msg 下发，正文即用户实际回复，
+    # 不走企微的 ""..."------...@机器人 引用格式。误用 parse_quoted_message
+    # 会在用户正文恰好以中文引号开头且含 ------ 时截断回复，故 iLink 路径跳过。
+    is_ilink = bool(data.get("ref_text") or data.get("ref_create_time_ms"))
     
     if msg_type == "text":
         text_data = data.get("text", {})
         raw_content = text_data.get("content", "")
 
-        short_id, content = parse_quoted_message(raw_content)
-
-        if short_id is None and content == raw_content:
+        if is_ilink:
+            # iLink：正文就是用户回复，仅做 @机器人 去除；short_id 交给
+            # handle_callback 的 L2(ref_text) / engine short_id 精确层处理。
+            content = raw_content
             if content.startswith("@"):
                 parts = content.split(" ", 1)
                 if len(parts) > 1:
                     content = parts[1].strip()
-
-        # 引用内容未嵌入正文（如 wecom-aibot 的「...」格式）时，
-        # 从独立的 quote 字段提取 short_id。
-        if short_id is None:
             short_id = _extract_short_id_from_quote(data)
+        else:
+            short_id, content = parse_quoted_message(raw_content)
+
+            if short_id is None and content == raw_content:
+                if content.startswith("@"):
+                    parts = content.split(" ", 1)
+                    if len(parts) > 1:
+                        content = parts[1].strip()
+
+            # 引用内容未嵌入正文（如 wecom-aibot 的「...」格式）时，
+            # 从独立的 quote 字段提取 short_id。
+            if short_id is None:
+                short_id = _extract_short_id_from_quote(data)
     
     elif msg_type == "image":
         image_data = data.get("image", {})
@@ -302,7 +320,10 @@ class RelayStorage:
                     status=db_session.status,
                     replies=[r.to_dict() for r in db_session.replies],
                     created_at=db_session.created_at,
-                    expire_at=db_session.expire_at
+                    expire_at=db_session.expire_at,
+                    # iLink 匹配锚点从 DB 恢复，重启后 L1 时间戳近似匹配仍可用
+                    ilink_msg_id=getattr(db_session, "ilink_msg_id", "") or "",
+                    ilink_sent_at_ms=getattr(db_session, "ilink_sent_at_ms", 0) or 0,
                 )
                 
                 self._sessions[session.session_id] = session
@@ -367,7 +388,9 @@ class RelayStorage:
         """创建会话"""
         async with self._lock:
             session_id = str(uuid.uuid4())
-            short_id = session_id[:8]
+            # 取 UUID hex（去掉连字符）前 12 位作为 short_id，保证纯 hex，
+            # 与 SESSION_ID_PATTERN 的 [a-f0-9]{8,12} 匹配一致。
+            short_id = session_id.replace("-", "")[:12]
             expire_at = datetime.now() + timedelta(seconds=timeout)
             
             session = Session(
@@ -607,6 +630,14 @@ class RelayStorage:
                 return False
             session.ilink_msg_id = ilink_msg_id
             logger.debug(f"更新会话 ilink_msg_id: {session_id[:8]} -> {ilink_msg_id}")
+            if self._db_manager:
+                from .models import HILSession
+                async with self._db_manager.session() as db:
+                    await db.execute(
+                        update(HILSession)
+                        .where(HILSession.session_id == session_id)
+                        .values(ilink_msg_id=ilink_msg_id, updated_at=datetime.now())
+                    )
             return True
 
     async def update_ilink_sent_at(self, session_id: str, sent_at_ms: int) -> bool:
@@ -619,6 +650,14 @@ class RelayStorage:
                 return False
             session.ilink_sent_at_ms = sent_at_ms
             logger.debug(f"更新会话 ilink_sent_at_ms: {session_id[:8]} -> {sent_at_ms}")
+            if self._db_manager:
+                from .models import HILSession
+                async with self._db_manager.session() as db:
+                    await db.execute(
+                        update(HILSession)
+                        .where(HILSession.session_id == session_id)
+                        .values(ilink_sent_at_ms=sent_at_ms, updated_at=datetime.now())
+                    )
             return True
 
     async def get_session_by_ilink_msg_id(self, ilink_msg_id: str) -> "Session | None":
@@ -631,19 +670,22 @@ class RelayStorage:
                     return session
         return None
 
-    async def get_session_by_ilink_time(
-        self, chat_id: str, ref_create_time_ms: int, tolerance_ms: int = 10_000
-    ) -> "Session | None":
-        """通过 iLink 引用消息的时间戳近似匹配等待中的会话。
+    async def get_ilink_time_candidates(
+        self, chat_id: str, ref_create_time_ms: int, tolerance_ms: int | None = None
+    ) -> list["Session"]:
+        """通过 iLink 引用消息的时间戳近似匹配，返回容差窗口内的候选会话（按 Δ 升序）。
 
         iLink sendmessage 响应为空 {}，无法直接获取 msg_id。
-        但 ref_msg.message_item.create_time_ms 是 iLink 给被引用消息的时间戳，
-        与我们 send_message 调用时记录的 ilink_sent_at_ms 之差通常 < 1 秒。
+        ref_msg.message_item.create_time_ms 是 iLink 服务端时钟，与本地记录的
+        ilink_sent_at_ms（发 HTTP 前的本地时钟）含网络 RTT + 时钟漂移。
 
-        在指定的 tolerance_ms 窗口内找到最接近的会话。
+        注意：返回多个候选时不在此处自动择一——调用方应将其视为歧义并引导用户引用，
+        而非"取最近"猜测（同窗口多会话时极易错配）。
         """
         if not ref_create_time_ms:
-            return None
+            return []
+        if tolerance_ms is None:
+            tolerance_ms = ILINK_TIME_TOLERANCE_MS
         async with self._lock:
             candidates = [
                 s for s in self._sessions.values()
@@ -652,10 +694,8 @@ class RelayStorage:
                 and s.ilink_sent_at_ms > 0
                 and abs(s.ilink_sent_at_ms - ref_create_time_ms) <= tolerance_ms
             ]
-        if not candidates:
-            return None
-        # 取时间差最小的
-        return min(candidates, key=lambda s: abs(s.ilink_sent_at_ms - ref_create_time_ms))
+        candidates.sort(key=lambda s: abs(s.ilink_sent_at_ms - ref_create_time_ms))
+        return candidates
 
     # ========== 回调处理 ==========
 
@@ -695,6 +735,7 @@ class RelayStorage:
         session = None
         match_method = None
 
+        # ===== 精确层（所有基于 short_id 的精确匹配，优先于 L1 近似）=====
         # 优先级 0：iLink L2 — ref_text 含 [#short_id] 精确匹配
         # iLink 有时在 ref_msg.message_item.text_item.text 中带回被引用消息的文本，
         # 若包含 [#short_id] 标签，可直接精确定位，无需时间戳近似。
@@ -710,27 +751,54 @@ class RelayStorage:
                 else:
                     logger.warning(f"iLink ref_text 含 short_id={ref_short_id}，但未匹配到等待中的会话")
 
-        # 优先级 1：iLink L1 — 时间戳近似匹配（引用回复，sendmessage 响应不含 msg_id）
+        # 优先级 1：short_id 精确匹配（引擎 refer_item 子树提取 / wecom-aibot 引用 / 消息头 [#short_id]）
+        # 注意：必须在 L1 时间戳近似之前——short_id 是精确锚点，时间戳只是兜底。
+        # 统一带 chat_id 过滤，避免跨 chat 偶发同 short_id 错配（与 L2 行为一致）。
+        if not session and short_id:
+            session = await self.get_session_by_short_id(short_id, chat_id)
+            if session:
+                match_method = f"short_id={short_id}"
+            else:
+                logger.warning(f"short_id={short_id} 未匹配到等待中的会话 (chat_id={chat_id[:16]}...)")
+
+        # ===== 近似层 =====
+        # 优先级 2：iLink L1 — 时间戳近似匹配（引用回复，sendmessage 响应不含 msg_id）
+        # 仅当容差窗口内恰好 1 个候选时才采纳；多候选视为歧义，引导用户引用，不再"取最近"猜测。
         ref_create_time_ms = data.get("ref_create_time_ms", 0)
         if not session and ref_create_time_ms:
-            session = await self.get_session_by_ilink_time(chat_id, ref_create_time_ms)
-            if session:
-                match_method = f"ilink_time≈{ref_create_time_ms}"
+            candidates = await self.get_ilink_time_candidates(chat_id, ref_create_time_ms)
+            if len(candidates) == 1:
+                session = candidates[0]
                 delta_ms = abs(session.ilink_sent_at_ms - ref_create_time_ms)
+                match_method = f"ilink_time≈{ref_create_time_ms}"
                 logger.info(
                     f"iLink 时间戳近似匹配会话(L1): ref_time={ref_create_time_ms}, "
                     f"session={session.short_id}, Δ={delta_ms}ms"
                 )
+                # Δ 接近容差边界 → 疑似时钟漂移，告警便于运维感知
+                if delta_ms >= ILINK_TIME_TOLERANCE_MS * 0.7:
+                    logger.warning(
+                        f"iLink L1 匹配 Δ={delta_ms}ms 接近容差上限 "
+                        f"{ILINK_TIME_TOLERANCE_MS}ms，疑似本地/iLink 时钟漂移，"
+                        f"建议核查 NTP 或调大 HIL_ILINK_TIME_TOLERANCE_MS"
+                    )
+            elif len(candidates) > 1:
+                cand_short_ids = [s.short_id for s in candidates]
+                logger.warning(
+                    f"iLink L1 时间窗口内存在 {len(candidates)} 个候选会话，拒绝猜测: "
+                    f"chat_id={chat_id[:16]}..., ref_time={ref_create_time_ms}, "
+                    f"short_ids={cand_short_ids}"
+                )
+                return {
+                    "success": False,
+                    "session_id": None,
+                    "error": "ambiguous_session",
+                    "chat_id": chat_id,
+                    "prompt_user": True,
+                    "waiting_short_ids": cand_short_ids,
+                }
             else:
                 logger.warning(f"ref_create_time_ms={ref_create_time_ms} 未匹配到会话")
-
-        # 优先级 2：short_id 精确匹配（wecom-aibot 引用、消息头 [#short_id]）
-        if not session and short_id:
-            session = await self.get_session_by_short_id(short_id)
-            if session:
-                match_method = f"short_id={short_id}"
-            else:
-                logger.warning(f"short_id={short_id} 未匹配到等待中的会话")
 
         # 优先级 3：chat_id 回退匹配
         if not session:
@@ -889,6 +957,12 @@ import os
 
 # 检查是否启用数据库模式
 USE_DATABASE = os.getenv("HIL_USE_DATABASE", "").lower() in ("1", "true", "yes")
+
+# iLink L1 时间戳近似匹配容差（ms）。
+# ilink_sent_at_ms 是本地时钟（发 HTTP 前），ref_create_time_ms 是 iLink 服务端时钟，
+# 二者含网络 RTT + 时钟漂移；默认 3000ms 已覆盖正常链路，过宽（旧值 10000）会导致
+# 同窗口多会话被"取最近"错配。可通过 HIL_ILINK_TIME_TOLERANCE_MS 调整。
+ILINK_TIME_TOLERANCE_MS = int(os.getenv("HIL_ILINK_TIME_TOLERANCE_MS", "3000"))
 
 # 全局存储实例
 storage = RelayStorage(use_database=USE_DATABASE)
