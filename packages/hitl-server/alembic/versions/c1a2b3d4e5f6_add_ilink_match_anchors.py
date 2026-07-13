@@ -32,12 +32,16 @@ def upgrade() -> None:
             sa.Column('ilink_msg_id', sa.String(length=64), nullable=False, server_default='')
         )
         # short_id 扩长到 12（兼容历史 8 位数据）
-        batch_op.alter_column('short_id', sa.String(length=12), existing_type=sa.String(length=8))
+        batch_op.alter_column(
+            'short_id', type_=sa.String(length=12), existing_type=sa.String(length=8)
+        )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     with op.batch_alter_table('hil_sessions', schema=None) as batch_op:
-        batch_op.alter_column('short_id', sa.String(length=8), existing_type=sa.String(length=12))
+        batch_op.alter_column(
+            'short_id', type_=sa.String(length=8), existing_type=sa.String(length=12)
+        )
         batch_op.drop_column('ilink_msg_id')
         batch_op.drop_column('ilink_sent_at_ms')
