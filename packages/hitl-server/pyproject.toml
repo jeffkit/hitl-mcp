@@ -51,15 +51,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["hitl_server"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"hitl_server/console/dist" = "hitl_server/console/dist"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "hitl_server",
     "README.md",
     "LICENSE",
 ]
-
-[tool.hatch.build.targets.sdist.force-include]
-"hitl_server/console/dist" = "hitl_server/console/dist"
 
 [dependency-groups]
 dev = [

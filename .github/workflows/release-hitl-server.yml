@@ -127,8 +127,26 @@ jobs:
       - name: Sync Python deps
         run: uv sync --locked
 
-      - name: Build sdist + wheel
-        run: uv build
+      - name: Build wheel + sdist
+        # 分开构建：uv build 默认先 sdist 再从 sdist 解压构建 wheel，
+        # 而 console/dist 被 .gitignore 忽略不会进 sdist，导致 wheel 的
+        # force-include 在 sdist 解压上下文中找不到该路径。先 --wheel 直接
+        # 构建（build 上下文为项目目录，console/dist 存在，force-include 生效），
+        # 再 --sdist 单独出源码包。
+        run: |
+          uv build --wheel
+          uv build --sdist
+
+      - name: Verify wheel ships console UI
+        run: |
+          python - <<'PY'
+          import zipfile, glob, sys
+          whl = glob.glob("dist/hitl_server-*.whl")[0]
+          names = zipfile.ZipFile(whl).namelist()
+          shipped = [n for n in names if n.startswith("hitl_server/console/dist/")]
+          assert shipped, f"❌ wheel 未包含 console/dist，管理台将不可用: {whl}"
+          print(f"✅ wheel 含 console/dist: {len(shipped)} 文件")
+          PY
 
       - name: Publish to PyPI
         env:
