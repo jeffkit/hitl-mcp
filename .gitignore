@@ -87,6 +87,7 @@ htmlcov/
 data/
 check_quote.py
 .a2a/
+.workbuddy/
 
 # OS
 .DS_Store
