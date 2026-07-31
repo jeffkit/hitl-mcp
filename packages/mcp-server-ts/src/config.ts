@@ -4,12 +4,15 @@
  * 所有配置均通过命令行参数传入（不依赖环境变量）。
  *
  * 引擎选择（--engine）：
- *   auto        → 自动：查询管理台已注册的内置引擎，按 ilink→wecom-aibot 优先级选用（默认）
+ *   auto        → 自动：查询管理台已注册的内置引擎，按 ilink→wecom-aibot→telegram→discord→feishu 优先级选用（默认）
  *   wecom-aibot → 企业微信智能机器人（走 HITL Server 的 wecom-aibot 内置引擎）
  *   ilink       → 微信 ClawBot/iLink（走 HITL Server 的 ilink 内置引擎）
+ *   telegram    → Telegram Bot（走 HITL Server 的 telegram 内置引擎，长轮询在服务端维持）
+ *   discord     → Discord Bot（走 HITL Server 的 discord 内置引擎，Gateway WS 在服务端维持）
+ *   feishu      → 飞书企业自建应用（走 HITL Server 的 feishu 内置引擎，WebSocket 在服务端维持）
  */
 
-export type EngineType = 'auto' | 'wecom-aibot' | 'ilink';
+export type EngineType = 'auto' | 'wecom-aibot' | 'ilink' | 'telegram' | 'discord' | 'feishu';
 
 export interface Config {
   engine: EngineType;
@@ -47,6 +50,16 @@ export interface Config {
   ilinkBaseUrl: string;
   ilinkTokenStorePath: string;
   ilinkPollTimeout: number;
+
+  // ── Telegram / Discord / 飞书 引擎 ──────────────────────────────────────────
+  /** Telegram Bot Token（--tg-token，自动向 HITL Server 注册 telegram 引擎） */
+  tgToken: string;
+  /** Discord Bot Token（--discord-token，自动向 HITL Server 注册 discord 引擎） */
+  discordToken: string;
+  /** 飞书企业自建应用 App ID（--feishu-app-id） */
+  feishuAppId: string;
+  /** 飞书企业自建应用 App Secret（--feishu-app-secret） */
+  feishuAppSecret: string;
 }
 
 export function createConfig(opts: Partial<Config>): Config {
@@ -69,6 +82,10 @@ export function createConfig(opts: Partial<Config>): Config {
     ilinkBaseUrl:         opts.ilinkBaseUrl         ?? 'https://ilinkai.weixin.qq.com',
     ilinkTokenStorePath:  opts.ilinkTokenStorePath  ?? './data/ilink_store.json',
     ilinkPollTimeout:     opts.ilinkPollTimeout     ?? 40,
+    tgToken:              opts.tgToken              ?? '',
+    discordToken:         opts.discordToken         ?? '',
+    feishuAppId:          opts.feishuAppId          ?? '',
+    feishuAppSecret:      opts.feishuAppSecret      ?? '',
   };
 }
 

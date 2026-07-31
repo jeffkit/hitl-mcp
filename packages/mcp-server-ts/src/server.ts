@@ -5,6 +5,9 @@
  *   auto        — send_and_wait_reply, send_message_only（启动时按管理台配置解析为下面之一）
  *   wecom-aibot — send_and_wait_reply, send_message_only
  *   ilink       — send_and_wait_reply, send_message_only
+ *   telegram    — send_and_wait_reply, send_message_only
+ *   discord     — send_and_wait_reply, send_message_only
+ *   feishu      — send_and_wait_reply, send_message_only
  *
  * 初始化（扫码登录 / 填写凭证 / 激活收件人）统一在管理台完成，MCP 侧不再暴露
  * wait_for_login / list_activated_users 工具；未初始化时 send_* 返回 not_initialized
@@ -21,19 +24,27 @@ import {
 import { getConfig, type EngineType } from './config.js';
 import { WecomAibotEngine } from './engines/wecom-aibot.js';
 import { ILinkEngine } from './engines/ilink.js';
+import { TelegramEngine } from './engines/telegram.js';
+import { DiscordEngine } from './engines/discord.js';
+import { FeishuEngine } from './engines/feishu.js';
 import type { Engine, SendResult } from './engines/base.js';
 
 function makeEngine(engineType: EngineType): Engine {
   switch (engineType) {
     case 'wecom-aibot': return new WecomAibotEngine();
     case 'ilink':       return new ILinkEngine();
+    case 'telegram':    return new TelegramEngine();
+    case 'discord':     return new DiscordEngine();
+    case 'feishu':      return new FeishuEngine();
     default:            throw new Error(`不支持的引擎类型: ${engineType}（auto 应在调用前已解析）`);
   }
 }
 
 /**
- * auto 模式：查询管理台 /admin/api/engines，按 ilink(logged_in) → wecom-aibot(connected)
- * → ilink(已注册) → wecom-aibot(已注册) 的优先级选用通道。
+ * auto 模式：查询管理台 /admin/api/engines，按
+ * ilink(logged_in) → wecom-aibot(connected) → ilink(已注册) → wecom-aibot(已注册)
+ * → telegram(running) → discord(connected) → feishu(connected) → 各自主(已注册)
+ * 的优先级选用通道。
  * 返回具体引擎类型与对应 bot_key（供 /api/send 路由）。无任何已注册引擎时抛错。
  */
 async function resolveAutoEngine(serviceUrl: string): Promise<{ engineType: EngineType; botKey: string }> {
@@ -60,7 +71,25 @@ async function resolveAutoEngine(serviceUrl: string): Promise<{ engineType: Engi
   const wecomAny = engines.find(e => e.worker_type === 'wecom-aibot');
   if (wecomAny) return { engineType: 'wecom-aibot', botKey: String(wecomAny.bot_key ?? '') };
 
-  throw new Error('管理台无已注册的内置引擎（ilink / wecom-aibot），请先在管理台初始化引擎');
+  const telegramReady = find('telegram', e => e.running === true);
+  if (telegramReady) return { engineType: 'telegram', botKey: String(telegramReady.bot_key ?? '') };
+
+  const discordReady = find('discord', e => e.connected === true);
+  if (discordReady) return { engineType: 'discord', botKey: String(discordReady.bot_key ?? '') };
+
+  const feishuReady = find('feishu', e => e.connected === true);
+  if (feishuReady) return { engineType: 'feishu', botKey: String(feishuReady.bot_key ?? '') };
+
+  const telegramAny = engines.find(e => e.worker_type === 'telegram');
+  if (telegramAny) return { engineType: 'telegram', botKey: String(telegramAny.bot_key ?? '') };
+
+  const discordAny = engines.find(e => e.worker_type === 'discord');
+  if (discordAny) return { engineType: 'discord', botKey: String(discordAny.bot_key ?? '') };
+
+  const feishuAny = engines.find(e => e.worker_type === 'feishu');
+  if (feishuAny) return { engineType: 'feishu', botKey: String(feishuAny.bot_key ?? '') };
+
+  throw new Error('管理台无已注册的内置引擎（ilink / wecom-aibot / telegram / discord / feishu），请先在管理台初始化引擎');
 }
 
 function jsonText(obj: unknown): { content: Array<{ type: string; [k: string]: unknown }> } {
@@ -77,6 +106,9 @@ function resultToContent(result: SendResult) {
       '初始化步骤（管理台「引擎管理」页）：',
       '  • iLink：扫码登录，然后给 bot 发一条消息激活收件人',
       '  • WeCom AI Bot：填写 Bot ID + Secret 启动，然后在企微给 bot 发一条消息激活收件人',
+      '  • Telegram：填写 Bot Token 启动（@BotFather 创建），然后在 Telegram 给 bot 发一条消息获得 chat_id',
+      '  • Discord：填写 Bot Token 启动（需开启 MESSAGE_CONTENT 特权意图），然后在频道里发消息获得 channel_id',
+      '  • 飞书：填写 App ID + App Secret 启动（企业自建应用，需开通 im:message 权限），然后给 bot 发消息获得 open_id',
       '',
       '完成后请重试原请求。',
       '',
@@ -125,6 +157,24 @@ function buildTools(cfg: ReturnType<typeof getConfig>): Tool[] {
         makeSendOnlyTool('wecom-aibot', recipientDesc),
       ];
     }
+
+    case 'telegram':
+      return [
+        makeSendAndWaitTool('telegram', '目标 chat_id（必填）。首次使用时给 bot 发一条消息即可获得自己的 chat_id'),
+        makeSendOnlyTool('telegram', '目标 chat_id（必填）。首次使用时给 bot 发一条消息即可获得自己的 chat_id'),
+      ];
+
+    case 'discord':
+      return [
+        makeSendAndWaitTool('discord', '目标 channel_id（必填）。Bot 需加入目标频道/私聊'),
+        makeSendOnlyTool('discord', '目标 channel_id（必填）。Bot 需加入目标频道/私聊'),
+      ];
+
+    case 'feishu':
+      return [
+        makeSendAndWaitTool('feishu', '目标 open_id（必填）。首次使用时给 bot 发一条消息即可获得自己的 open_id'),
+        makeSendOnlyTool('feishu', '目标 open_id（必填）。首次使用时给 bot 发一条消息即可获得自己的 open_id'),
+      ];
 
     default:
       throw new Error(`不支持的引擎类型: ${cfg.engine}`);

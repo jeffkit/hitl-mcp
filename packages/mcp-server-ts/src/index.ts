@@ -10,6 +10,9 @@
  *   # 指定引擎（覆盖 auto）
  *   hitl-mcp --engine ilink --service-url http://localhost:8081
  *   hitl-mcp --engine wecom-aibot --service-url http://localhost:8081
+ *   hitl-mcp --engine telegram --tg-token <token> --service-url http://localhost:8081
+ *   hitl-mcp --engine discord --discord-token <token> --service-url http://localhost:8081
+ *   hitl-mcp --engine feishu --feishu-app-id <id> --feishu-app-secret <secret> --service-url http://localhost:8081
  */
 
 import { program } from 'commander';
@@ -51,10 +54,10 @@ program
   // ── 通用参数（默认行为：启动 MCP server） ────────────────────────────────
   .option(
     '--engine <type>',
-    '引擎类型: auto | wecom-aibot | ilink（默认: auto，按管理台已配置引擎自动选用）',
+    '引擎类型: auto | wecom-aibot | ilink | telegram | discord | feishu（默认: auto，按管理台已配置引擎自动选用）',
     'auto'
   )
-  .option('--chat-id <id>',       '默认 chatid（wecom-aibot 引擎）')
+  .option('--chat-id <id>',       '默认 chatid（wecom-aibot / telegram / discord / feishu 引擎）')
   .option('--bot-key <key>',     '可选。单 bot 可不传，后端按引擎类型自动路由；管理台绑定多个 bot 时用它指定')
   .option('--project-name <name>','默认项目名称')
   .option('--timeout <seconds>',  '等待回复超时（秒，默认 1200）', parseInt)
@@ -80,14 +83,20 @@ program
     'iLink API 基础地址（扫码登录、getupdates、sendmessage，默认: https://ilinkai.weixin.qq.com）'
   )
 
+  // ── Telegram / Discord / 飞书 参数 ──────────────────────────────────────────
+  .option('--tg-token <token>',           'Telegram Bot Token（engine=telegram 时向 HITL Server 自动注册）')
+  .option('--discord-token <token>',      'Discord Bot Token（engine=discord 时向 HITL Server 自动注册）')
+  .option('--feishu-app-id <id>',         '飞书企业自建应用 App ID（engine=feishu 时使用）')
+  .option('--feishu-app-secret <secret>', '飞书企业自建应用 App Secret（engine=feishu 时使用）')
+
   // ── 默认行为（无子命令时）：启动 MCP server ──────────────────────────────
   // 用 program.action 而非顶层直接调用，确保子命令（ilink-setup）触发时不会同时启动 server。
   .action(() => {
     const opts = program.opts();
 
     const engine = (opts.engine as EngineType) ?? 'auto';
-    if (engine !== 'auto' && engine !== 'ilink' && engine !== 'wecom-aibot') {
-      console.error(`[Main] 不支持的 --engine: ${opts.engine}（可选: auto | ilink | wecom-aibot）`);
+    if (!['auto', 'ilink', 'wecom-aibot', 'telegram', 'discord', 'feishu'].includes(engine)) {
+      console.error(`[Main] 不支持的 --engine: ${opts.engine}（可选: auto | ilink | wecom-aibot | telegram | discord | feishu）`);
       process.exit(1);
     }
 
@@ -107,6 +116,11 @@ program
       // iLink
       ilinkTokenStorePath: opts.tokenStore,
       ilinkBaseUrl:        opts.baseUrl,
+      // Telegram / Discord / 飞书
+      tgToken:            opts.tgToken,
+      discordToken:       opts.discordToken,
+      feishuAppId:        opts.feishuAppId,
+      feishuAppSecret:    opts.feishuAppSecret,
     });
 
     setConfig(config);
