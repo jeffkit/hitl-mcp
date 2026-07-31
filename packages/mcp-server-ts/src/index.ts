@@ -24,7 +24,7 @@ import { runSetup } from './setup.js';
 program
   .name('hitl-mcp')
   .description('Human-in-the-Loop MCP Server（支持 企业微信 AI Bot / 微信 iLink 内置引擎）')
-  .version('0.5.0')
+  .version('0.6.1')
 
   // ── 子命令：iLink 一键安装 + 服务化 ───────────────────────────────────────
   .command('ilink-setup')

@@ -1,7 +1,7 @@
 {
   "name": "hitl-mcp",
-  "version": "0.6.0",
-  "description": "Human-in-the-Loop MCP Server for WeCom (企业微信) - TypeScript Implementation",
+  "version": "0.6.1",
+  "description": "Human-in-the-Loop MCP Server - TypeScript Implementation (WeCom / iLink / Telegram / Discord / 飞书)",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
