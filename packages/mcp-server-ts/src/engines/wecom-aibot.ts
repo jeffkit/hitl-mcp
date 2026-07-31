@@ -89,7 +89,7 @@ export class WecomAibotEngine implements Engine {
     recipient: string,
     text: string,
     timeoutSec: number,
-    _projectName?: string,
+    projectName?: string,
     _shortId?: string,
   ): Promise<SendResult> {
     const cfg = getConfig();
@@ -105,6 +105,7 @@ export class WecomAibotEngine implements Engine {
         timeout: timeoutSec,
         bot_key: cfg.botKey,
         upstream: 'wecom-aibot',
+        project_name: projectName,
       }),
     }).catch(e => ({ success: false, error: String(e) }));
 
@@ -133,7 +134,7 @@ export class WecomAibotEngine implements Engine {
   async sendOnly(
     recipient: string,
     text: string,
-    _projectName?: string,
+    projectName?: string,
   ): Promise<SendResult> {
     const cfg = getConfig();
     if (cfg.shared && !recipient) return missingChatId();
@@ -147,6 +148,7 @@ export class WecomAibotEngine implements Engine {
         wait_reply: false,
         bot_key: cfg.botKey,
         upstream: 'wecom-aibot',
+        project_name: projectName,
       }),
     }).catch(e => ({ success: false, error: String(e) }));
 
