@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, type ReactNode } from 'react'
 import {
   QrCode,
   Plug,
@@ -16,6 +16,8 @@ import {
   Link,
   Copy,
   ClipboardCheck,
+  Bot,
+  AtSign,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -127,6 +129,205 @@ function computeWecomStep(wecom?: EngineStatus): Step {
   return { index: 4, tone: 'ready', title: '就绪，可在 Cursor 中使用', hint: '企业微信 AI Bot 通道已就绪，收件人已激活。' }
 }
 
+// Telegram / Discord / 飞书 通用状态机（凭证引擎：运行 → 已连接 → 就绪）
+function computeTokenStep(status: EngineStatus | undefined, active: boolean): Step {
+  if (!status || !status.running) {
+    return { index: 1, tone: 'idle', title: '填写凭证并启动', hint: '填写下方凭证后点击「启动引擎」。' }
+  }
+  if (!active) {
+    return { index: 2, tone: 'connecting', title: '正在建立连接…', hint: '引擎正在连接渠道服务，稍候自动就绪。', glow: 'blue' }
+  }
+  return { index: 3, tone: 'ready', title: '已就绪，可在 Cursor 中使用', hint: '首次使用时给 bot 发一条消息以获得自己的 chat_id / open_id。' }
+}
+
+interface TokenField {
+  key: string
+  label: string
+  type?: 'text' | 'password'
+  placeholder: string
+  hint?: string
+}
+
+interface TokenEngineCardProps {
+  id: string                       // busy 状态前缀
+  title: string
+  description: string
+  icon: ReactNode
+  status?: EngineStatus
+  fields: TokenField[]
+  defaultBotKey: string
+  /** 引擎真正就绪的判断（telegram: running / discord: connected / feishu: connected） */
+  active: boolean
+  activeLabel: string              // 徽章运行文案
+  onStart: (values: Record<string, string>, botKey: string) => Promise<void>
+  onStop: (botKey?: string) => Promise<void>
+  mcpArgs: (botKey: string) => string[]
+}
+
+/** 凭证型引擎通用卡片：字段表单 + 启动/停止 + 就绪后 Cursor MCP 配置片段。 */
+function TokenEngineCard({
+  id, title, description, icon, status, fields, defaultBotKey,
+  active, activeLabel, onStart, onStop, mcpArgs,
+}: TokenEngineCardProps) {
+  const [values, setValues] = useState<Record<string, string>>({ bot_key: defaultBotKey })
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [copied, setCopied] = useState(false)
+
+  const step = computeTokenStep(status, active)
+
+  // 服务端回显非敏感字段（app_id / bot_key），用户未手动编辑时同步
+  useEffect(() => {
+    for (const f of fields) {
+      if (f.type === 'password' || touched[f.key]) continue
+      if (f.key === 'bot_key' && status?.bot_key && status.bot_key !== values.bot_key) {
+        setValues((v) => ({ ...v, bot_key: status.bot_key! }))
+      } else if (f.key !== 'bot_key' && status && (status as unknown as Record<string, unknown>)[f.key] != null) {
+        const sv = String((status as unknown as Record<string, unknown>)[f.key])
+        if (sv && sv !== values[f.key]) setValues((v) => ({ ...v, [f.key]: sv }))
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status])
+
+  const setField = (key: string, value: string) => {
+    setTouched((t) => ({ ...t, [key]: true }))
+    setValues((v) => ({ ...v, [key]: value }))
+  }
+
+  const start = async () => {
+    const required = fields.filter((f) => f.key !== 'bot_key' && !(values[f.key] ?? '').trim())
+    if (required.length > 0) {
+      setError(`请填写：${required.map((f) => f.label).join('、')}`)
+      return
+    }
+    setBusy(`${id}-start`)
+    setError(null)
+    try {
+      await onStart(values, values.bot_key || '')
+      setTouched({})
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const stop = async () => {
+    setBusy(`${id}-stop`)
+    setError(null)
+    try {
+      await onStop(status?.bot_key)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <Card className={step.glow === 'blue' ? 'hitl-glow-blue' : ''}>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 bg-violet-500/10 rounded-lg flex items-center justify-center">{icon}</div>
+            <div>
+              <CardTitle>{title}</CardTitle>
+              <CardDescription>{description}</CardDescription>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <StatusBadge on={active} onText={activeLabel} offText={status?.running ? '连接中' : '未运行'} />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <StepBanner step={step} />
+
+        {status?.bot_key && (
+          <div className="text-sm text-muted-foreground">
+            bot_key: <code className="text-foreground">{status.bot_key}</code>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {fields.map((f) => (
+            <div key={f.key} className="space-y-1.5">
+              <label className="text-sm text-muted-foreground">{f.label}</label>
+              <Input
+                type={f.type ?? 'text'}
+                value={values[f.key] ?? ''}
+                onChange={(e) => setField(f.key, e.target.value)}
+                placeholder={f.placeholder}
+              />
+              {f.hint && <p className="text-xs text-muted-foreground">{f.hint}</p>}
+            </div>
+          ))}
+          <div className="space-y-1.5">
+            <label className="text-sm text-muted-foreground">Bot Key（路由标识）</label>
+            <Input
+              value={values.bot_key ?? ''}
+              onChange={(e) => setField('bot_key', e.target.value)}
+              placeholder={defaultBotKey}
+            />
+          </div>
+        </div>
+
+        {error && (
+          <div className="bg-red-500/10 text-red-600 border border-red-500/20 rounded-lg px-3 py-2 text-sm">{error}</div>
+        )}
+
+        <div className="flex gap-3">
+          <Button onClick={start} disabled={busy === `${id}-start`}>
+            {busy === `${id}-start` ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Plug className="w-4 h-4 mr-2" />}
+            {status ? '重启引擎' : '启动引擎'}
+          </Button>
+          {status && (
+            <Button variant="outline" onClick={stop} disabled={busy === `${id}-stop`}>
+              {busy === `${id}-stop` ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Power className="w-4 h-4 mr-2" />}
+              停止
+            </Button>
+          )}
+        </div>
+
+        {/* 就绪后展示 Cursor MCP 配置片段 */}
+        {step.index === 3 && status?.bot_key && (
+          <div className="space-y-2 border border-green-500/20 bg-green-500/5 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm font-medium text-green-400">
+                <CheckCircle2 className="w-4 h-4" />
+                Cursor MCP 配置（粘贴到 ~/.cursor/mcp.json）
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-xs"
+                onClick={() => {
+                  const cfg = { mcpServers: { hitl: { command: 'npx', args: ['-y', 'hitl-mcp', ...mcpArgs(status.bot_key!)] } } }
+                  navigator.clipboard.writeText(JSON.stringify(cfg, null, 2)).then(() => {
+                    setCopied(true)
+                    setTimeout(() => setCopied(false), 2000)
+                  })
+                }}
+              >
+                {copied ? (
+                  <><ClipboardCheck className="w-3.5 h-3.5 mr-1 text-green-400" /><span className="text-green-400">已复制</span></>
+                ) : (
+                  <><Copy className="w-3.5 h-3.5 mr-1" />复制</>
+                )}
+              </Button>
+            </div>
+            <pre className="text-xs font-mono bg-muted/60 rounded p-3 overflow-x-auto text-muted-foreground leading-relaxed">
+{JSON.stringify({ mcpServers: { hitl: { command: 'npx', args: ['-y', 'hitl-mcp', ...mcpArgs(status.bot_key!)] } } }, null, 2)}
+            </pre>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+
 export function EnginesPage() {
   const [engines, setEngines] = useState<EngineStatus[]>([])
   const [loading, setLoading] = useState(true)
@@ -169,6 +370,9 @@ export function EnginesPage() {
 
   const ilink = engines.find((e) => e.worker_type === 'ilink')
   const wecom = engines.find((e) => e.worker_type === 'wecom-aibot')
+  const telegram = engines.find((e) => e.worker_type === 'telegram')
+  const discord = engines.find((e) => e.worker_type === 'discord')
+  const feishu = engines.find((e) => e.worker_type === 'feishu')
   const ilinkStep = computeIlinkStep(ilink)
   const wecomStep = computeWecomStep(wecom)
 
@@ -315,7 +519,7 @@ export function EnginesPage() {
         <div>
           <h1 className="text-2xl font-semibold">引擎管理</h1>
           <p className="text-sm text-muted-foreground mt-1">
-            配置本地 HITL Server 的内置消息引擎。iLink 扫码登录，企业微信 AI Bot 填写凭证。
+            配置本地 HITL Server 的内置消息引擎。iLink 扫码登录，企业微信 / Telegram / Discord / 飞书 填写凭证。
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={refresh}>
@@ -659,6 +863,79 @@ export function EnginesPage() {
             </p>
           </CardContent>
         </Card>
+
+        {/* Telegram 卡 */}
+        <TokenEngineCard
+          id="telegram"
+          title="Telegram"
+          description="Bot API 长轮询（@BotFather 创建 Bot 获取 Token）"
+          icon={<Send className="w-5 h-5 text-sky-600" />}
+          status={telegram}
+          fields={[{
+            key: 'bot_token',
+            label: 'Bot Token',
+            type: 'password',
+            placeholder: telegram?.running ? '已保存，无需重填；如需更换请输入新值' : '123456:AAH...',
+            hint: '凭证已保存到本地（~/.hil-mcp/telegram_store.json），重启自动恢复。',
+          }]}
+          defaultBotKey="telegram-1"
+          active={!!telegram?.running}
+          activeLabel="长轮询中"
+          onStart={async (values) => { await engineApi.telegramStart(values.bot_token!, values.bot_key); await refresh() }}
+          onStop={async (botKey) => { await engineApi.telegramStop(botKey); await refresh() }}
+          mcpArgs={(botKey) => ['--engine', 'telegram', '--service-url', 'http://localhost:8081', '--bot-key', botKey]}
+        />
+
+        {/* Discord 卡 */}
+        <TokenEngineCard
+          id="discord"
+          title="Discord"
+          description="Gateway WebSocket（需在开发者后台开启 MESSAGE_CONTENT 特权意图）"
+          icon={<Bot className="w-5 h-5 text-indigo-600" />}
+          status={discord}
+          fields={[{
+            key: 'bot_token',
+            label: 'Bot Token',
+            type: 'password',
+            placeholder: discord?.running ? '已保存，无需重填；如需更换请输入新值' : 'MTA...',
+            hint: '凭证已保存到本地（~/.hil-mcp/discord_store.json），重启自动恢复。',
+          }]}
+          defaultBotKey="discord-1"
+          active={!!discord?.connected}
+          activeLabel="已连接"
+          onStart={async (values) => { await engineApi.discordStart(values.bot_token!, values.bot_key); await refresh() }}
+          onStop={async (botKey) => { await engineApi.discordStop(botKey); await refresh() }}
+          mcpArgs={(botKey) => ['--engine', 'discord', '--service-url', 'http://localhost:8081', '--bot-key', botKey]}
+        />
+
+        {/* 飞书卡 */}
+        <TokenEngineCard
+          id="feishu"
+          title="飞书（Lark）"
+          description="企业自建应用 WebSocket（需开通 im:message 权限，服务端需 pip install lark-oapi）"
+          icon={<AtSign className="w-5 h-5 text-blue-600" />}
+          status={feishu}
+          fields={[
+            {
+              key: 'app_id',
+              label: 'App ID',
+              placeholder: 'cli_xxx',
+            },
+            {
+              key: 'app_secret',
+              label: 'App Secret',
+              type: 'password',
+              placeholder: feishu?.running ? '已保存，无需重填；如需更换请输入新值' : '填写 App Secret',
+              hint: '凭证已保存到本地（~/.hil-mcp/feishu_store.json），重启自动恢复。',
+            },
+          ]}
+          defaultBotKey="feishu-1"
+          active={!!feishu?.connected}
+          activeLabel="已连接"
+          onStart={async (values) => { await engineApi.feishuStart(values.app_id!, values.app_secret!, values.bot_key); await refresh() }}
+          onStop={async (botKey) => { await engineApi.feishuStop(botKey); await refresh() }}
+          mcpArgs={(botKey) => ['--engine', 'feishu', '--service-url', 'http://localhost:8081', '--bot-key', botKey]}
+        />
       </div>
     </div>
   )

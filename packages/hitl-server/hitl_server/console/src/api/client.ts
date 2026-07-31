@@ -52,7 +52,7 @@ export async function getHILSessions() {
   return api.get<{ total: number; sessions: HILSession[] }>('/hil/sessions')
 }
 
-// Engines API（内置引擎管理：iLink 扫码、WeCom AI Bot 凭证）
+// Engines API（内置引擎管理：iLink 扫码、WeCom AI Bot、Telegram/Discord/飞书 凭证）
 export interface EngineStatus {
   worker_type: string
   bot_key: string
@@ -66,6 +66,11 @@ export interface EngineStatus {
   bot_id?: string
   connected?: boolean
   known_recipients?: { recipient: string; chat_type: string; from_user: string; last_active: number }[]
+  // telegram / discord 专属
+  has_token?: boolean
+  // discord / feishu 专属
+  app_id?: string
+  session_id?: string
 }
 
 export interface EnginesListResponse {
@@ -100,6 +105,37 @@ export const engineApi = {
   wecomStop: (botKey?: string) =>
     api.post<{ success: boolean; error?: string }>(
       `/engines/wecom-aibot/stop${botKey ? `?bot_key=${botKey}` : ''}`,
+      {},
+    ),
+  telegramStart: (botToken: string, botKey?: string) =>
+    api.post<{ success: boolean; engine: EngineStatus }>('/engines/telegram/start', {
+      bot_token: botToken,
+      bot_key: botKey ?? 'telegram-1',
+    }),
+  telegramStop: (botKey?: string) =>
+    api.post<{ success: boolean; error?: string }>(
+      `/engines/telegram/stop${botKey ? `?bot_key=${botKey}` : ''}`,
+      {},
+    ),
+  discordStart: (botToken: string, botKey?: string) =>
+    api.post<{ success: boolean; engine: EngineStatus }>('/engines/discord/start', {
+      bot_token: botToken,
+      bot_key: botKey ?? 'discord-1',
+    }),
+  discordStop: (botKey?: string) =>
+    api.post<{ success: boolean; error?: string }>(
+      `/engines/discord/stop${botKey ? `?bot_key=${botKey}` : ''}`,
+      {},
+    ),
+  feishuStart: (appId: string, appSecret: string, botKey?: string) =>
+    api.post<{ success: boolean; engine: EngineStatus }>('/engines/feishu/start', {
+      app_id: appId,
+      app_secret: appSecret,
+      bot_key: botKey ?? 'feishu-1',
+    }),
+  feishuStop: (botKey?: string) =>
+    api.post<{ success: boolean; error?: string }>(
+      `/engines/feishu/stop${botKey ? `?bot_key=${botKey}` : ''}`,
       {},
     ),
 }
