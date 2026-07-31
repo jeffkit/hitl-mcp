@@ -107,6 +107,86 @@ async def lifespan(app: FastAPI):
         # 落盘（env 启动时也同步到 store，保证后续重启可自动恢复）
         wecom_store.set_credentials(wecom_bot_id, wecom_bot_secret, wecom_bot_key)
         logger.info(f"  [内置引擎] WeCom AI Bot 已启用: bot_key={wecom_bot_key}, bot_id={wecom_bot_id}")
+    # ── Telegram 引擎 ──────────────────────────────────────────────────────────
+    from .engines import TelegramEngine, TelegramStore
+    tg_store_path = config.telegram_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "telegram_store.json"
+    )
+    tg_store = TelegramStore(tg_store_path)
+    tg_token = config.telegram_bot_token
+    if not tg_token:
+        tg_token = tg_store.get_token() or ""
+    if tg_token:
+        if not config.telegram_bot_token:
+            logger.info(f"  [内置引擎] 从持久化恢复 Telegram bot_key={config.telegram_bot_key}")
+        tg_engine = TelegramEngine(
+            bot_key=config.telegram_bot_key,
+            bot_token=tg_token,
+            store=tg_store,
+            poll_timeout=config.telegram_poll_timeout,
+        )
+        tg_engine.on_user_message = storage.handle_callback
+        engine_manager.register(tg_engine)
+        tg_store.set_token(tg_token)
+        logger.info(f"  [内置引擎] Telegram 已启用: bot_key={config.telegram_bot_key}")
+    elif config.enable_telegram_engine:
+        logger.warning("  [内置引擎] ENABLE_TELEGRAM_ENGINE=true 但未设置 TELEGRAM_BOT_TOKEN，跳过")
+
+    # ── Discord 引擎 ───────────────────────────────────────────────────────────
+    from .engines import DiscordEngine, DiscordStore
+    dc_store_path = config.discord_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "discord_store.json"
+    )
+    dc_store = DiscordStore(dc_store_path)
+    dc_token = config.discord_bot_token
+    if not dc_token:
+        dc_token = dc_store.get_token() or ""
+    if dc_token:
+        if not config.discord_bot_token:
+            logger.info(f"  [内置引擎] 从持久化恢复 Discord bot_key={config.discord_bot_key}")
+        dc_engine = DiscordEngine(
+            bot_key=config.discord_bot_key,
+            bot_token=dc_token,
+            store=dc_store,
+        )
+        dc_engine.on_user_message = storage.handle_callback
+        engine_manager.register(dc_engine)
+        dc_store.set_token(dc_token)
+        logger.info(f"  [内置引擎] Discord 已启用: bot_key={config.discord_bot_key}")
+    elif config.enable_discord_engine:
+        logger.warning("  [内置引擎] ENABLE_DISCORD_ENGINE=true 但未设置 DISCORD_BOT_TOKEN，跳过")
+
+    # ── 飞书引擎 ───────────────────────────────────────────────────────────────
+    from .engines import FeishuEngine, FeishuStore
+    fs_store_path = config.feishu_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "feishu_store.json"
+    )
+    fs_store = FeishuStore(fs_store_path)
+    fs_app_id = config.feishu_app_id
+    fs_app_secret = config.feishu_app_secret
+    if not fs_app_id or not fs_app_secret:
+        persisted = fs_store.get_credentials()
+        if persisted:
+            fs_app_id = fs_app_id or persisted["app_id"]
+            fs_app_secret = fs_app_secret or persisted["app_secret"]
+            logger.info(f"  [内置引擎] 从持久化恢复飞书凭证: bot_key={config.feishu_bot_key}")
+    if fs_app_id and fs_app_secret:
+        try:
+            fs_engine = FeishuEngine(
+                bot_key=config.feishu_bot_key,
+                app_id=fs_app_id,
+                app_secret=fs_app_secret,
+                store=fs_store,
+            )
+            fs_engine.on_user_message = storage.handle_callback
+            engine_manager.register(fs_engine)
+            fs_store.set_credentials(fs_app_id, fs_app_secret, config.feishu_bot_key)
+            logger.info(f"  [内置引擎] 飞书已启用: bot_key={config.feishu_bot_key}, app_id={fs_app_id}")
+        except Exception as e:
+            logger.error(f"  [内置引擎] 飞书启动失败: {e}")
+    elif config.enable_feishu_engine:
+        logger.warning("  [内置引擎] ENABLE_FEISHU_ENGINE=true 但未设置 FEISHU_APP_ID/SECRET，跳过")
+
     await engine_manager.start_all()
     
     # 启动文件清理任务（7 天后清理过期文件）

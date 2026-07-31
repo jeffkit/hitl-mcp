@@ -36,6 +36,12 @@ dependencies = [
     "alembic>=1.13.0",
 ]
 
+[project.optional-dependencies]
+# 飞书渠道需要 lark-oapi SDK（WebSocket 事件接收）
+feishu = ["lark-oapi>=1.3.0"]
+# 一键安装所有可选渠道依赖
+all-channels = ["lark-oapi>=1.3.0"]
+
 [project.urls]
 Homepage = "https://github.com/jeffkit/hitl-mcp"
 Repository = "https://github.com/jeffkit/hitl-mcp"

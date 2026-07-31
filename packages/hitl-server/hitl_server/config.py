@@ -108,6 +108,82 @@ class HITLConfig(BaseSettings):
         description="企微 AI Bot 凭证存储路径（默认 ~/.hil-mcp/wecom_aibot_store.json），重启后据此自动注册",
     )
 
+    # ========== 内置引擎：Telegram ==========
+    enable_telegram_engine: bool = Field(
+        default=False,
+        alias="ENABLE_TELEGRAM_ENGINE",
+        description="启用 Telegram Bot API 内置引擎（进程内维持长轮询）",
+    )
+    telegram_bot_key: str = Field(
+        default="telegram-1",
+        alias="TELEGRAM_BOT_KEY",
+        description="Telegram 内置引擎的 bot_key（MCP 端按此路由）",
+    )
+    telegram_bot_token: str = Field(
+        default="",
+        alias="TELEGRAM_BOT_TOKEN",
+        description="Telegram Bot Token（由 @BotFather 获取）",
+    )
+    telegram_store_path: str = Field(
+        default="",
+        alias="TELEGRAM_STORE_PATH",
+        description="Telegram 凭证存储路径（默认 ~/.hil-mcp/telegram_store.json）",
+    )
+    telegram_poll_timeout: int = Field(
+        default=30,
+        alias="TELEGRAM_POLL_TIMEOUT",
+        description="getUpdates 长轮询超时（秒）",
+    )
+
+    # ========== 内置引擎：Discord ==========
+    enable_discord_engine: bool = Field(
+        default=False,
+        alias="ENABLE_DISCORD_ENGINE",
+        description="启用 Discord Gateway WebSocket 内置引擎",
+    )
+    discord_bot_key: str = Field(
+        default="discord-1",
+        alias="DISCORD_BOT_KEY",
+        description="Discord 内置引擎的 bot_key（MCP 端按此路由）",
+    )
+    discord_bot_token: str = Field(
+        default="",
+        alias="DISCORD_BOT_TOKEN",
+        description="Discord Bot Token（需开启 MESSAGE_CONTENT 特权意图）",
+    )
+    discord_store_path: str = Field(
+        default="",
+        alias="DISCORD_STORE_PATH",
+        description="Discord 凭证存储路径（默认 ~/.hil-mcp/discord_store.json）",
+    )
+
+    # ========== 内置引擎：飞书 ==========
+    enable_feishu_engine: bool = Field(
+        default=False,
+        alias="ENABLE_FEISHU_ENGINE",
+        description="启用飞书企业自建应用 WebSocket 内置引擎（需 pip install lark-oapi）",
+    )
+    feishu_bot_key: str = Field(
+        default="feishu-1",
+        alias="FEISHU_BOT_KEY",
+        description="飞书内置引擎的 bot_key（MCP 端按此路由）",
+    )
+    feishu_app_id: str = Field(
+        default="",
+        alias="FEISHU_APP_ID",
+        description="飞书企业自建应用 App ID",
+    )
+    feishu_app_secret: str = Field(
+        default="",
+        alias="FEISHU_APP_SECRET",
+        description="飞书企业自建应用 App Secret",
+    )
+    feishu_store_path: str = Field(
+        default="",
+        alias="FEISHU_STORE_PATH",
+        description="飞书凭证存储路径（默认 ~/.hil-mcp/feishu_store.json）",
+    )
+
     # ========== 共享部署模式（一个企微 AI Bot 服务全员）==========
     shared_mode: bool = Field(
         default=False,

@@ -173,6 +173,158 @@ async def engines_wecom_aibot_stop_admin(bot_key: str = "wecom-aibot-1"):
     return {"success": False, "error": "引擎未注册"}
 
 
+# ============== Telegram 引擎 API ==============
+
+class TelegramEngineStartRequest(BaseModel):
+    bot_token: str
+    bot_key: str = "telegram-1"
+    poll_timeout: int = 30
+
+
+@router.post("/api/engines/telegram/start")
+async def engines_telegram_start(request: TelegramEngineStartRequest):
+    """注册并启动 Telegram Bot 内置引擎。"""
+    from ..engines import engine_manager, TelegramEngine, TelegramStore
+
+    bot_key = request.bot_key or config.telegram_bot_key
+    existing = engine_manager.get_by_bot_key(bot_key)
+    if existing:
+        await existing.stop()
+        engine_manager.remove(bot_key)
+
+    store_path = config.telegram_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "telegram_store.json"
+    )
+    store = TelegramStore(store_path)
+    store.set_token(request.bot_token)
+
+    engine = TelegramEngine(
+        bot_key=bot_key,
+        bot_token=request.bot_token,
+        store=store,
+        poll_timeout=request.poll_timeout,
+    )
+    engine.on_user_message = storage.handle_callback
+    engine_manager.register(engine)
+    await engine.start()
+    logger.info(f"管理台启动 Telegram 引擎: bot_key={bot_key}")
+    return {"success": True, "engine": engine.status()}
+
+
+@router.post("/api/engines/telegram/stop")
+async def engines_telegram_stop(bot_key: str = "telegram-1"):
+    """停止 Telegram 引擎。"""
+    from ..engines import engine_manager
+    engine = engine_manager.get_by_bot_key(bot_key) or engine_manager.get_by_type("telegram")
+    if engine:
+        await engine.stop()
+        engine_manager.remove(engine.bot_key)
+        return {"success": True}
+    return {"success": False, "error": "引擎未注册"}
+
+
+# ============== Discord 引擎 API ==============
+
+class DiscordEngineStartRequest(BaseModel):
+    bot_token: str
+    bot_key: str = "discord-1"
+
+
+@router.post("/api/engines/discord/start")
+async def engines_discord_start(request: DiscordEngineStartRequest):
+    """注册并启动 Discord Gateway 内置引擎。"""
+    from ..engines import engine_manager, DiscordEngine, DiscordStore
+
+    bot_key = request.bot_key or config.discord_bot_key
+    existing = engine_manager.get_by_bot_key(bot_key)
+    if existing:
+        await existing.stop()
+        engine_manager.remove(bot_key)
+
+    store_path = config.discord_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "discord_store.json"
+    )
+    store = DiscordStore(store_path)
+    store.set_token(request.bot_token)
+
+    engine = DiscordEngine(
+        bot_key=bot_key,
+        bot_token=request.bot_token,
+        store=store,
+    )
+    engine.on_user_message = storage.handle_callback
+    engine_manager.register(engine)
+    await engine.start()
+    logger.info(f"管理台启动 Discord 引擎: bot_key={bot_key}")
+    return {"success": True, "engine": engine.status()}
+
+
+@router.post("/api/engines/discord/stop")
+async def engines_discord_stop(bot_key: str = "discord-1"):
+    """停止 Discord 引擎。"""
+    from ..engines import engine_manager
+    engine = engine_manager.get_by_bot_key(bot_key) or engine_manager.get_by_type("discord")
+    if engine:
+        await engine.stop()
+        engine_manager.remove(engine.bot_key)
+        return {"success": True}
+    return {"success": False, "error": "引擎未注册"}
+
+
+# ============== 飞书引擎 API ==============
+
+class FeishuEngineStartRequest(BaseModel):
+    app_id: str
+    app_secret: str
+    bot_key: str = "feishu-1"
+
+
+@router.post("/api/engines/feishu/start")
+async def engines_feishu_start(request: FeishuEngineStartRequest):
+    """注册并启动飞书内置引擎（需 pip install lark-oapi）。"""
+    from ..engines import engine_manager, FeishuEngine, FeishuStore
+
+    bot_key = request.bot_key or config.feishu_bot_key
+    existing = engine_manager.get_by_bot_key(bot_key)
+    if existing:
+        await existing.stop()
+        engine_manager.remove(bot_key)
+
+    store_path = config.feishu_store_path or os.path.join(
+        os.path.expanduser("~"), ".hil-mcp", "feishu_store.json"
+    )
+    store = FeishuStore(store_path)
+    store.set_credentials(request.app_id, request.app_secret, bot_key)
+
+    try:
+        engine = FeishuEngine(
+            bot_key=bot_key,
+            app_id=request.app_id,
+            app_secret=request.app_secret,
+            store=store,
+        )
+    except RuntimeError as e:
+        return {"success": False, "error": str(e)}
+
+    engine.on_user_message = storage.handle_callback
+    engine_manager.register(engine)
+    await engine.start()
+    logger.info(f"管理台启动飞书引擎: bot_key={bot_key}, app_id={request.app_id}")
+    return {"success": True, "engine": engine.status()}
+
+
+@router.post("/api/engines/feishu/stop")
+async def engines_feishu_stop(bot_key: str = "feishu-1"):
+    """停止飞书引擎（凭证保留，重启后自动恢复）。"""
+    from ..engines import engine_manager
+    engine = engine_manager.get_by_bot_key(bot_key) or engine_manager.get_by_type("feishu")
+    if engine:
+        await engine.stop()
+        engine_manager.remove(engine.bot_key)
+        return {"success": True}
+    return {"success": False, "error": "引擎未注册"}
+
+
 # ============== HIL 会话查询 API ==============
 
 @router.get("/api/hil/sessions")
