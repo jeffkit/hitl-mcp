@@ -1,0 +1,21 @@
+{
+  "//": "hil-mcp agent pool（项目级）。Python 为主 + 1 个 TS 子包。用 claude（默认）或 codex 跑。",
+  "agents": {
+    "claude": {
+      "executor": "claude",
+      "timeout": 1800000,
+      "extraArgs": ["--dangerously-skip-permissions"]
+    },
+    "codex": {
+      "executor": "codex",
+      "timeout": 1800000
+    },
+    "claude-reviewer": {
+      "_comment": "reviewer profile：FastAPI/数据库/GitNexus 安全视角，用于 evaluator 角色。",
+      "executor": "claude",
+      "timeout": 600000,
+      "extraArgs": ["--dangerously-skip-permissions"],
+      "extraPromptPrefix": "你是 FastAPI 与数据库安全专家，重点审查：SQL 注入、异步数据库会话泄漏、Alembic 迁移遗漏、JSON/DB 双模式 API 一致性、MCP 引擎类型枚举完整性。"
+    }
+  }
+}

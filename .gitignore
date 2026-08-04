@@ -101,3 +101,8 @@ alembic/versions/__pycache__/
 !/**/packaging/*.spec
 
 .worktrees/
+
+# flowcast runtime 产物不入 git；配置文件（gates/agents/hygiene）保留
+.flowcast/logs/
+.flowcast/runs/
+.flowcast/pge/

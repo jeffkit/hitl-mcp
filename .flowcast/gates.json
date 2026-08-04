@@ -1,0 +1,29 @@
+{
+  "_comment": "hil-mcp 质量门。多包结构（hitl-server Python + mcp-server-ts + console）。按包拆 gate。注意：mcp-server-ts 的 test script 是假的（只跑 --help），这里用 typecheck + build + test:logic 替代。当前仓 CI 不跑这些门（仅有 release/docs workflow），本 gates.json 是首个质量门定义点。",
+  "gates": {
+    "py-test": {
+      "_comment": "hitl-server 单测。pytest-asyncio（asyncio_mode auto），conftest 用内存 SQLite + mock db_manager。",
+      "cmd": "cd packages/hitl-server && uv run pytest tests/ -v",
+      "onFail": "resume-fix",
+      "timeout": 180000
+    },
+    "ts-typecheck": {
+      "_comment": "mcp-server-ts 类型检查。tsc --noEmit。不产出，只验证类型。",
+      "cmd": "cd packages/mcp-server-ts && pnpm typecheck",
+      "onFail": "resume-fix",
+      "timeout": 120000
+    },
+    "ts-build": {
+      "_comment": "mcp-server-ts 构建。tsc + chmod +x。替代假的 test script（只跑 --help 的那个）。",
+      "cmd": "cd packages/mcp-server-ts && pnpm build",
+      "onFail": "resume-fix",
+      "timeout": 120000
+    },
+    "ts-test-logic": {
+      "_comment": "mcp-server-ts 逻辑测试。tsx test-logic.ts。这是真正的 TS 端逻辑验证（区别于只跑 --help 的 test script）。",
+      "cmd": "cd packages/mcp-server-ts && pnpm test:logic",
+      "onFail": "resume-fix",
+      "timeout": 120000
+    }
+  }
+}
