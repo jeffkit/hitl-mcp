@@ -100,3 +100,7 @@ alembic/versions/__pycache__/
 !/**/packaging/*.spec
 
 .worktrees/
+
+# Local sqlite backups (never commit)
+db_backup/
+*.db
