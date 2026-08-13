@@ -61,6 +61,7 @@ export class ILinkEngine implements Engine {
     timeoutSec: number,
     projectName?: string,
     _shortId?: string,
+    images?: string[],
   ): Promise<SendResult> {
     const cfg = getConfig();
 
@@ -79,6 +80,7 @@ export class ILinkEngine implements Engine {
         bot_key: cfg.botKey,
         upstream: 'ilink',
         project_name: projectName,
+        images: images && images.length ? images : undefined,
       }),
     }).catch(e => ({ success: false, error: String(e) }));
 
@@ -106,6 +108,7 @@ export class ILinkEngine implements Engine {
     recipient: string,
     text: string,
     projectName?: string,
+    images?: string[],
   ): Promise<SendResult> {
     const cfg = getConfig();
 
@@ -122,6 +125,7 @@ export class ILinkEngine implements Engine {
         bot_key: cfg.botKey,
         upstream: 'ilink',
         project_name: projectName,
+        images: images && images.length ? images : undefined,
       }),
     }).catch(e => ({ success: false, error: String(e) }));
 

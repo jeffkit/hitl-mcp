@@ -20,6 +20,7 @@ export interface Engine {
   /** 发消息并等待回复
    *  shortId：由 server 统一生成、嵌入消息文本的会话标识，引擎用它注册本地待匹配会话。
    *          未提供时引擎可内部生成（向后兼容），但会与消息文本中的 [#id] 不一致，不推荐。
+   *  images：可选，本地图片路径数组。引擎支持时随消息一起发送（如 iLink 图文）。
    */
   sendAndWait(
     recipient: string,
@@ -27,11 +28,13 @@ export interface Engine {
     timeoutSec: number,
     projectName?: string,
     shortId?: string,
+    images?: string[],
   ): Promise<SendResult>;
   /** 仅发消息，不等待回复 */
   sendOnly(
     recipient: string,
     text: string,
     projectName?: string,
+    images?: string[],
   ): Promise<SendResult>;
 }

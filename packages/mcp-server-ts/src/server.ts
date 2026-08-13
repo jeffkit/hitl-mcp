@@ -183,17 +183,21 @@ function buildTools(cfg: ReturnType<typeof getConfig>): Tool[] {
 
 function makeSendAndWaitTool(engine: EngineType, recipientDesc: string): Tool {
   const initNote = '\n若引擎未初始化（未登录/未激活收件人），本工具返回 not_initialized（含管理台链接 init_url），请引导用户打开管理台完成初始化后重试。';
+  const imagesNote = engine === 'ilink'
+    ? '\n本引擎（iLink/微信）支持 images 参数：可附带本地图片路径，随消息一起发送到用户微信（用于图文审核等场景）。'
+    : '';
   return {
     name: 'send_and_wait_reply',
     description: `发送消息并等待用户回复（引擎: ${engine}）。
 发出带 [#id] 标识的消息，等待用户回复后返回内容。支持引用回复精确匹配，也支持直接回复（FIFO）。
-超时后返回 timeout 状态。${initNote}`,
+超时后返回 timeout 状态。${initNote}${imagesNote}`,
     inputSchema: {
       type: 'object',
       properties: {
         message:      { type: 'string', description: '要发送给用户的消息内容' },
         recipient:    { type: 'string', description: recipientDesc },
         project_name: { type: 'string', description: '项目名称，显示在消息头中' },
+        images:       { type: 'array', items: { type: 'string' }, description: '本地图片路径数组（当前仅 iLink 引擎支持，随消息发送到用户微信）。路径须为 hitl-server 进程可读的绝对路径。' },
       },
       required: ['message'],
     },
@@ -212,6 +216,7 @@ function makeSendOnlyTool(engine: EngineType, recipientDesc: string): Tool {
         message:      { type: 'string', description: '要发送给用户的消息内容' },
         recipient:    { type: 'string', description: recipientDesc },
         project_name: { type: 'string', description: '项目名称' },
+        images:       { type: 'array', items: { type: 'string' }, description: '本地图片路径数组（当前仅 iLink 引擎支持）。' },
       },
       required: ['message'],
     },
@@ -266,10 +271,11 @@ export async function startServer(): Promise<void> {
         const message   = String(a.message ?? '');
         const recipient = String(a.recipient ?? cfg.defaultRecipient);
         const projectName = a.project_name ? String(a.project_name) : cfg.defaultProjectName || undefined;
+        const images   = Array.isArray(a.images) ? a.images.map(String) : undefined;
 
         // ilink / wecom-aibot 引擎：shortId/头部/「请回复」全部由 HITL Server 端 (Python) 统一处理，
         // TS 端不生成 shortId、不格式化、也不传 shortId，避免重复添加。
-        const result = await engine.sendAndWait(recipient, message, cfg.defaultTimeout, projectName);
+        const result = await engine.sendAndWait(recipient, message, cfg.defaultTimeout, projectName, undefined, images);
         return resultToContent(result);
       }
 
@@ -277,9 +283,10 @@ export async function startServer(): Promise<void> {
         const message   = String(a.message ?? '');
         const recipient = String(a.recipient ?? cfg.defaultRecipient);
         const projectName = a.project_name ? String(a.project_name) : cfg.defaultProjectName || undefined;
+        const images   = Array.isArray(a.images) ? a.images.map(String) : undefined;
 
         // 同上：由 HITL Server 端统一处理消息头。
-        const result = await engine.sendOnly(recipient, message, projectName);
+        const result = await engine.sendOnly(recipient, message, projectName, images);
         return resultToContent(result);
       }
 
