@@ -16,7 +16,6 @@ import logging
 import os
 import random
 import re
-import secrets
 import threading
 import time
 from dataclasses import dataclass
@@ -31,11 +30,7 @@ logger = logging.getLogger(__name__)
 
 UA = "Mozilla/5.0 (compatible; iLink-Bot/1.0)"
 
-# iLink CDN 域名（媒体文件加密上传）
-_ILINK_CDN_BASE = "https://novac2c.cdn.weixin.qq.com/c2c"
-
-# iLink 媒体/消息类型常量（与 openclaw-weixin types.ts 对齐）
-_MEDIA_TYPE_IMAGE = 1
+# iLink 消息类型常量（与 ilink-hub types.rs 对齐）
 _ITEM_TYPE_IMAGE = 2
 
 # 与 storage.SESSION_ID_PATTERN 保持一致：匹配 [#short_id] 或 [#short_id 项目名]
@@ -264,21 +259,6 @@ def _build_text_reply(context_token: str, text: str, to_user_id: str, message_id
     return msg
 
 
-def _aes_128_ecb_encrypt(plaintext: bytes, key: bytes) -> bytes:
-    """AES-128-ECB + PKCS7 padding 加密。
-
-    iLink/微信 CDN 要求所有媒体文件用随机 AES-128 key 做 ECB 加密。
-    """
-    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    from cryptography.hazmat.primitives.padding import PKCS7
-
-    padder = PKCS7(128).padder()
-    padded = padder.update(plaintext) + padder.finalize()
-    cipher = Cipher(algorithms.AES(key), modes.ECB())
-    encryptor = cipher.encryptor()
-    return encryptor.update(padded) + encryptor.finalize()
-
-
 @dataclass
 class UserMessage:
     from_user_id: str
@@ -420,14 +400,18 @@ class ILinkClient:
 
     # ── 发送图片 ───────────────────────────────────────────────────────────
 
-    async def _upload_media(self, image_path: str, to_user_id: str) -> Optional[dict]:
-        """加密图片 → getuploadurl → CDN POST，返回 sendmessage 所需的媒体参数。
+    async def _upload_media(self, image_path: str) -> Optional[dict]:
+        """上传图片到 iLink CDN，返回 sendmessage 所需的 media_id。
 
-        返回 dict 形如：
-            { "encrypt_query_param": str, "aes_key": str(base64), "mid_size": int }
+        链路：getuploadurl（Hub schema: file_type/file_size/file_md5）
+              → POST 原始图片字节到 upload_url
+              → 返回 {media_id, upload_url}
+
+        注意：本引擎经 iLink Hub（ilink-hub）转发到腾讯 iLink。
+        Hub 的 getuploadurl 只认 3 个字段（file_type/file_size/file_md5），
+        不走 openclaw-weixin 的 AES 加密协议——Hub 层透明代理，media_id 直接用于 sendmessage。
+
         失败返回 None 并记日志。
-
-        协议参考：openclaw-weixin（hyonex）的 messenger.ts，已交叉验证字段名。
         """
         bot_token = self.store.get_bot_token()
         if not bot_token:
@@ -435,32 +419,23 @@ class ILinkClient:
             return None
 
         try:
-            plaintext = Path(image_path).read_bytes()
+            image_bytes = Path(image_path).read_bytes()
         except Exception as e:
             logger.error(f"[ilink-engine] 读图片失败 {image_path}: {e}")
             return None
 
-        aes_key = secrets.token_bytes(16)  # AES-128 → 16 字节
-        filekey = secrets.token_hex(16)
-        rawsize = len(plaintext)
-        rawfilemd5 = hashlib.md5(plaintext).hexdigest()
-        ciphertext = _aes_128_ecb_encrypt(plaintext, aes_key)
-        ciphertext_size = len(ciphertext)
+        file_md5 = hashlib.md5(image_bytes).hexdigest()
+        file_size = len(image_bytes)
 
         try:
-            # 1. getuploadurl
+            # 1. getuploadurl（Hub schema: file_type / file_size / file_md5）
             res = await self._http.post(
                 f"{self.base_url}/ilink/bot/getuploadurl",
                 headers=_ilink_headers(bot_token),
                 json={
-                    "filekey": filekey,
-                    "media_type": _MEDIA_TYPE_IMAGE,
-                    "to_user_id": to_user_id,
-                    "rawsize": rawsize,
-                    "rawfilemd5": rawfilemd5,
-                    "filesize": ciphertext_size,
-                    "aeskey": aes_key.hex(),
-                    "no_need_thumb": True,
+                    "file_type": "image",
+                    "file_size": file_size,
+                    "file_md5": file_md5,
                 },
                 timeout=15,
             )
@@ -468,65 +443,39 @@ class ILinkClient:
                 logger.error(f"[ilink-engine] getuploadurl HTTP {res.status_code}: {res.text[:200]}")
                 return None
             upload_resp = res.json()
-            if upload_resp.get("errcode") not in (None, 0):
+            ret = upload_resp.get("ret", -1)
+            if ret != 0:
                 logger.error(
-                    f"[ilink-engine] getuploadurl 失败: errcode={upload_resp.get('errcode')}, "
+                    f"[ilink-engine] getuploadurl 上游返回 ret={ret}, "
                     f"errmsg={upload_resp.get('errmsg')}"
                 )
                 return None
 
-            upload_full_url = upload_resp.get("upload_full_url") or ""
-            upload_param = upload_resp.get("upload_param") or ""
-            if upload_full_url:
-                upload_url = upload_full_url
-            elif upload_param:
-                upload_url = (
-                    f"{_ILINK_CDN_BASE}/upload"
-                    f"?encrypted_query_param={upload_param}"
-                    f"&filekey={filekey}"
-                )
-            else:
-                logger.error(f"[ilink-engine] getuploadurl 未返回上传地址: {upload_resp}")
+            upload_url = upload_resp.get("upload_url") or ""
+            media_id = upload_resp.get("media_id") or ""
+            if not upload_url or not media_id:
+                logger.error(f"[ilink-engine] getuploadurl 未返回 upload_url/media_id: {upload_resp}")
                 return None
 
-            # 2. CDN POST 上传密文
+            # 2. POST 图片字节到 CDN upload_url
             cdn_res = await self._http.post(
                 upload_url,
                 headers={
                     "Content-Type": "application/octet-stream",
-                    "Content-Length": str(ciphertext_size),
+                    "Content-Length": str(file_size),
                 },
-                content=ciphertext,
+                content=image_bytes,
                 timeout=30,
             )
-            if cdn_res.status_code != 200:
+            if cdn_res.status_code not in (200, 204):
                 logger.error(f"[ilink-engine] CDN 上传 HTTP {cdn_res.status_code}: {cdn_res.text[:200]}")
                 return None
 
-            # 关键：encrypt_query_param 在响应头 x-encrypted-param，不在 body
-            eqp = (
-                cdn_res.headers.get("x-encrypted-param")
-                or cdn_res.headers.get("X-Encrypted-Param")
-                or ""
-            )
-            if not eqp:
-                try:
-                    j = cdn_res.json()
-                    eqp = j.get("encrypted_query_param") or j.get("encrypt_query_param") or ""
-                except Exception:
-                    pass
-            if not eqp:
-                logger.error("[ilink-engine] CDN 上传后未拿到 encrypt_query_param")
-                return None
-
-            # aes_key 给 API 时是 base64(hex_string)——注意不是直接 base64(key)
-            aes_key_for_api = base64.b64encode(aes_key.hex().encode()).decode()
-
-            return {
-                "encrypt_query_param": eqp,
-                "aes_key": aes_key_for_api,
-                "mid_size": ciphertext_size,
-            }
+            logger.info(f"[ilink-engine] 图片已上传 CDN: media_id={media_id}, size={file_size}")
+            return {"media_id": media_id}
+        except Exception as e:
+            logger.error(f"[ilink-engine] 上传图片失败: {e}", exc_info=True)
+            return None
         except Exception as e:
             logger.error(f"[ilink-engine] 上传图片失败: {e}", exc_info=True)
             return None
@@ -534,20 +483,16 @@ class ILinkClient:
     def _build_image_reply(
         self, context_token: str, to_user_id: str, media: dict, caption: str = ""
     ) -> dict:
-        """构造图片消息体。可选 caption 会作为 text_item 放在图片前。"""
+        """构造图片消息体。可选 caption 会作为 text_item 放在图片前。
+
+        Hub 的 ImageItem 用 media_id 引用 CDN 上传的图片（非 AES 加密协议）。
+        """
         items: list[dict] = []
         if caption:
             items.append({"type": 1, "text_item": {"text": caption}})
         items.append({
             "type": _ITEM_TYPE_IMAGE,
-            "image_item": {
-                "media": {
-                    "encrypt_query_param": media["encrypt_query_param"],
-                    "aes_key": media["aes_key"],
-                    "encrypt_type": 1,
-                },
-                "mid_size": media["mid_size"],
-            },
+            "image_item": {"media_id": media["media_id"]},
         })
         return {
             "context_token": context_token,
@@ -564,7 +509,7 @@ class ILinkClient:
     ) -> tuple[bool, Optional[str]]:
         """发送图片消息。返回 (success, error_or_none)。
 
-        先上传图片到 CDN，再发 sendmessage。
+        先上传图片到 CDN（getuploadurl → POST 字节），再用 media_id 发 sendmessage。
         """
         bot_token = self.store.get_bot_token()
         if not bot_token:
@@ -573,7 +518,7 @@ class ILinkClient:
         if not context_token:
             return False, f"用户未激活: {to_user_id}"
 
-        media = await self._upload_media(image_path, to_user_id)
+        media = await self._upload_media(image_path)
         if not media:
             return False, "图片上传 CDN 失败"
 
@@ -594,8 +539,8 @@ class ILinkClient:
             if not raw.strip():
                 return True, None
             data = res.json()
-            if data.get("ret") not in (None, 0) or data.get("errcode") not in (None, 0):
-                return False, f"ret={data.get('ret')}, errcode={data.get('errcode')}, errmsg={data.get('errmsg')}"
+            if data.get("ret") not in (None, 0):
+                return False, f"ret={data.get('ret')}, errmsg={data.get('errmsg')}"
             return True, None
         except Exception as e:
             return False, str(e)
