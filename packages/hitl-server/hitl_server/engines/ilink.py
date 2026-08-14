@@ -621,7 +621,18 @@ class ILinkClient:
                 return True, None
             data = res.json()
             if data.get("ret") not in (None, 0):
-                return False, f"ret={data.get('ret')}, errmsg={data.get('errmsg')}"
+                errmsg = str(data.get("errmsg") or "")
+                # 实测结论（2026-08，对齐 hermes-agent #85735 的分析）：
+                # ret=-2 "prepare failed" 表示收件人会话对媒体推送已失效——
+                # 文字消息有降级通道不受影响，但图片推送要求收件人近期
+                # 给 bot 发过消息（新鲜 context_token）。恢复方式：用户给
+                # bot 发一条消息即可。
+                if data.get("ret") == -2 and "prepare failed" in errmsg.lower():
+                    return False, (
+                        "prepare failed（收件人会话过期）：图片推送要求用户近期给 bot "
+                        "发过消息。请让用户在微信里给 bot 发任意一条消息后重试。"
+                    )
+                return False, f"ret={data.get('ret')}, errmsg={errmsg}"
             return True, None
         except Exception as e:
             return False, str(e)
