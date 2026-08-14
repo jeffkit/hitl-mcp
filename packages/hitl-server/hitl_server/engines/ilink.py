@@ -545,17 +545,19 @@ class ILinkClient:
             return None
 
     def _build_image_reply(
-        self, context_token: str, to_user_id: str, media: dict, caption: str = ""
+        self, context_token: str, to_user_id: str, media: dict
     ) -> dict:
-        """构造图片消息体。可选 caption 会作为 text_item 放在图片前。
+        """构造图片消息体（item_list 只含 image item）。
 
-        openclaw 协议：image_item.media 携带 encrypt_query_param + aes_key
-        （base64(hex)) + encrypt_type=1，mid_size 为密文大小。
+        openclaw 协议（实测验证）：
+        - image_item.media 携带 encrypt_query_param + aes_key（base64(hex)) + encrypt_type=1，
+          mid_size 为密文大小
+        - 腾讯不支持 text+image 混在同一条消息的 item_list（返回 ret=-2
+          "invalid arguments"）——每个 item 必须单独一条消息（对齐官方
+          openclaw-weixin v2.4.6 sendMediaItems 的行为），caption 由调用方
+          作为独立文字消息发送
         """
-        items: list[dict] = []
-        if caption:
-            items.append({"type": 1, "text_item": {"text": caption}})
-        items.append({
+        items: list[dict] = [{
             "type": _ITEM_TYPE_IMAGE,
             "image_item": {
                 "media": {
@@ -565,7 +567,7 @@ class ILinkClient:
                 },
                 "mid_size": media["mid_size"],
             },
-        })
+        }]
         return {
             "context_token": context_token,
             "to_user_id": to_user_id,
@@ -582,6 +584,7 @@ class ILinkClient:
         """发送图片消息。返回 (success, error_or_none)。
 
         链路：AES 加密 → getuploadurl → CDN POST 密文 → sendmessage。
+        caption（如有）作为独立文字消息先发——不能与图片混在同一条消息。
         """
         bot_token = self.store.get_bot_token()
         if not bot_token:
@@ -590,12 +593,18 @@ class ILinkClient:
         if not context_token:
             return False, f"用户未激活: {to_user_id}"
 
+        # caption 作为独立文字消息先发（腾讯不支持混合 item_list）
+        if caption:
+            ok_text, err_text = await self.send_message(to_user_id, caption)
+            if not ok_text:
+                logger.warning(f"[ilink-engine] 图片 caption 发送失败: {err_text}")
+
         media = await self._upload_media(image_path, to_user_id)
         if not media:
             return False, "图片上传 CDN 失败"
 
         try:
-            msg = self._build_image_reply(context_token, to_user_id, media, caption)
+            msg = self._build_image_reply(context_token, to_user_id, media)
             res = await self._http.post(
                 f"{self.base_url}/ilink/bot/sendmessage",
                 headers=_ilink_headers(bot_token),
