@@ -64,18 +64,23 @@ patch config（全部可选），环境变量（`HITL_*`）从启动 shell 覆�
 > 部署）会把审批静默误路由到未激活收件人（实测报 `用户未激活`）。要固定收件人
 > 请写在 patch config 里。
 
-## ilink-hub 路由语义（实测结论）
+## ilink-hub 路由语义（源码核实 + 实测）
 
-hitl-server 经 ilink-hub 中转时（多后端共享一个微信会话）：
+hitl-server 经 ilink-hub 中转时（多后端共享一个微信会话，路由按微信用户单归属）：
 
-- **出站即认领**：hitl-server 发出审批消息后，该微信用户的入站路由临时归属
-  hitl-server，随后的 `y`/`n` 回复直达本插件——审批流自包含，无需切路由。
-- 认领期间你发给 ClawBot 的**普通消息**也会进 hitl-server；无等待会话时会被
-  忽略。其他后端（如常驻 agent 桥）下次发送时会重新认领路由。
-- 微信里 `/list` 查看后端与当前路由，`/use <名称>` 手动切换，
-  `@<名称> <消息>` 临时定向，长按**引用回复**可精确匹配到出站消息。
-- 如需彻底解耦（审批通道不与日常 agent 抢路由），给审批单独注册一个
-  hitl-server 引擎 bot_key，并在 patch config 里显式指定 `botKey`。
+- **引用回复是保证路径**：长按引用审批消息后回复 `y`，hub 按 L0 msg_id 精确
+  路由回该消息的产出后端（hitl-server），无视当前路由归属（quote_route.rs，
+  L0 msg_id → L1 时间戳 → L2 内容前缀 → L3 footer 四层回退）。
+- **普通回复不保证**：取决于当时 `/use` 路由归属与后端在线状态（实测出站
+  发送**不**认领路由——bot.rs 的 sendmessage 无 set_route；只有 `/use` 命令
+  与启动时的路由加载会写路由表）。审批场景请指引用户引用回复。
+- 微信里 `/list` 查看后端与当前路由，`/use <名称>` 切换，`@<名称> <消息>`
+  临时定向。
+- 多个等待会话且无引用时，hitl-server 会提示长按引用目标消息再回复
+  （ambiguous_session，不猜测）。
+- 如需彻底隔离（审批与日常 agent 不同会话命名空间），hub 的会话本就按
+  `(vctx, vtoken)` 隔离——同后端内 approval 与日常消息靠引用回复区分即可，
+  无需第二 bot_key（hitl-server 单实例也只支持一个 ilink 引擎）。
 
 ## 文件
 

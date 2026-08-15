@@ -133,7 +133,7 @@ function apply(ctx, config = {}) {
     const message =
       `[${cfg.projectLabel}] 审批请求\n` +
       `工具: ${tool}${reason}\n` +
-      `\n回复 y = 允许一次 / n = 拒绝`;
+      `\n长按本消息引用回复：y = 允许一次 / n = 拒绝`;
 
     // 1) Deliver. Failure to deliver means we do NOT own the request —
     //    delegate to any later answerer (web UI) or the fail-closed fallback.
