@@ -1,0 +1,14 @@
+# dsh 审批应答器挂载模板。
+# 用法：改下面的插件绝对路径为你的安装位置，然后：
+#   dsh --profile <任意> --patch <本文件> "<任务>"
+# 或把 insert 条目合并进 ~/.dsh/profiles/<profile>/cordis.patch.yml 常驻。
+#
+# 注意：值保持字面量。——patch overlay 的 config 里 !!js 表达式在部分
+# dsh 版本会静默阻断插件激活；运行时覆盖统一走插件内读的 HITL_* 环境变量。
+- insert:
+    - id: hitl-approval
+      name: /Users/yourname/.dsh/plugins/hitl-approval.mjs   # ← 改成你的路径
+      config:
+        timeoutSec: 300
+        # botKey: hitl-approval-bot   # 独立引擎时显式指定
+        # chatId: wxid_xxx            # 固定收件人（仅此处配置，不读 env）
