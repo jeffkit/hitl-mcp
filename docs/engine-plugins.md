@@ -20,7 +20,7 @@
 | `async send_message(payload) -> dict` | 处理 `/api/send` 下行 |
 | `status() -> dict` | 管理台展示状态（至少含 `worker_type` / `bot_key` / `running`） |
 
-在此之上，每个渠道在 descriptor 里提供两个装配钩子：
+在此之上，每个渠道在 descriptor 里提供两个装配钩子（**sync 或 async 函数均可**，核心经 `maybe_await` 统一处理；需要网络探测的插件可用 async）：
 
 ```python
 from hitl_server.engines.registry import EngineDescriptor, EngineContext

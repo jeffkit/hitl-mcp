@@ -61,11 +61,11 @@ async def lifespan(app: FastAPI):
     # 启动内置引擎（in-process，启用时维持长连接，消息直接进 storage）
     # 渠道清单来自注册表（内置 + entry point 插件），核心不硬编码任何渠道——
     # 见 engines/registry.py 与 docs/engine-plugins.md。
-    from .engines import engine_manager, all_descriptors, EngineContext
+    from .engines import engine_manager, all_descriptors, maybe_await, EngineContext
     ctx = EngineContext(config=config, storage=storage)
     for descriptor in all_descriptors():
         try:
-            engine = await descriptor.build_startup(ctx)
+            engine = await maybe_await(descriptor.build_startup(ctx))
         except Exception as e:
             logger.error(f"  [内置引擎] {descriptor.title} 装配失败: {e}", exc_info=True)
             continue

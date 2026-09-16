@@ -109,7 +109,7 @@ async def list_engine_registry():
 
 async def _start_engine(etype: str, body: Dict[str, Any]) -> Dict[str, Any]:
     """通用动态启动：查 descriptor → 校验参数 → start → 返回状态。"""
-    from ..engines import get_descriptor, engine_manager
+    from ..engines import get_descriptor, engine_manager, maybe_await
 
     descriptor = get_descriptor(etype)
     if not descriptor:
@@ -123,7 +123,7 @@ async def _start_engine(etype: str, body: Dict[str, Any]) -> Dict[str, Any]:
     else:
         params = body
 
-    result = await descriptor.start(_engine_context(), params)
+    result = await maybe_await(descriptor.start(_engine_context(), params))
     if isinstance(result, dict) and result.get("success") is False:
         # descriptor 明确报告失败（如缺凭证）；维持旧端点语义原样返回
         return result

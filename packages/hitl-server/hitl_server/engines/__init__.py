@@ -25,6 +25,7 @@ from .registry import (
     EngineContext,
     EngineDescriptor,
     all_descriptors,
+    maybe_await,
     get as get_descriptor,
     register as register_descriptor,
 )
@@ -44,6 +45,7 @@ __all__ = [
     "EngineContext",
     "EngineDescriptor",
     "all_descriptors",
+    "maybe_await",
     "get_descriptor",
     "register_descriptor",
     "BUILTIN_DESCRIPTORS",

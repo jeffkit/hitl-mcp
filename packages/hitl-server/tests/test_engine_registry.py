@@ -130,3 +130,39 @@ async def test_generic_stop_engine():
     result = await admin._stop_engine("fake", "fake-1")
     assert result["success"] is True
     assert engine_manager.get_by_bot_key("fake-1") is None
+
+
+@pytest.mark.asyncio
+async def test_sync_descriptor_hooks_work_end_to_end():
+    """回归：descriptor 装配钩子可以是同步 def（builtin.py 即如此），
+    核心经 maybe_await 统一处理，不得出现 `can't be used in await`。"""
+    from hitl_server.handlers import admin
+    from hitl_server.engines import engine_manager
+
+    def build_startup(ctx):  # 故意用同步 def
+        return None
+
+    def start(ctx, params):  # 故意用同步 def
+        return FakeEngine(bot_key=params.get("bot_key", "fake-1"))
+
+    registry.register(EngineDescriptor(name="fake", title="Fake", build_startup=build_startup, start=start))
+
+    result = await admin._start_engine("fake", {"bot_key": "fake-1"})
+    assert result["success"] is True
+    assert result["engine"]["running"] is True
+    assert engine_manager.get_by_bot_key("fake-1") is not None
+
+
+@pytest.mark.asyncio
+async def test_builtin_descriptors_build_startup_boot_path():
+    """回归：模拟 app.py lifespan 的装配循环，确保内置渠道钩子可被
+    await 调用（sync 经 maybe_await），不抛 TypeError。"""
+    from hitl_server.config import config
+    from hitl_server.engines import all_descriptors, maybe_await, EngineContext
+    from hitl_server.storage import storage
+
+    ctx = EngineContext(config=config, storage=storage)
+    for descriptor in all_descriptors():
+        # 与 app.py lifespan 相同的调用形态
+        engine = await maybe_await(descriptor.build_startup(ctx))
+        assert engine is None or isinstance(engine, object)

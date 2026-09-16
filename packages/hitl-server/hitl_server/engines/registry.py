@@ -15,6 +15,7 @@
 核心（app.py lifespan / admin.py 通用路由）只面向 descriptor 编排，
 不含任何 IM 渠道特有逻辑。
 """
+import inspect
 import logging
 from dataclasses import dataclass, field
 from importlib.metadata import entry_points
@@ -28,6 +29,18 @@ logger = logging.getLogger(__name__)
 ENTRY_POINT_GROUP = "hitl_server.engines"
 
 
+async def maybe_await(value: Any) -> Any:
+    """装配钩子兼容 sync 与 async 两种写法。
+
+    descriptor 的 ``build_startup`` / ``start`` 既可以是普通函数（同步装配，
+    如内置渠道的 env/持久化读取），也可以是 async 函数（外置插件需要网络
+    探测时）。核心统一 ``await maybe_await(hook(...))`` 即可，两种写法等价。
+    """
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
 @dataclass
 class EngineContext:
     """装配引擎时可用的核心服务。"""
@@ -38,9 +51,9 @@ class EngineContext:
     storage: Any
 
 
-# 装配钩子签名
-StartupBuilder = Callable[[EngineContext], Awaitable[Optional[BaseEngine]]]
-DynamicStarter = Callable[[EngineContext, Dict[str, Any]], Awaitable[BaseEngine]]
+# 装配钩子签名（sync 或 async 均可，核心经 maybe_await 统一处理）
+StartupBuilder = Callable[[EngineContext], Any]
+DynamicStarter = Callable[[EngineContext, Dict[str, Any]], Any]
 
 
 @dataclass
