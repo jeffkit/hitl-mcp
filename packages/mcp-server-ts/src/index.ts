@@ -88,17 +88,16 @@ program
   .option('--discord-token <token>',      'Discord Bot Token（engine=discord 时向 HITL Server 自动注册）')
   .option('--feishu-app-id <id>',         '飞书企业自建应用 App ID（engine=feishu 时使用）')
   .option('--feishu-app-secret <secret>', '飞书企业自建应用 App Secret（engine=feishu 时使用）')
+  .option('--engine-credentials <json>',  '外置引擎注册凭证 JSON（engine=非内置渠道时 POST /api/engines/{type}/start，如 --engine-credentials \'{"bot_token": "..."}\'）')
 
   // ── 默认行为（无子命令时）：启动 MCP server ──────────────────────────────
   // 用 program.action 而非顶层直接调用，确保子命令（ilink-setup）触发时不会同时启动 server。
   .action(() => {
     const opts = program.opts();
 
+    // 引擎名不再限定白名单：内置五渠道之外的名字走 GenericEngine 通用路径
+    //（要求 HITL Server 注册表中存在该渠道，如外置插件）；auto 仍按内置优先级解析。
     const engine = (opts.engine as EngineType) ?? 'auto';
-    if (!['auto', 'ilink', 'wecom-aibot', 'telegram', 'discord', 'feishu'].includes(engine)) {
-      console.error(`[Main] 不支持的 --engine: ${opts.engine}（可选: auto | ilink | wecom-aibot | telegram | discord | feishu）`);
-      process.exit(1);
-    }
 
     const config = createConfig({
       engine,
@@ -121,6 +120,8 @@ program
       discordToken:       opts.discordToken,
       feishuAppId:        opts.feishuAppId,
       feishuAppSecret:    opts.feishuAppSecret,
+      // 通用外置引擎
+      engineCredentials:  opts.engineCredentials,
     });
 
     setConfig(config);

@@ -12,7 +12,8 @@
  *   feishu      → 飞书企业自建应用（走 HITL Server 的 feishu 内置引擎，WebSocket 在服务端维持）
  */
 
-export type EngineType = 'auto' | 'wecom-aibot' | 'ilink' | 'telegram' | 'discord' | 'feishu';
+/** 任意 string 也可（外置插件渠道，走 GenericEngine 通用路径） */
+export type EngineType = 'auto' | 'wecom-aibot' | 'ilink' | 'telegram' | 'discord' | 'feishu' | (string & {});
 
 export interface Config {
   engine: EngineType;
@@ -60,6 +61,11 @@ export interface Config {
   feishuAppId: string;
   /** 飞书企业自建应用 App Secret（--feishu-app-secret） */
   feishuAppSecret: string;
+
+  // ── 通用外置引擎 ──────────────────────────────────────────────────────────
+  /** 引擎注册凭证 JSON（--engine-credentials '{"bot_token": "..."}'，
+   *  engine 为非内置渠道时 POST /api/engines/{type}/start 用；字段由渠道定义） */
+  engineCredentials: string;
 }
 
 export function createConfig(opts: Partial<Config>): Config {
@@ -86,6 +92,7 @@ export function createConfig(opts: Partial<Config>): Config {
     discordToken:         opts.discordToken         ?? '',
     feishuAppId:          opts.feishuAppId          ?? '',
     feishuAppSecret:      opts.feishuAppSecret      ?? '',
+    engineCredentials:    opts.engineCredentials    ?? '',
   };
 }
 

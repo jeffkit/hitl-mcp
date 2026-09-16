@@ -1,0 +1,18 @@
+[project]
+name = "hitl-engine-skeleton"
+version = "0.1.0"
+description = "HITL Server 外置引擎示例：skeleton 渠道（echo）"
+requires-python = ">=3.10"
+dependencies = [
+  # 复用宿主 HITL Server 的 BaseEngine / registry；单独安装本包时需自备 hitl-server
+]
+
+[project.entry-points."hitl_server.engines"]
+skeleton = "hitl_engine_skeleton:descriptor"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["hitl_engine_skeleton"]

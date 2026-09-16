@@ -27,6 +27,7 @@ import { ILinkEngine } from './engines/ilink.js';
 import { TelegramEngine } from './engines/telegram.js';
 import { DiscordEngine } from './engines/discord.js';
 import { FeishuEngine } from './engines/feishu.js';
+import { GenericEngine } from './engines/generic.js';
 import type { Engine, SendResult } from './engines/base.js';
 
 function makeEngine(engineType: EngineType): Engine {
@@ -36,7 +37,9 @@ function makeEngine(engineType: EngineType): Engine {
     case 'telegram':    return new TelegramEngine();
     case 'discord':     return new DiscordEngine();
     case 'feishu':      return new FeishuEngine();
-    default:            throw new Error(`不支持的引擎类型: ${engineType}（auto 应在调用前已解析）`);
+    default:
+      // 外置插件渠道：走引擎无关的通用路径（/api/engines/{type}/start + /api/send）
+      return new GenericEngine(engineType);
   }
 }
 
@@ -89,7 +92,15 @@ async function resolveAutoEngine(serviceUrl: string): Promise<{ engineType: Engi
   const feishuAny = engines.find(e => e.worker_type === 'feishu');
   if (feishuAny) return { engineType: 'feishu', botKey: String(feishuAny.bot_key ?? '') };
 
-  throw new Error('管理台无已注册的内置引擎（ilink / wecom-aibot / telegram / discord / feishu），请先在管理台初始化引擎');
+  // 内置五渠道都不在时，退化为渠道无关解析：任意外置插件引擎
+  //（就绪状态 = running / connected / logged_in 任一为真）优先，其次任意已注册。
+  const isReady = (e: Record<string, any>) =>
+    e.running === true || e.connected === true || e.logged_in === true;
+  const external = engines.find(e => !['ilink', 'wecom-aibot', 'telegram', 'discord', 'feishu'].includes(String(e.worker_type)) && isReady(e))
+    ?? engines.find(e => !['ilink', 'wecom-aibot', 'telegram', 'discord', 'feishu'].includes(String(e.worker_type)));
+  if (external) return { engineType: String(external.worker_type), botKey: String(external.bot_key ?? '') };
+
+  throw new Error('管理台无已注册的内置引擎（ilink / wecom-aibot / telegram / discord / feishu / 外置插件），请先在管理台初始化引擎');
 }
 
 function jsonText(obj: unknown): { content: Array<{ type: string; [k: string]: unknown }> } {

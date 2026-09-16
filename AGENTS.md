@@ -80,9 +80,11 @@ MCP Client ──HTTP──▶ hitl-server ──长连接──▶ 微信 / 企
 - `/api/send` 命中内置引擎 → 进程内直接调 `engine.send_message`
 - MCP 端 `--engine auto` 启动时查 `/admin/api/engines`，按 ilink→wecom-aibot 优先级选用
 
-### 引擎注册
+### 引擎注册（插件化注册表）
 
-`hitl_server/engines/manager.py` 持有按配置启用的引擎实例，按 `worker_type` / `bot_key` 索引。`worker_type` 为引擎类型字段（`ilink` / `wecom-aibot`），名称沿用历史，非 Worker 概念。wecom-aibot 支持运行时动态注册（`/api/engines/wecom-aibot/start`，MCP 启动时自举）。
+`hitl_server/engines/manager.py` 持有按配置启用的引擎实例，按 `worker_type` / `bot_key` 索引。`worker_type` 为引擎类型字段（`ilink` / `wecom-aibot` / `telegram` / `discord` / `feishu` / 外置插件），名称沿用历史，非 Worker 概念。
+
+**新增渠道不改核心**：渠道以 `engines/registry.py` 的 `EngineDescriptor`（`build_startup` + `start` 两个装配钩子）为单元注册——内置渠道在 `engines/builtin.py` 的 `BUILTIN_DESCRIPTORS` 追加；外置渠道打包 wheel 并声明 entry point 组 `hitl_server.engines`。`app.py` lifespan 与 `admin.py` 的通用端点（`/admin/api/engines/{type}/start|stop`、`/admin/api/engines/registry`）只面向 descriptor 编排。TS 客户端对外置渠道走 `GenericEngine`（`--engine <name> --engine-credentials '<JSON>'`），无需新增 shim。详见 `docs/engine-plugins.md` 与示例 `packages/hitl-server/examples/skeleton-engine/`。
 
 ### Database Configuration
 
