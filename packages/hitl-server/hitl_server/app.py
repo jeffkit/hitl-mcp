@@ -111,7 +111,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="HITL Server",
     description="Human-in-the-Loop Server - 内置 ilink + wecom-aibot 引擎",
-    version="2.1.3",
+    version="2.1.9",
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None
@@ -169,7 +169,7 @@ async def root():
     # 如果首页不存在，返回 API 信息
     result = {
         "service": "HITL Server",
-        "version": "2.1.3",
+        "version": "2.1.9",
         "status": "running",
     }
 

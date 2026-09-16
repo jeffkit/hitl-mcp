@@ -258,7 +258,7 @@ export async function startServer(): Promise<void> {
   }
 
   const server = new Server(
-    { name: 'hitl-mcp', version: '0.6.1' },
+    { name: 'hitl-mcp', version: '0.7.0' },
     { capabilities: { tools: {} } }
   );
 
