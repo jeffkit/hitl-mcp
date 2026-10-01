@@ -1,0 +1,20 @@
+[project]
+name = "hitl-engine-agently"
+version = "0.1.0"
+description = "HITL Server 外置引擎：Agently Mail（QQ Agent 邮箱）确认渠道"
+requires-python = ">=3.10"
+dependencies = [
+  # 复用宿主 HITL Server 的 BaseEngine / registry；单独安装本包时需自备 hitl-server。
+  # agently-cli（@tencent-qqmail/agently-cli）为 peer dependency，需在 PATH 上，
+  # 且已通过 `agently-cli auth login` 完成一次 OAuth 授权（凭据存 macOS 钥匙串）。
+]
+
+[project.entry-points."hitl_server.engines"]
+agently-mail = "hitl_engine_agently:descriptor"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["hitl_engine_agently"]

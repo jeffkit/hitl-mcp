@@ -17,6 +17,7 @@
 hil-mcp/
 ├── packages/
 │   ├── hitl-server/     # 本地后端（FastAPI + 内置引擎 + React 管理台）
+│   ├── hitl-engine-agently/  # 外置引擎插件：Agently Mail（QQ 邮箱）确认渠道
 │   ├── mcp-server-py/   # MCP 客户端（Python 版，uvx hitl-mcp）
 │   └── mcp-server-ts/   # MCP 客户端（TypeScript 版，npx hitl-mcp）
 ├── data/                # 数据存储（SQLite/JSON）
@@ -27,7 +28,7 @@ hil-mcp/
 
 ### Key Services
 
-1. **hitl-server** - 本地单进程后端（内置 ilink / wecom-aibot / telegram / discord / feishu 五个引擎 + React 管理台）
+1. **hitl-server** - 本地单进程后端（内置 ilink / wecom-aibot / telegram / discord / feishu 五个引擎 + React 管理台；外置渠道插件经 entry point 组 `hitl_server.engines` 扩展，如 `hitl-engine-agently`）
 2. **mcp-server-py** - Python MCP 客户端 (`uvx hitl-mcp`)
 3. **mcp-server-ts** - TypeScript MCP 客户端 (`npx hitl-mcp`)
 
@@ -213,7 +214,7 @@ alembic upgrade head
 
 - **存储模式**：JSON 与数据库模式 API 一致，通过 `HIL_USE_DATABASE` 切换；开发用 SQLite，生产用 MySQL。
 - **安全**：管理台由 JWT（账号密码）保护；iLink 凭证落盘于 `ILINK_TOKEN_STORE_PATH`，企微凭证落盘后重启自动恢复。
-- **MCP 引擎类型**：`auto` / `ilink` / `wecom-aibot` / `telegram` / `discord` / `feishu`（`hil` 已移除）。前五个为内置引擎（`engines/builtin.py`），外置渠道经 `hitl_server.engines` entry point 注册后同样可用 `--engine <name>` 指定。
+- **MCP 引擎类型**：`auto` / `ilink` / `wecom-aibot` / `telegram` / `discord` / `feishu`（`hil` 已移除）。前五个为内置引擎（`engines/builtin.py`），外置渠道经 `hitl_server.engines` entry point 注册（如 `agently-mail`）后同样可用 `--engine <name>` 指定，TS 端走 `GenericEngine` 无需改动。
 
 ---
 

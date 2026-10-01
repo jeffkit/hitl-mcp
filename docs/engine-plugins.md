@@ -92,3 +92,8 @@ mychannel = "hitl_engine_mychannel:descriptor"
 完整可运行的 skeleton 插件见
 [`examples/skeleton-engine/`](../examples/skeleton-engine/)（含 pyproject、
 descriptor、README）。
+
+生产级真实插件参考 [`packages/hitl-engine-agently/`](../packages/hitl-engine-agently/)：
+Agently Mail（QQ 邮箱）渠道——`agently-cli` 子进程收发、两阶段确认握手、
+收件箱轮询 + 发件人 ACL + `[#short_id]` 匹配回灌、基线建档防重放，
+并附 15 个单元测试（stub CLI 桩进程，不依赖真实邮箱）。
