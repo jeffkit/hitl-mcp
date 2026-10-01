@@ -28,9 +28,9 @@ hitl-mcp/
 └── scripts/             # 辅助脚本
 ```
 
-## 五个内置引擎
+## 内置引擎
 
-`hitl-server` 内置**五个**引擎，架构对等、可同时启用、互不干扰。MCP 端用 `--engine` 指定，或 `--engine auto` 按管理台状态自动选用。
+hitl-server 内置五个引擎：ilink / wecom-aibot / telegram / discord / feishu，架构对等，可同时启用，互不干扰。MCP 端用 `--engine` 指定，或 `--engine auto` 按管理台状态自动选用。下表对比最常用的 ilink 与 wecom-aibot：
 
 | 引擎 | 通道 | 连接方式 | 鉴权 | 启用 |
 |---|---|---|---|---|
@@ -127,7 +127,7 @@ ENABLE_ILINK_ENGINE=true ./hitl-server/hitl-server
 | `HITL_HOST=127.0.0.1` | 监听地址；服务器上建议保持 `127.0.0.1`，由 nginx 反代到公网/HTTPS |
 | `ADMIN_PASSWORD` / `ADMIN_TOKEN_SECRET` | 服务器部署务必改掉默认值 |
 
-`packaging/hitl-server.service` 内有完整的共享部署环境变量示例，可直接参照。用户首次在企微给 bot 发消息时，bot 会**自动回告其 `chat_id`**，方便自助配置。
+打包产物（systemd unit 等）与部署脚本待补，共享部署环境变量以上表为准。用户首次在企微给 bot 发消息时，bot 会**自动回告其 `chat_id`**，方便自助配置。
 
 ### 安全网关
 
@@ -179,7 +179,7 @@ uv sync
 uv run python -m hitl_server.app
 ```
 
-或一键构建二进制：`bash packaging/build.sh`（依赖 `uv` / `pnpm` / Python ≥ 3.10）。
+一键构建二进制的打包脚本待补，当前可按上文从源码运行。
 
 ## 文档
 

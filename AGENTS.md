@@ -27,16 +27,15 @@ hil-mcp/
 
 ### Key Services
 
-1. **hitl-server** - 本地单进程后端（内置 ilink + wecom-aibot 引擎 + React 管理台）
+1. **hitl-server** - 本地单进程后端（内置 ilink / wecom-aibot / telegram / discord / feishu 五个引擎 + React 管理台）
 2. **mcp-server-py** - Python MCP 客户端 (`uvx hitl-mcp`)
 3. **mcp-server-ts** - TypeScript MCP 客户端 (`npx hitl-mcp`)
 
 > **架构演进（2026-06-30）**：已移除旧的 relay/direct 模式、fly-pigeon 上游、
 > `devcloud-worker` / `forward-service` / `ws-tunnel` 三个包、`ws_manager` / `sender` /
 > `handlers/forward_client` / `handlers/websocket` / `slash_commands` / `idle_hint_config`
-> 等模块，以及 MCP 端的 `hil` 引擎。新架构保留 `hitl-server` 内置的 **五个**引擎
-> （`ilink` / `wecom-aibot` / `telegram` / `discord` / `feishu`，注册处见
-> `packages/hitl-server/hitl_server/engines/builtin.py`），所有消息收发在进程内完成。
+> 等模块，以及 MCP 端的 `hil` 引擎。新架构把消息收发收敛进 `hitl-server` 进程内完成，
+> 内置引擎现为五个：ilink / wecom-aibot / telegram / discord / feishu。
 
 ---
 
@@ -75,9 +74,9 @@ pnpm run dev
 MCP Client ──HTTP──▶ hitl-server ──长连接──▶ 微信 / 企微 / Telegram / Discord / 飞书
                       ├─ ilink 引擎（iLink 长轮询，个人微信 ClawBot）
                       ├─ wecom-aibot 引擎（企微 WebSocket，企业微信 AI 机器人）
-                      ├─ telegram 引擎（Telegram Bot API）
-                      ├─ discord 引擎（Discord Gateway）
-                      └─ feishu 引擎（飞书长连接）
+                      ├─ telegram 引擎（Bot API getUpdates 长轮询）
+                      ├─ discord 引擎（Gateway WebSocket）
+                      └─ feishu 引擎（飞书 WebSocket，企业自建应用）
 ```
 
 - 收到上游用户消息 → 进程内直接调 `storage.handle_callback`
@@ -88,7 +87,7 @@ MCP Client ──HTTP──▶ hitl-server ──长连接──▶ 微信 / 企
 
 `hitl_server/engines/manager.py` 持有按配置启用的引擎实例，按 `worker_type` / `bot_key` 索引。`worker_type` 为引擎类型字段（`ilink` / `wecom-aibot` / `telegram` / `discord` / `feishu` / 外置插件），名称沿用历史，非 Worker 概念。
 
-**新增渠道不改核心**：渠道以 `engines/registry.py` 的 `EngineDescriptor`（`build_startup` + `start` 两个装配钩子）为单元注册——内置渠道在 `engines/builtin.py` 的 `BUILTIN_DESCRIPTORS` 追加；外置渠道打包 wheel 并声明 entry point 组 `hitl_server.engines`。`app.py` lifespan 与 `admin.py` 的通用端点（`/admin/api/engines/{type}/start|stop`、`/admin/api/engines/registry`）只面向 descriptor 编排。TS 客户端对外置渠道走 `GenericEngine`（`--engine <name> --engine-credentials '<JSON>'`），无需新增 shim。详见 `docs/engine-plugins.md` 与示例 `packages/hitl-server/examples/skeleton-engine/`。
+**新增渠道不改核心**：渠道以 `engines/registry.py` 的 `EngineDescriptor`（`build_startup` + `start` 两个装配钩子）为单元注册——内置渠道在 `engines/builtin.py` 的 `BUILTIN_DESCRIPTORS` 追加；外置渠道打包 wheel 并声明 entry point 组 `hitl_server.engines`。`app.py` lifespan 与 `handlers/admin.py` 的通用端点（`/admin/api/engines/{type}/start|stop`、`/admin/api/engines/registry`）只面向 descriptor 编排。TS 客户端对外置渠道走 `GenericEngine`（`--engine <name> --engine-credentials '<JSON>'`），无需新增 shim。详见 `docs/engine-plugins.md` 与示例 `packages/hitl-server/examples/skeleton-engine/`。
 
 ### Database Configuration
 
