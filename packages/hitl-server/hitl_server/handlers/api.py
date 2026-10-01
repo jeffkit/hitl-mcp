@@ -5,7 +5,7 @@ HTTP API 处理器
 消息收发由内置引擎（ilink / wecom-aibot）在进程内完成。
 """
 import logging
-from fastapi import APIRouter, Depends, UploadFile, File, Query
+from fastapi import APIRouter, Depends, Request, UploadFile, File, Query
 from pydantic import BaseModel
 
 from ..config import config
@@ -355,3 +355,29 @@ async def engines_wecom_aibot_start(request: WecomAibotStartRequest, _allowed: l
         return {"success": False, "error": str(e)}
     logger.info(f"动态启动 wecom-aibot 引擎: bot_key={request.bot_key}, bot_id={request.bot_id}")
     return {"success": True, "status": "started"}
+
+
+# ============== 通用引擎动态启动（/api 面，供 MCP 客户端自动注册） ==============
+
+@router.post("/engines/{etype}/start")
+async def engines_generic_start(
+    etype: str, request: Request, _allowed: list[str] | None = Depends(require_api_token)
+):
+    """通用引擎动态启动端点（/api 面，受 API Token 鉴权）。
+
+    历史缺陷（2026-10 修复）：TS 客户端（telegram / discord / feishu / generic）
+    按约定调用 /api/engines/{type}/start，但 /api 面此前只实现了
+    wecom-aibot 特例，其余渠道一律 404，导致客户端启动时的引擎自动注册
+    静默失败（仅 stderr 提示「注册失败」）。
+
+    实现与管理台 /admin/api/engines/{etype}/start（handlers/admin.py
+    ::_start_engine）完全同源：查 descriptor → 按其 request_model 校验
+    凭证字段 → 停旧起新。wecom-aibot 仍走上方特例路由（语义不变）。
+    """
+    from .admin import _start_engine
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    return await _start_engine(etype, body if isinstance(body, dict) else {})
