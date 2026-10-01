@@ -28,7 +28,7 @@ hitl-mcp/
 └── scripts/             # 辅助脚本
 ```
 
-## 内置引擎
+## 五个内置引擎
 
 hitl-server 内置五个引擎：ilink / wecom-aibot / telegram / discord / feishu，架构对等，可同时启用，互不干扰。MCP 端用 `--engine` 指定，或 `--engine auto` 按管理台状态自动选用。下表对比最常用的 ilink 与 wecom-aibot：
 

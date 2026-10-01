@@ -35,7 +35,8 @@ hil-mcp/
 > `devcloud-worker` / `forward-service` / `ws-tunnel` 三个包、`ws_manager` / `sender` /
 > `handlers/forward_client` / `handlers/websocket` / `slash_commands` / `idle_hint_config`
 > 等模块，以及 MCP 端的 `hil` 引擎。新架构把消息收发收敛进 `hitl-server` 进程内完成，
-> 内置引擎现为五个：ilink / wecom-aibot / telegram / discord / feishu。
+> 内置**五个**引擎：ilink / wecom-aibot / telegram / discord / feishu（注册处见
+> `packages/hitl-server/hitl_server/engines/builtin.py`）。
 
 ---
 
