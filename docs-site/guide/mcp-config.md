@@ -130,9 +130,9 @@ npm install -g hitl-mcp
 }
 ```
 
-## 同时接入两个引擎
+## 同时接入多个引擎
 
-在 `mcpServers` 下加两条即可，AI 会同时看到两组工具：
+在 `mcpServers` 下按需加多条（每个引擎一条）即可，AI 会同时看到各组工具：
 
 ```json
 {

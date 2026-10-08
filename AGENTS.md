@@ -17,7 +17,7 @@
 hil-mcp/
 ├── packages/
 │   ├── hitl-server/     # 本地后端（FastAPI + 内置引擎 + React 管理台）
-│   ├── mcp-server-py/   # MCP 客户端（Python 版，uvx hil-mcp）
+│   ├── mcp-server-py/   # MCP 客户端（Python 版，uvx hitl-mcp）
 │   └── mcp-server-ts/   # MCP 客户端（TypeScript 版，npx hitl-mcp）
 ├── data/                # 数据存储（SQLite/JSON）
 ├── docs/                # 设计文档
@@ -28,14 +28,15 @@ hil-mcp/
 ### Key Services
 
 1. **hitl-server** - 本地单进程后端（内置 ilink + wecom-aibot 引擎 + React 管理台）
-2. **mcp-server-py** - Python MCP 客户端 (`uvx hil-mcp`)
+2. **mcp-server-py** - Python MCP 客户端 (`uvx hitl-mcp`)
 3. **mcp-server-ts** - TypeScript MCP 客户端 (`npx hitl-mcp`)
 
 > **架构演进（2026-06-30）**：已移除旧的 relay/direct 模式、fly-pigeon 上游、
 > `devcloud-worker` / `forward-service` / `ws-tunnel` 三个包、`ws_manager` / `sender` /
 > `handlers/forward_client` / `handlers/websocket` / `slash_commands` / `idle_hint_config`
-> 等模块，以及 MCP 端的 `hil` 引擎。新架构只保留 `hitl-server` 内置的 ilink 与
-> wecom-aibot 两个引擎，所有消息收发在进程内完成。
+> 等模块，以及 MCP 端的 `hil` 引擎。新架构保留 `hitl-server` 内置的 **五个**引擎
+> （`ilink` / `wecom-aibot` / `telegram` / `discord` / `feishu`，注册处见
+> `packages/hitl-server/hitl_server/engines/builtin.py`），所有消息收发在进程内完成。
 
 ---
 
@@ -47,7 +48,7 @@ hil-mcp/
 cd packages/hitl-server
 uv sync
 uv run python -m hitl_server.app          # 前台运行
-USE_DATABASE=true uv run python -m hitl_server.app   # 数据库模式
+HIL_USE_DATABASE=true uv run python -m hitl_server.app   # 数据库模式
 uv run pytest tests/ -v                    # 测试
 uv build                                   # 构建包
 ```
@@ -71,9 +72,12 @@ pnpm run dev
 `hitl-server` 进程内维持长连接，消息收发不经任何外部 Worker：
 
 ```
-MCP Client ──HTTP──▶ hitl-server ──长连接──▶ 微信 / 企微
+MCP Client ──HTTP──▶ hitl-server ──长连接──▶ 微信 / 企微 / Telegram / Discord / 飞书
                       ├─ ilink 引擎（iLink 长轮询，个人微信 ClawBot）
-                      └─ wecom-aibot 引擎（企微 WebSocket，企业微信 AI 机器人）
+                      ├─ wecom-aibot 引擎（企微 WebSocket，企业微信 AI 机器人）
+                      ├─ telegram 引擎（Telegram Bot API）
+                      ├─ discord 引擎（Discord Gateway）
+                      └─ feishu 引擎（飞书长连接）
 ```
 
 - 收到上游用户消息 → 进程内直接调 `storage.handle_callback`
@@ -91,7 +95,7 @@ MCP Client ──HTTP──▶ hitl-server ──长连接──▶ 微信 / 企
 支持 JSON 文件与数据库两种存储，接口一致：
 
 - **JSON**（默认）：`data/*.json`，热重载
-- **Database**：`sqlite+aiosqlite:///./data/service.db` 或 MySQL，`USE_DATABASE=true` 启用，异步 SQLAlchemy
+- **Database**：`sqlite+aiosqlite:///./data/service.db` 或 MySQL，`HIL_USE_DATABASE=true` 启用，异步 SQLAlchemy
 
 ### Database Schema (hitl-server, 2 张表)
 
@@ -128,8 +132,11 @@ from_user (JSON), raw_data (JSON), timestamp
 | `WECOM_AIBOT_BOT_KEY` | 企微引擎路由键 | `wecom-aibot-1` |
 | `WECOM_AIBOT_BOT_ID` | 企微 Bot ID | — |
 | `WECOM_AIBOT_BOT_SECRET` | 企微 Bot Secret | — |
-| `USE_DATABASE` | 启用数据库模式 | `false` |
-| `DATABASE_URL` | 数据库连接串 | `sqlite+aiosqlite:///./data/service.db` |
+| `ENABLE_TELEGRAM_ENGINE` | 启用 Telegram 引擎（需 `TELEGRAM_BOT_TOKEN`，缺失则跳过） | `false` |
+| `ENABLE_DISCORD_ENGINE` | 启用 Discord 引擎（需 `DISCORD_BOT_TOKEN`，缺失则跳过） | `false` |
+| `ENABLE_FEISHU_ENGINE` | 启用飞书引擎（需 `FEISHU_APP_ID` / `FEISHU_APP_SECRET`，缺失则跳过） | `false` |
+| `HIL_USE_DATABASE` | 启用数据库模式 | `false` |
+| `HIL_DATABASE_URL` | 数据库连接串 | `sqlite+aiosqlite:///./data/service.db` |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 管理台账号 | `admin` / `jarvis2026` |
 | `ADMIN_TOKEN_SECRET` | JWT 密钥 | `hil-mcp-secret-key-2026` |
 
@@ -204,9 +211,9 @@ alembic upgrade head
 
 ## Important Notes
 
-- **存储模式**：JSON 与数据库模式 API 一致，通过 `USE_DATABASE` 切换；开发用 SQLite，生产用 MySQL。
+- **存储模式**：JSON 与数据库模式 API 一致，通过 `HIL_USE_DATABASE` 切换；开发用 SQLite，生产用 MySQL。
 - **安全**：管理台由 JWT（账号密码）保护；iLink 凭证落盘于 `ILINK_TOKEN_STORE_PATH`，企微凭证落盘后重启自动恢复。
-- **MCP 引擎类型**：`auto` / `ilink` / `wecom-aibot`（`hil` 已移除）。
+- **MCP 引擎类型**：`auto` / `ilink` / `wecom-aibot` / `telegram` / `discord` / `feishu`（`hil` 已移除）。前五个为内置引擎（`engines/builtin.py`），外置渠道经 `hitl_server.engines` entry point 注册后同样可用 `--engine <name>` 指定。
 
 ---
 

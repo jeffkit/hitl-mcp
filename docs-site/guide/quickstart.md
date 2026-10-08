@@ -155,7 +155,7 @@ WECOM_AIBOT_BOT_SECRET=你的BotSecret
 
 - 在项目的 `CLAUDE.md` 里写一条规则：「执行写操作前先用 hitl-mcp 向我确认」。
 - 调整 `--timeout`（默认 1200 秒 / 20 分钟）。
-- 同时启用两个引擎，用 `--engine auto` 自动选用。
+- 同时启用多个引擎，用 `--engine auto` 自动选用。
 
 ## 下一步
 

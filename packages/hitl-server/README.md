@@ -34,7 +34,7 @@ uv sync && uv run python -m hitl_server.app
 ```bash
 hitl-server                         # 前台运行，默认 :8081
 ENABLE_ILINK_ENGINE=true hitl-server  # 启用 iLink 引擎
-USE_DATABASE=true hitl-server        # 数据库模式（SQLAlchemy）
+HIL_USE_DATABASE=true hitl-server        # 数据库模式（SQLAlchemy）
 ```
 
 管理台：`http://localhost:8081/console`
