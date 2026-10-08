@@ -24,14 +24,19 @@
 5. `hitl-server` 拿到回复，`hitl-mcp` 轮询取回，交给 AI。
 6. AI 拿到你的回复，继续往下执行。
 
-## 两个引擎怎么选
+## 引擎怎么选
 
-hitl-mcp 目前支持两个「引擎」，也就是两条不同的消息通道：
+hitl-mcp 内置五个「引擎」，也就是五条不同的消息通道：
 
 | 引擎 | 通道 | 适合谁 | 需要准备什么 |
 |------|------|--------|------------|
 | **ilink**（微信 ClawBot） | 个人微信 | 个人开发者 | 微信扫码登录一次 |
 | **wecom-aibot**（企微 AI 机器人） | 企业微信 | 团队 / 企业用户 | 企微后台的 Bot ID + Bot Secret |
+| **telegram** | Telegram | 使用 Telegram 的个人 / 团队 | Telegram Bot Token（`TELEGRAM_BOT_TOKEN`） |
+| **discord** | Discord | 使用 Discord 的社区 / 团队 | Discord Bot Token（`DISCORD_BOT_TOKEN`） |
+| **feishu** | 飞书 | 使用飞书的企业 / 团队 | 飞书自建应用 App ID + App Secret（`FEISHU_APP_ID` / `FEISHU_APP_SECRET`），并安装 `lark-oapi` |
+
+前两条（ilink / wecom-aibot）有独立文档；其余三条的启用变量见 [README 的引擎表](https://github.com/jeffkit/hitl-mcp#五个内置引擎)。
 
 ::: tip 个人用户
 如果你只是想让 AI 在自己手机上问你，选 **ilink**，扫码就能用，不用申请任何企业账号。

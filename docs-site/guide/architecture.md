@@ -54,9 +54,9 @@ hitl-mcp 由三层组成，理解了这三层，后面的安装步骤就不会�
 MCP 客户端进程随时会被 Agent 重启，不适合持有长连接。把长连接收敛到一个常驻的 `hitl-server`，MCP 端就能随时重启而不掉线，扫码登录的状态也不会丢。
 :::
 
-## 两个引擎的差异
+## 引擎之间的差异
 
-两个引擎在架构上 **完全对等**，只是消息通道不同：
+`hitl-server` 内置五个引擎（`ilink` / `wecom-aibot` / `telegram` / `discord` / `feishu`），它们在架构上 **完全对等**，只是消息通道不同。下表以 ilink 与 wecom-aibot 为例：
 
 | | ilink 引擎 | wecom-aibot 引擎 |
 |---|---|---|
@@ -66,7 +66,9 @@ MCP 客户端进程随时会被 Agent 重启，不适合持有长连接。把长
 | 收件人 | 给 ClawBot 发过消息的微信用户 | 企微里的群 / 用户 |
 | 启用方式 | `ENABLE_ILINK_ENGINE=true` | `ENABLE_WECOM_AIBOT_ENGINE=true` |
 
-两个引擎可以 **同时启用**，互不干扰；MCP 端通过 `--engine` 选择走哪一条，或用 `--engine auto` 自动选。
+其余三个（telegram / discord / feishu）同为内置引擎，配置方式见 [README 的引擎表](https://github.com/jeffkit/hitl-mcp#五个内置引擎)。
+
+多个引擎可以 **同时启用**，互不干扰；MCP 端通过 `--engine` 选择走哪一条，或用 `--engine auto` 自动选。
 
 ## 数据流向（一条消息的旅程）
 

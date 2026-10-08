@@ -8,7 +8,7 @@
 - **改 `hitl_server/models.py` 后必须用 Alembic 生成迁移脚本**，不要直接改表结构。
   在 `packages/hitl-server` 下跑 `alembic revision --autogenerate -m "描述"`。
   详见 `packages/hitl-server/ALEMBIC_GUIDE.md`。
-- **JSON 与 DB 模式 API 必须一致**：通过 `USE_DATABASE` 切换。改了一侧的数据层行为，
+- **JSON 与 DB 模式 API 必须一致**：通过 `HIL_USE_DATABASE` 切换。改了一侧的数据层行为，
   另一侧也要对齐。开发用 SQLite（`sqlite+aiosqlite:///./data/service.db`），
   生产用 MySQL。
 - **异步 SQLAlchemy**：数据库操作走 `aiosqlite`/async driver，不要在异步上下文里用同步 DB 调用。

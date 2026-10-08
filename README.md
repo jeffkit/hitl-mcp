@@ -21,24 +21,27 @@ AI 把「需要人确认」的请求发给 hitl-server，hitl-server 把消息�
 hitl-mcp/
 ├── packages/
 │   ├── hitl-server/     # 本地后端（FastAPI + 内置引擎 + React 管理台）
-│   ├── mcp-server-py/   # MCP 客户端（Python 版，uvx hil-mcp）
+│   ├── mcp-server-py/   # MCP 客户端（Python 版，uvx hitl-mcp）
 │   └── mcp-server-ts/   # MCP 客户端（TypeScript 版，npx hitl-mcp）
 ├── docs/                # 设计文档
 ├── docs-site/           # 用户文档站点源码
 └── scripts/             # 辅助脚本
 ```
 
-## 两个引擎
+## 五个内置引擎
 
-两个引擎架构对等，可同时启用，互不干扰。MCP 端用 `--engine` 指定，或 `--engine auto` 按管理台状态自动选用。
+`hitl-server` 内置**五个**引擎，架构对等、可同时启用、互不干扰。MCP 端用 `--engine` 指定，或 `--engine auto` 按管理台状态自动选用。
 
-| | ilink 引擎 | wecom-aibot 引擎 |
-|---|---|---|
-| 通道 | 个人微信（ClawBot） | 企业微信 AI 机器人 |
-| 连接方式 | iLink 长轮询 | 企微 WebSocket |
-| 鉴权 | 微信扫码登录 | Bot ID + Bot Secret |
-| 收件人 | 给 ClawBot 发过消息的微信用户 | 企微里的群 / 用户 |
-| 启用 | `ENABLE_ILINK_ENGINE=true` | 管理台填凭证或 `ENABLE_WECOM_AIBOT_ENGINE=true` |
+| 引擎 | 通道 | 连接方式 | 鉴权 | 启用 |
+|---|---|---|---|---|
+| `ilink` | 个人微信（ClawBot） | iLink 长轮询 | 微信扫码登录 | `ENABLE_ILINK_ENGINE=true` |
+| `wecom-aibot` | 企业微信 AI 机器人 | 企微 WebSocket | Bot ID + Bot Secret | 管理台填凭证或 `ENABLE_WECOM_AIBOT_ENGINE=true` |
+| `telegram` | Telegram | Bot API `getUpdates` 长轮询 | Bot Token（`TELEGRAM_BOT_TOKEN`） | `ENABLE_TELEGRAM_ENGINE=true` |
+| `discord` | Discord | Gateway WebSocket | Bot Token（`DISCORD_BOT_TOKEN`） | `ENABLE_DISCORD_ENGINE=true` |
+| `feishu` | 飞书（企业自建应用） | 飞书 WebSocket 长连接（依赖 `lark-oapi`） | App ID + App Secret（`FEISHU_APP_ID` / `FEISHU_APP_SECRET`） | `ENABLE_FEISHU_ENGINE=true` |
+
+> 引擎注册处：`packages/hitl-server/hitl_server/engines/builtin.py`。外置渠道可打包 wheel 并声明 `hitl_server.engines` entry point 后同样以 `--engine <name>` 使用，详见 [`docs/engine-plugins.md`](./docs/engine-plugins.md)。
+> 用户文档目前收录 ilink 与 wecom-aibot（[`docs-site/engines/`](./docs-site/engines/)）；telegram / discord / feishu 的配置以上表环境变量与各引擎模块的 docstring 为准。
 
 ## 快速开始
 
